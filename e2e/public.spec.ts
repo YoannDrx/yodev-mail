@@ -1,0 +1,4 @@
+import { test, expect } from "@playwright/test";
+test("landing page exposes the product promise",async({page})=>{await page.goto("/");await expect(page.getByRole("heading",{name:"Tous vos emails. Zéro angle mort."})).toBeVisible();await expect(page.getByRole("link",{name:"Rejoindre la bêta"}).first()).toBeVisible()});
+test("sandbox dashboard is navigable without external credentials",async({page})=>{await page.goto("/dashboard");await expect(page.getByRole("heading",{name:"Bonjour Yoann 👋"})).toBeVisible();await page.goto("/dashboard/domaines");await expect(page.getByRole("heading",{name:"Domaines"})).toBeVisible()});
+test("health endpoint remains useful before database provisioning",async({request})=>{const response=await request.get("/api/health");expect(response.ok()).toBeTruthy();expect(await response.json()).toMatchObject({status:"ok",database:"unconfigured"})});
