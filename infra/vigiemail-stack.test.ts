@@ -63,6 +63,18 @@ describe("VigieMail AWS infrastructure", () => {
     workload.resourceCountIs("AWS::CloudWatch::Alarm", 13);
   });
 
+  test("caps email delivery without reserving scarce account concurrency", () => {
+    workload.hasResourceProperties("AWS::Lambda::EventSourceMapping", {
+      BatchSize: 1,
+      ScalingConfig: { MaximumConcurrency: 2 },
+    });
+    for (const fn of Object.values(
+      workload.findResources("AWS::Lambda::Function"),
+    )) {
+      expect(fn.Properties.ReservedConcurrentExecutions).toBeUndefined();
+    }
+  });
+
   test("creates cost alerts and a single shared operations topic", () => {
     foundation.resourceCountIs("AWS::Budgets::Budget", 1);
     foundation.resourceCountIs("AWS::SNS::Topic", 1);

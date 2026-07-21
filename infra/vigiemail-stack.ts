@@ -123,7 +123,6 @@ export class VigieMailStack extends Stack {
       name: string,
       entry: string,
       extra: Record<string, string> = {},
-      options: { reservedConcurrentExecutions?: number } = {},
     ) => {
       const functionName = `${prefix}-${name.toLowerCase()}`;
       const logGroup = new LogGroup(this, `${name}Logs`, {
@@ -135,7 +134,6 @@ export class VigieMailStack extends Stack {
       });
       const fn = new NodejsFunction(this, name, {
         ...common,
-        ...options,
         entry: path.join(process.cwd(), entry),
         environment: { ...common.environment, ...extra },
         functionName,
@@ -153,15 +151,11 @@ export class VigieMailStack extends Stack {
       return fn;
     };
 
-    const send = worker(
-      "SendEmail",
-      "src/workers/send-email.ts",
-      {},
-      { reservedConcurrentExecutions: 1 },
-    );
+    const send = worker("SendEmail", "src/workers/send-email.ts");
     send.addEventSource(
       new SqsEventSource(email.main, {
         batchSize: 1,
+        maxConcurrency: 2,
         reportBatchItemFailures: true,
       }),
     );
