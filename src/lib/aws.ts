@@ -6,7 +6,11 @@ import { env } from "@/lib/env";
 
 function credentials() {
   if (!env.AWS_ROLE_ARN) return undefined;
-  return awsCredentialsProvider({ roleArn: env.AWS_ROLE_ARN, audience: "sts.amazonaws.com", roleSessionName: "vigiemail-vercel" });
+  return awsCredentialsProvider({
+    roleArn: env.AWS_ROLE_ARN,
+    audience: env.AWS_OIDC_AUDIENCE,
+    roleSessionName: "vigiemail-vercel",
+  });
 }
 
 export async function awsClients() {

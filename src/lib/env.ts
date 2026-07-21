@@ -16,6 +16,10 @@ const schema = z.object({
   ADMIN_USER_IDS: z.string().optional(),
   AWS_REGION: z.string().default("eu-west-3"),
   AWS_ACCOUNT_ID: z.string().optional(),
+  AWS_OIDC_AUDIENCE: z
+    .string()
+    .url()
+    .default("https://vercel.com/yoanndrxs-projects"),
   AWS_ROLE_ARN: z.string().optional(),
   AWS_EMAIL_QUEUE_URL: optionalUrl,
   AWS_CAMPAIGN_QUEUE_URL: optionalUrl,

@@ -21,13 +21,14 @@ async function sendOne(messageId: string) {
   const [workspace] = await db.select().from(workspaces).where(eq(workspaces.id, claimed.workspaceId)).limit(1);
   if (!workspace?.sesTenantName) throw new Error("SES tenant is missing");
   const configSuffix = claimed.stream === "transactional" ? "txn" : claimed.trackingClicks || claimed.trackingOpens ? "mkt-tracked" : "mkt-private";
+  const unsubscribeToken = claimed.stream === "marketing" && claimed.contactId && process.env.UNSUBSCRIBE_SIGNING_SECRET ? signExpiringToken({ workspaceId: claimed.workspaceId, contactId: claimed.contactId }, process.env.UNSUBSCRIBE_SIGNING_SECRET, new Date(Date.now() + 366 * 864e5)) : null;
+  const unsubscribeUrl = unsubscribeToken ? `${process.env.PUBLIC_LINKS_URL ?? "https://links.vigie-mail.fr"}/u/${unsubscribeToken}` : null;
+  const html = unsubscribeUrl ? `${claimed.html}<p style="margin-top:32px;font-size:12px;color:#71717a">Vous recevez cet email de ${claimed.fromName ?? claimed.fromEmail}. <a href="${unsubscribeUrl}">Se désabonner</a></p>` : claimed.html;
+  const plainText = unsubscribeUrl ? `${claimed.plainText}\n\nSe désabonner : ${unsubscribeUrl}` : claimed.plainText;
+  const { ses } = await awsClients();
+  let result;
   try {
-    const unsubscribeToken = claimed.stream === "marketing" && claimed.contactId && process.env.UNSUBSCRIBE_SIGNING_SECRET ? signExpiringToken({ workspaceId: claimed.workspaceId, contactId: claimed.contactId }, process.env.UNSUBSCRIBE_SIGNING_SECRET, new Date(Date.now() + 366 * 864e5)) : null;
-    const unsubscribeUrl = unsubscribeToken ? `${process.env.PUBLIC_LINKS_URL ?? "https://links.vigie-mail.fr"}/u/${unsubscribeToken}` : null;
-    const html = unsubscribeUrl ? `${claimed.html}<p style="margin-top:32px;font-size:12px;color:#71717a">Vous recevez cet email de ${claimed.fromName ?? claimed.fromEmail}. <a href="${unsubscribeUrl}">Se désabonner</a></p>` : claimed.html;
-    const plainText = unsubscribeUrl ? `${claimed.plainText}\n\nSe désabonner : ${unsubscribeUrl}` : claimed.plainText;
-    const { ses } = await awsClients();
-    const result = await ses.send(new SendEmailCommand({
+    result = await ses.send(new SendEmailCommand({
       TenantName: workspace.sesTenantName,
       ConfigurationSetName: `${workspace.sesTenantName}-${configSuffix}`,
       FromEmailAddress: claimed.fromName ? `${claimed.fromName} <${claimed.fromEmail}>` : claimed.fromEmail,
@@ -36,14 +37,20 @@ async function sendOne(messageId: string) {
       Content: { Simple: { Subject: { Data: claimed.subject, Charset: "UTF-8" }, Body: { Html: { Data: html, Charset: "UTF-8" }, Text: { Data: plainText, Charset: "UTF-8" } }, Headers: unsubscribeUrl ? [{ Name: "List-Unsubscribe", Value: `<${unsubscribeUrl}>` }, { Name: "List-Unsubscribe-Post", Value: "List-Unsubscribe=One-Click" }] : undefined } },
       EmailTags: [{ Name: "vm_message_id", Value: claimed.id }, { Name: "vm_workspace_id", Value: claimed.workspaceId }],
     }));
-    const month = new Date().toISOString().slice(0, 7);
-    await db.transaction(async tx => {
-      await tx.update(messages).set({ status: "sent", sesMessageId: result.MessageId, sentAt: new Date(), updatedAt: new Date() }).where(eq(messages.id, claimed.id));
-      await tx.insert(messageAttempts).values({ messageId: claimed.id, attempt: 1, status: "accepted" }).onConflictDoNothing();
-      await tx.insert(usageMonths).values({ workspaceId: claimed.workspaceId, month, acceptedEmails: 1 }).onConflictDoUpdate({ target: [usageMonths.workspaceId, usageMonths.month], set: { acceptedEmails: sql`${usageMonths.acceptedEmails} + 1`, updatedAt: new Date() } });
-    });
   } catch (error) {
-    await db.update(messages).set({ status: "queued", lastError: error instanceof Error ? error.message : "SES send failed", updatedAt: new Date() }).where(eq(messages.id, claimed.id));
+    await db.update(messages).set({ status: "queued", lastError: error instanceof Error ? error.message : "SES send failed", updatedAt: new Date() }).where(and(eq(messages.id, claimed.id), eq(messages.workspaceId, claimed.workspaceId), eq(messages.status, "sending")));
     throw error;
   }
+
+  // SES accepted the message. From this point onward, never return it to `queued`:
+  // an event carrying the VigieMail tags will reconcile an ambiguous database write.
+  const acceptedAt = new Date();
+  const month = acceptedAt.toISOString().slice(0, 7);
+  await db.transaction(async tx => {
+    await tx.update(messages).set({ status: "sent", sesMessageId: result.MessageId, sentAt: acceptedAt, updatedAt: acceptedAt }).where(and(eq(messages.id, claimed.id), eq(messages.workspaceId, claimed.workspaceId), eq(messages.status, "sending")));
+    const attempt = await tx.insert(messageAttempts).values({ messageId: claimed.id, attempt: 1, status: "accepted" }).onConflictDoNothing().returning();
+    if (attempt.length) {
+      await tx.insert(usageMonths).values({ workspaceId: claimed.workspaceId, month, acceptedEmails: 1 }).onConflictDoUpdate({ target: [usageMonths.workspaceId, usageMonths.month], set: { acceptedEmails: sql`${usageMonths.acceptedEmails} + 1`, updatedAt: acceptedAt } });
+    }
+  });
 }
