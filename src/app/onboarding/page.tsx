@@ -11,6 +11,8 @@ import { Textarea } from "@/components/ui/textarea";
 import { completeOnboardingAction } from "@/features/onboarding/actions";
 import { isClerkConfigured } from "@/lib/env";
 
+export const dynamic = "force-dynamic";
+
 export default async function Page() {
   if (isClerkConfigured()) {
     const session = await auth();
