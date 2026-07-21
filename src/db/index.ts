@@ -7,9 +7,18 @@ import * as schema from "./schema";
 
 const databaseUrl = process.env.DATABASE_URL;
 
+function withVerifiedSsl(connectionString: string) {
+  const url = new URL(connectionString);
+  const sslMode = url.searchParams.get("sslmode");
+  if (sslMode && ["prefer", "require", "verify-ca"].includes(sslMode)) {
+    url.searchParams.set("sslmode", "verify-full");
+  }
+  return url.toString();
+}
+
 const pool = databaseUrl
   ? new Pool({
-      connectionString: databaseUrl,
+      connectionString: withVerifiedSsl(databaseUrl),
       max: 10,
     })
   : null;
