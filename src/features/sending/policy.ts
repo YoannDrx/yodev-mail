@@ -1,4 +1,5 @@
 export type SendingEligibilityInput = {
+  mode?: "test" | "live";
   stream: "transactional" | "marketing";
   workspaceStatus: "sandbox" | "pending_review" | "approved" | "paused" | "rejected";
   billingStatus: "inactive" | "trialing" | "active" | "past_due" | "canceled";
@@ -15,8 +16,12 @@ export type EligibilityResult = { allowed: true } | { allowed: false; code: stri
 
 export function evaluateSendingEligibility(input: SendingEligibilityInput): EligibilityResult {
   const now = input.now ?? new Date();
-  if (input.workspaceStatus !== "approved") {
+  const mode = input.mode ?? "live";
+  if (mode === "live" && input.workspaceStatus !== "approved") {
     return { allowed: false, code: "workspace_not_approved", reason: "Le workspace doit être approuvé avant un envoi public." };
+  }
+  if (mode === "test" && (input.workspaceStatus === "paused" || input.workspaceStatus === "rejected")) {
+    return { allowed: false, code: "workspace_not_available", reason: "Le workspace est suspendu ou refusé." };
   }
   if (!input.domainVerified) {
     return { allowed: false, code: "domain_not_verified", reason: "Le domaine expéditeur n’est pas vérifié." };
@@ -30,6 +35,7 @@ export function evaluateSendingEligibility(input: SendingEligibilityInput): Elig
   if (input.dailySent >= input.dailyLimit) {
     return { allowed: false, code: "daily_limit_reached", reason: "Le quota quotidien progressif est atteint." };
   }
+  if (mode === "test") return { allowed: true };
   if (input.billingStatus === "active" || input.billingStatus === "trialing") return { allowed: true };
   if (
     input.stream === "transactional" &&
@@ -46,4 +52,3 @@ export function shouldAutoPause({ sent, hardBounces, complaints }: { sent: numbe
   if (sent < 100) return false;
   return hardBounces / sent >= 0.05 || complaints / sent >= 0.002;
 }
-

@@ -1,0 +1,9 @@
+"use server";
+import { and, eq } from "drizzle-orm";
+import { revalidatePath } from "next/cache";
+import { z } from "zod";
+import { requireDb } from "@/db";
+import { adminReviews, auditEvents, subscriptions, workspaces } from "@/db/schema";
+import { requireAdmin } from "@/lib/page-auth";
+const idSchema=z.string().uuid();
+export async function reviewWorkspaceAction(workspaceId:string,decision:"approved"|"rejected"|"limited"){const id=idSchema.parse(workspaceId);const {userId}=await requireAdmin();const db=requireDb();await db.transaction(async(tx)=>{if(decision==="approved"){await tx.update(workspaces).set({approvedAt:new Date(),dailyLimit:500,pauseReason:null,pausedAt:null,status:"approved",warmupAdvancedAt:new Date(),warmupStage:1,updatedAt:new Date()}).where(eq(workspaces.id,id));await tx.update(subscriptions).set({status:"trialing",graceEndsAt:new Date(Date.now()+14*864e5),updatedAt:new Date()}).where(eq(subscriptions.workspaceId,id))}else if(decision==="rejected"){await tx.update(workspaces).set({pauseReason:"admin_rejected",status:"rejected",updatedAt:new Date()}).where(eq(workspaces.id,id))}else{await tx.update(workspaces).set({dailyLimit:200,pauseReason:"admin_limited",pausedAt:new Date(),status:"paused",updatedAt:new Date()}).where(eq(workspaces.id,id))}const [review]=await tx.select().from(adminReviews).where(eq(adminReviews.workspaceId,id)).orderBy(adminReviews.createdAt).limit(1);if(review)await tx.update(adminReviews).set({decision:decision==="limited"?"pending":decision,reviewedAt:new Date(),reviewedBy:userId,updatedAt:new Date()}).where(and(eq(adminReviews.id,review.id),eq(adminReviews.workspaceId,id)));await tx.insert(auditEvents).values({action:`workspace.${decision}`,actorUserId:userId,entityId:id,entityType:"workspace",workspaceId:id})});revalidatePath("/admin")}

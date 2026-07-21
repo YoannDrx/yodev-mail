@@ -7,9 +7,15 @@ import {
   Tags,
   type StackProps,
 } from "aws-cdk-lib";
+import {
+  Dashboard as CloudWatchDashboard,
+  GraphWidget,
+  Metric,
+  TreatMissingData,
+} from "aws-cdk-lib/aws-cloudwatch";
 import { SnsAction } from "aws-cdk-lib/aws-cloudwatch-actions";
-import { Rule } from "aws-cdk-lib/aws-events";
-import { SqsQueue } from "aws-cdk-lib/aws-events-targets";
+import { Rule, Schedule } from "aws-cdk-lib/aws-events";
+import { LambdaFunction, SqsQueue } from "aws-cdk-lib/aws-events-targets";
 import {
   type IOpenIdConnectProvider,
   PolicyStatement,
@@ -29,6 +35,7 @@ import {
   Bucket,
   BucketEncryption,
   EventType,
+  HttpMethods,
 } from "aws-cdk-lib/aws-s3";
 import { CfnScheduleGroup } from "aws-cdk-lib/aws-scheduler";
 import { Secret } from "aws-cdk-lib/aws-secretsmanager";
@@ -88,6 +95,19 @@ export class VigieMailStack extends Stack {
       autoDeleteObjects: !prod,
       blockPublicAccess: BlockPublicAccess.BLOCK_ALL,
       bucketName: `${prefix}-imports-${this.account}`,
+      cors: [
+        {
+          allowedHeaders: ["content-type"],
+          allowedMethods: [HttpMethods.PUT],
+          allowedOrigins: [
+            "http://localhost:3000",
+            "https://app.vigie-mail.fr",
+            "https://*.vercel.app",
+          ],
+          exposedHeaders: ["etag"],
+          maxAge: 300,
+        },
+      ],
       encryption: BucketEncryption.S3_MANAGED,
       enforceSSL: true,
       lifecycleRules: [{ expiration: Duration.days(7) }],
@@ -113,11 +133,15 @@ export class VigieMailStack extends Stack {
         UNSUBSCRIBE_SIGNING_SECRET: databaseSecret
           .secretValueFromJson("UNSUBSCRIBE_SIGNING_SECRET")
           .unsafeUnwrap(),
+        WEBHOOK_SIGNING_SECRET: databaseSecret
+          .secretValueFromJson("WEBHOOK_SIGNING_SECRET")
+          .unsafeUnwrap(),
       },
       memorySize: 512,
       runtime: Runtime.NODEJS_22_X,
       timeout: Duration.seconds(60),
     };
+    const workerFunctions: NodejsFunction[] = [];
 
     const worker = (
       name: string,
@@ -146,8 +170,18 @@ export class VigieMailStack extends Stack {
         .createAlarm(this, `${name}ErrorsAlarm`, {
           evaluationPeriods: 1,
           threshold: 1,
+          treatMissingData: TreatMissingData.NOT_BREACHING,
         });
       errors.addAlarmAction(new SnsAction(props.alertTopic));
+      const throttles = fn
+        .metricThrottles({ period: Duration.minutes(5) })
+        .createAlarm(this, `${name}ThrottlesAlarm`, {
+          evaluationPeriods: 1,
+          threshold: 1,
+          treatMissingData: TreatMissingData.NOT_BREACHING,
+        });
+      throttles.addAlarmAction(new SnsAction(props.alertTopic));
+      workerFunctions.push(fn);
       return fn;
     };
 
@@ -210,6 +244,59 @@ export class VigieMailStack extends Stack {
     );
     imports.grantRead(importer);
 
+    const outbox = worker(
+      "OutboxDispatch",
+      "src/workers/outbox-dispatch.ts",
+      {
+        CAMPAIGN_QUEUE_URL: campaign.main.queueUrl,
+        EMAIL_QUEUE_URL: email.main.queueUrl,
+        WEBHOOK_QUEUE_URL: webhooks.main.queueUrl,
+      },
+    );
+    campaign.main.grantSendMessages(outbox);
+    email.main.grantSendMessages(outbox);
+    webhooks.main.grantSendMessages(outbox);
+    new Rule(this, "OutboxSchedule", {
+      schedule: Schedule.rate(Duration.minutes(1)),
+      targets: [new LambdaFunction(outbox)],
+    });
+
+    const domainHealth = worker(
+      "DomainHealth",
+      "src/workers/domain-health.ts",
+    );
+    domainHealth.addToRolePolicy(
+      new PolicyStatement({ actions: ["ses:GetEmailIdentity"], resources: ["*"] }),
+    );
+    new Rule(this, "DomainHealthSchedule", {
+      schedule: Schedule.rate(Duration.minutes(15)),
+      targets: [new LambdaFunction(domainHealth)],
+    });
+
+    const stripeUsage = worker(
+      "StripeUsage",
+      "src/workers/report-stripe-usage.ts",
+      {
+        STRIPE_METER_EVENT_NAME: "vigiemail_emails_sent",
+        STRIPE_SECRET_KEY: databaseSecret
+          .secretValueFromJson("STRIPE_SECRET_KEY")
+          .unsafeUnwrap(),
+      },
+    );
+    new Rule(this, "StripeUsageSchedule", {
+      schedule: Schedule.rate(Duration.hours(1)),
+      targets: [new LambdaFunction(stripeUsage)],
+    });
+
+    const warmup = worker(
+      "WarmupProgress",
+      "src/workers/warmup-progress.ts",
+    );
+    new Rule(this, "WarmupProgressSchedule", {
+      schedule: Schedule.cron({ hour: "1", minute: "15" }),
+      targets: [new LambdaFunction(warmup)],
+    });
+
     new Rule(this, "SesEventRule", {
       eventPattern: { source: ["aws.ses"] },
       targets: [new SqsQueue(events.main)],
@@ -241,6 +328,7 @@ export class VigieMailStack extends Stack {
           "ses:CreateTenant",
           "ses:CreateTenantResourceAssociation",
           "ses:GetEmailIdentity",
+          "ses:GetAccount",
           "ses:GetTenant",
           "ses:PutEmailIdentityMailFromAttributes",
         ],
@@ -269,6 +357,68 @@ export class VigieMailStack extends Stack {
         value: queuePair.main.queueUrl,
       });
     }
+
+    const bounceRate = new Metric({
+      metricName: "Reputation.BounceRate",
+      namespace: "AWS/SES",
+      period: Duration.minutes(5),
+      statistic: "Average",
+    });
+    const complaintRate = new Metric({
+      metricName: "Reputation.ComplaintRate",
+      namespace: "AWS/SES",
+      period: Duration.minutes(5),
+      statistic: "Average",
+    });
+    const bounceAlarm = bounceRate.createAlarm(this, "SesBounceRateAlarm", {
+      evaluationPeriods: 1,
+      threshold: 0.05,
+      treatMissingData: TreatMissingData.IGNORE,
+    });
+    const complaintAlarm = complaintRate.createAlarm(
+      this,
+      "SesComplaintRateAlarm",
+      {
+        evaluationPeriods: 1,
+        threshold: 0.001,
+        treatMissingData: TreatMissingData.IGNORE,
+      },
+    );
+    bounceAlarm.addAlarmAction(new SnsAction(props.alertTopic));
+    complaintAlarm.addAlarmAction(new SnsAction(props.alertTopic));
+
+    const dashboard = new CloudWatchDashboard(this, "OperationsDashboard", {
+      dashboardName: `${prefix}-operations`,
+    });
+    dashboard.addWidgets(
+      new GraphWidget({
+        left: [
+          new Metric({ metricName: "Send", namespace: "AWS/SES", statistic: "Sum" }),
+          new Metric({ metricName: "Delivery", namespace: "AWS/SES", statistic: "Sum" }),
+          new Metric({ metricName: "Bounce", namespace: "AWS/SES", statistic: "Sum" }),
+          new Metric({ metricName: "Complaint", namespace: "AWS/SES", statistic: "Sum" }),
+        ],
+        title: "SES sending events",
+        width: 12,
+      }),
+      new GraphWidget({
+        left: [bounceRate, complaintRate],
+        title: "SES account reputation",
+        width: 12,
+      }),
+      new GraphWidget({
+        left: [campaign, email, events, webhooks].map((pair) =>
+          pair.main.metricApproximateAgeOfOldestMessage(),
+        ),
+        title: "Queue age",
+        width: 12,
+      }),
+      new GraphWidget({
+        left: workerFunctions.map((fn) => fn.metricErrors()),
+        title: "Lambda errors",
+        width: 12,
+      }),
+    );
 
     Tags.of(this).add("application", "vigiemail");
     Tags.of(this).add("environment", props.environment);

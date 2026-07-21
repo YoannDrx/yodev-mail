@@ -1,4 +1,33 @@
-import { Bell, ChevronDown, Search } from "lucide-react";
+import { OrganizationSwitcher, UserButton } from "@clerk/nextjs";
+import { Bell, Search } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
-export function DashboardHeader(){return <header className="flex h-16 items-center justify-between border-b bg-white/90 px-5 backdrop-blur"><div className="relative hidden w-72 md:block"><Search className="absolute left-3 top-2.5 size-4 text-muted-foreground"/><Input className="h-9 pl-9" placeholder="Rechercher…"/></div><div className="ml-auto flex items-center gap-2"><Button size="icon" variant="ghost"><Bell/></Button><Button variant="ghost" className="gap-2"><span className="grid size-7 place-items-center rounded-full bg-primary/10 text-xs font-semibold text-primary">YA</span><span className="hidden sm:inline">Yoann</span><ChevronDown className="size-3"/></Button></div></header>}
+import { isClerkConfigured } from "@/lib/env";
+
+export function DashboardHeader() {
+  return (
+    <header className="flex h-16 items-center justify-between border-b bg-white/90 px-5 backdrop-blur">
+      <div className="relative hidden w-72 md:block">
+        <Search className="absolute left-3 top-2.5 size-4 text-muted-foreground" />
+        <Input className="h-9 pl-9" placeholder="Rechercher…" />
+      </div>
+      <div className="ml-auto flex items-center gap-3">
+        <Button aria-label="Notifications" size="icon" variant="ghost">
+          <Bell />
+        </Button>
+        {isClerkConfigured() ? (
+          <>
+            <OrganizationSwitcher
+              afterCreateOrganizationUrl="/onboarding"
+              afterSelectOrganizationUrl="/dashboard"
+              hidePersonal
+            />
+            <UserButton />
+          </>
+        ) : (
+          <span className="text-sm text-muted-foreground">Mode démonstration</span>
+        )}
+      </div>
+    </header>
+  );
+}

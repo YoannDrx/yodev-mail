@@ -1,4 +1,11 @@
-import { createHash, createHmac, randomBytes, timingSafeEqual } from "node:crypto";
+import {
+  createCipheriv,
+  createDecipheriv,
+  createHash,
+  createHmac,
+  randomBytes,
+  timingSafeEqual,
+} from "node:crypto";
 
 export function sha256(value: string) {
   return createHash("sha256").update(value).digest("hex");
@@ -25,6 +32,34 @@ export function createApiKey(mode: "test" | "live", pepper: string) {
   };
 }
 
+export function encryptSecret(value: string, keyMaterial: string) {
+  const key = createHash("sha256").update(keyMaterial).digest();
+  const iv = randomBytes(12);
+  const cipher = createCipheriv("aes-256-gcm", key, iv);
+  const encrypted = Buffer.concat([cipher.update(value, "utf8"), cipher.final()]);
+  return [iv, cipher.getAuthTag(), encrypted]
+    .map((part) => part.toString("base64url"))
+    .join(".");
+}
+
+export function decryptSecret(value: string, keyMaterial: string) {
+  const [ivValue, tagValue, encryptedValue] = value.split(".");
+  if (!ivValue || !tagValue || !encryptedValue) {
+    throw new Error("Encrypted secret has an invalid format");
+  }
+  const key = createHash("sha256").update(keyMaterial).digest();
+  const decipher = createDecipheriv(
+    "aes-256-gcm",
+    key,
+    Buffer.from(ivValue, "base64url"),
+  );
+  decipher.setAuthTag(Buffer.from(tagValue, "base64url"));
+  return Buffer.concat([
+    decipher.update(Buffer.from(encryptedValue, "base64url")),
+    decipher.final(),
+  ]).toString("utf8");
+}
+
 export function signExpiringToken(payload: Record<string, string>, secret: string, expiresAt: Date) {
   const body = Buffer.from(JSON.stringify({ ...payload, exp: expiresAt.getTime() })).toString("base64url");
   return `${body}.${hmac(body, secret)}`;
@@ -37,4 +72,3 @@ export function verifyExpiringToken(token: string, secret: string) {
   if (!Number.isFinite(data.exp) || data.exp < Date.now()) return null;
   return data;
 }
-

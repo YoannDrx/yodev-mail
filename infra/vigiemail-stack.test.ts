@@ -60,7 +60,8 @@ describe("VigieMail AWS infrastructure", () => {
     for (const queue of Object.values(queues)) {
       expect(queue.Properties.SqsManagedSseEnabled).toBe(true);
     }
-    workload.resourceCountIs("AWS::CloudWatch::Alarm", 13);
+    workload.resourceCountIs("AWS::CloudWatch::Alarm", 28);
+    workload.resourceCountIs("AWS::CloudWatch::Dashboard", 1);
   });
 
   test("caps email delivery without reserving scarce account concurrency", () => {

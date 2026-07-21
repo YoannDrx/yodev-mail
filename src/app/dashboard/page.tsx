@@ -1,6 +1,144 @@
-import { Activity, ArrowUpRight, MailCheck, MousePointerClick, Send, ShieldCheck } from "lucide-react";
+import Link from "next/link";
+import {
+  Activity,
+  ArrowUpRight,
+  MailCheck,
+  Send,
+  ShieldCheck,
+  TriangleAlert,
+} from "lucide-react";
 import { StatCard } from "@/components/stat-card";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Progress } from "@/components/ui/progress";
-export default function Dashboard(){return <><div className="flex flex-col justify-between gap-4 sm:flex-row sm:items-end"><div><p className="text-sm text-muted-foreground">Samedi 18 juillet</p><h1 className="mt-1 text-3xl font-semibold tracking-tight">Bonjour Yoann 👋</h1><p className="mt-2 text-muted-foreground">Vos emails sont sous contrôle.</p></div><div className="flex gap-2"><Button variant="outline">Importer des contacts</Button><Button>Créer une campagne</Button></div></div><div className="mt-8 grid gap-4 sm:grid-cols-2 xl:grid-cols-4"><StatCard label="Emails envoyés" value="48 294" detail="+12,4 % vs mois dernier" icon={Send}/><StatCard label="Délivrés" value="99,42 %" detail="Excellent · cible > 98 %" icon={MailCheck}/><StatCard label="Taux de clic" value="4,81 %" detail="Suivi consenti uniquement" icon={MousePointerClick}/><StatCard label="Réputation" value="Saïne" detail="0,03 % de plaintes" icon={ShieldCheck}/></div><div className="mt-6 grid gap-6 xl:grid-cols-[1.6fr_1fr]"><section className="rounded-2xl border bg-white p-6 shadow-sm"><div className="flex items-center justify-between"><div><h2 className="font-semibold">Activité d'envoi</h2><p className="text-sm text-muted-foreground">30 derniers jours</p></div><Badge variant="secondary">Toutes les sources</Badge></div><div className="mt-8 flex h-52 items-end gap-2">{[34,48,41,70,58,82,76,91,63,86,78,96,84,68,90,74,88,99,79,93,86,72,95,89].map((h,i)=><div key={i} className="flex-1 rounded-t-sm bg-gradient-to-t from-violet-600 to-violet-300" style={{height:`${h}%`}}/>)}</div></section><section className="rounded-2xl border bg-white p-6 shadow-sm"><h2 className="font-semibold">Garde-fous</h2><div className="mt-6 grid gap-6">{[["Quota quotidien","2 418 / 5 000",48],["Hard bounces","0,71 % / 5 %",14],["Plaintes","0,03 % / 0,2 %",15]].map(([a,b,c])=><div key={a as string}><div className="mb-2 flex justify-between text-sm"><span>{a as string}</span><span className="text-muted-foreground">{b as string}</span></div><Progress value={c as number}/></div>)}</div><div className="mt-7 rounded-xl bg-emerald-50 p-4 text-sm text-emerald-800"><Activity className="mr-2 inline size-4"/>Tous les indicateurs sont sains.</div></section></div><section className="mt-6 rounded-2xl border bg-white shadow-sm"><div className="flex items-center justify-between border-b p-5"><div><h2 className="font-semibold">Dernières campagnes</h2><p className="text-sm text-muted-foreground">Audience et résultats figés à l'envoi</p></div><Button variant="ghost">Tout voir <ArrowUpRight/></Button></div>{[["Nouveautés de juillet","Envoyée","12 480","99,1 %"],["Invitation bêta VigieAds","Programmée","3 240","—"],["Newsletter juin","Envoyée","11 904","98,9 %"]].map(row=><div key={row[0]} className="grid grid-cols-[1fr_auto] items-center gap-4 border-b px-5 py-4 last:border-0 sm:grid-cols-4"><span className="font-medium">{row[0]}</span><Badge variant="secondary">{row[1]}</Badge><span className="hidden text-sm text-muted-foreground sm:block">{row[2]} destinataires</span><span className="hidden text-sm sm:block">{row[3]} délivrés</span></div>)}</section></>}
+import { getDashboardData } from "@/features/dashboard/queries";
+import { requirePageWorkspace } from "@/lib/page-auth";
+import { isPaidPlan, planCatalog } from "@/lib/plans";
+
+const percent = (value: number, total: number) =>
+  total > 0 ? (value / total) * 100 : 0;
+const rate = (value: number) => `${value.toFixed(2).replace(".", ",")} %`;
+
+export default async function Dashboard() {
+  const context = await requirePageWorkspace();
+  if (!context) {
+    return (
+      <section className="rounded-3xl border bg-white p-10 text-center">
+        <h1 className="text-3xl font-semibold">Cockpit VigieMail</h1>
+        <p className="mt-3 text-muted-foreground">
+          Configurez Clerk pour créer un workspace et afficher des données réelles.
+        </p>
+      </section>
+    );
+  }
+  const data = await getDashboardData(context.workspace.id);
+  const deliveredRate = percent(data.totals.delivered, data.totals.accepted);
+  const complaintRate = percent(data.totals.complaints, data.totals.accepted);
+  const bounceRate = percent(data.totals.hardBounces, data.totals.accepted);
+  const included = isPaidPlan(data.workspace.plan)
+    ? planCatalog[data.workspace.plan].includedEmails
+    : 0;
+  const monthlyProgress = included
+    ? Math.min(100, percent(data.currentMonthAccepted, included))
+    : 0;
+  const maxDay = Math.max(1, ...data.activity.map((day) => day.acceptedEmails));
+  const healthy = bounceRate < 2 && complaintRate < 0.1;
+
+  return (
+    <>
+      <div className="flex flex-col justify-between gap-4 sm:flex-row sm:items-end">
+        <div>
+          <p className="text-sm text-muted-foreground">
+            {new Intl.DateTimeFormat("fr-FR", { dateStyle: "full" }).format(new Date())}
+          </p>
+          <h1 className="mt-1 text-3xl font-semibold tracking-tight">
+            {data.workspace.name}
+          </h1>
+          <p className="mt-2 text-muted-foreground">
+            Les indicateurs ci-dessous proviennent des événements SES acceptés.
+          </p>
+        </div>
+        <div className="flex gap-2">
+          <Button asChild variant="outline">
+            <Link href="/dashboard/contacts">Importer des contacts</Link>
+          </Button>
+          <Button asChild>
+            <Link href="/dashboard/campagnes">Créer une campagne</Link>
+          </Button>
+        </div>
+      </div>
+
+      <div className="mt-8 grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
+        <StatCard label="Acceptés ce mois" value={data.currentMonthAccepted.toLocaleString("fr-FR")} detail="Base de facturation SES" icon={Send} />
+        <StatCard label="Délivrés sur 30 jours" value={rate(deliveredRate)} detail={`${data.totals.delivered.toLocaleString("fr-FR")} messages confirmés`} icon={MailCheck} />
+        <StatCard label="En attente" value={String((data.statusCounts.queued ?? 0) + (data.statusCounts.sending ?? 0))} detail="Queue et envois en cours" icon={Activity} />
+        <StatCard label="Réputation" value={healthy ? "Saine" : "À surveiller"} detail={`${rate(complaintRate)} de plaintes`} icon={healthy ? ShieldCheck : TriangleAlert} />
+      </div>
+
+      <div className="mt-6 grid gap-6 xl:grid-cols-[1.6fr_1fr]">
+        <section className="rounded-2xl border bg-white p-6 shadow-sm">
+          <div className="flex items-center justify-between">
+            <div>
+              <h2 className="font-semibold">Activité d’envoi</h2>
+              <p className="text-sm text-muted-foreground">30 derniers jours</p>
+            </div>
+            <Badge variant="secondary">Acceptés par SES</Badge>
+          </div>
+          {data.activity.length ? (
+            <div className="mt-8 flex h-52 items-end gap-2">
+              {data.activity.map((day) => (
+                <div
+                  className="min-h-1 flex-1 rounded-t-sm bg-gradient-to-t from-violet-600 to-violet-300"
+                  key={day.day}
+                  style={{ height: `${Math.max(2, percent(day.acceptedEmails, maxDay))}%` }}
+                  title={`${day.day}: ${day.acceptedEmails}`}
+                />
+              ))}
+            </div>
+          ) : (
+            <div className="mt-8 grid h-52 place-items-center rounded-xl bg-zinc-50 text-sm text-muted-foreground">
+              Aucun envoi réel sur cette période.
+            </div>
+          )}
+        </section>
+        <section className="rounded-2xl border bg-white p-6 shadow-sm">
+          <h2 className="font-semibold">Garde-fous</h2>
+          <div className="mt-6 grid gap-6">
+            <Metric label="Quota quotidien" value={`${data.todayAccepted.toLocaleString("fr-FR")} / ${data.workspace.dailyLimit.toLocaleString("fr-FR")}`} progress={percent(data.todayAccepted, data.workspace.dailyLimit)} />
+            <Metric label="Hard bounces" value={`${rate(bounceRate)} / 5 %`} progress={percent(bounceRate, 5)} />
+            <Metric label="Plaintes" value={`${rate(complaintRate)} / 0,2 %`} progress={percent(complaintRate, 0.2)} />
+            {included > 0 && <Metric label="Forfait mensuel" value={`${data.currentMonthAccepted.toLocaleString("fr-FR")} / ${included.toLocaleString("fr-FR")}`} progress={monthlyProgress} />}
+          </div>
+          <div className={`mt-7 rounded-xl p-4 text-sm ${healthy ? "bg-emerald-50 text-emerald-800" : "bg-amber-50 text-amber-900"}`}>
+            <Activity className="mr-2 inline size-4" />
+            {healthy ? "Tous les indicateurs mesurés sont sains." : "Un seuil d’alerte nécessite votre attention."}
+          </div>
+        </section>
+      </div>
+
+      <section className="mt-6 rounded-2xl border bg-white shadow-sm">
+        <div className="flex items-center justify-between border-b p-5">
+          <div>
+            <h2 className="font-semibold">Dernières campagnes</h2>
+            <p className="text-sm text-muted-foreground">Audience et résultats réels</p>
+          </div>
+          <Button asChild variant="ghost">
+            <Link href="/dashboard/campagnes">Tout voir <ArrowUpRight /></Link>
+          </Button>
+        </div>
+        {data.recentCampaigns.length ? data.recentCampaigns.map((campaign) => (
+          <div className="grid grid-cols-[1fr_auto] items-center gap-4 border-b px-5 py-4 last:border-0 sm:grid-cols-4" key={campaign.id}>
+            <span className="font-medium">{campaign.name}</span>
+            <Badge variant="secondary">{campaign.status}</Badge>
+            <span className="hidden text-sm text-muted-foreground sm:block">{campaign.recipientCount.toLocaleString("fr-FR")} destinataires</span>
+            <span className="hidden text-sm sm:block">{campaign.deliveredCount.toLocaleString("fr-FR")} délivrés</span>
+          </div>
+        )) : <p className="p-8 text-center text-sm text-muted-foreground">Aucune campagne créée.</p>}
+      </section>
+    </>
+  );
+}
+
+function Metric({ label, progress, value }: { label: string; progress: number; value: string }) {
+  return <div><div className="mb-2 flex justify-between text-sm"><span>{label}</span><span className="text-muted-foreground">{value}</span></div><Progress value={Math.min(100, progress)} /></div>;
+}

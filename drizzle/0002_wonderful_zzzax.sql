@@ -1,0 +1,1 @@
+ALTER TABLE "outbox_jobs" ALTER COLUMN "workspace_id" SET NOT NULL;
