@@ -2,8 +2,10 @@ import { and, eq, inArray } from "drizzle-orm";
 import { requireDb } from "@/db/runtime";
 import { domains } from "@/db/schema";
 import { checkSesDomain } from "@/features/domains/check-domain";
+import { loadRuntimeSecrets } from "@/workers/runtime-secrets";
 
 export async function handler() {
+  await loadRuntimeSecrets();
   const db = requireDb();
   const candidates = await db
     .select()

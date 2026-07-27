@@ -6,6 +6,7 @@ import { z } from "zod";
 import { requireDb } from "@/db/runtime";
 import { contactListMembers, contactLists, contacts, importJobs } from "@/db/schema";
 import { normalizeEmail } from "@/features/contacts/normalization";
+import { loadRuntimeSecrets } from "@/workers/runtime-secrets";
 
 const emailSchema = z.string().trim().email().max(320);
 const MAX_BYTES = 10 * 1024 * 1024;
@@ -17,6 +18,7 @@ function field(row: Record<string, string>, mapping: Record<string, string>, key
 }
 
 export async function handler(event: S3Event) {
+  await loadRuntimeSecrets();
   const s3 = new S3Client({});
   for (const record of event.Records) {
     const key = decodeURIComponent(record.s3.object.key.replace(/\+/g, " "));

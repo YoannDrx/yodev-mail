@@ -17,8 +17,10 @@ import {
 } from "@/features/sending/eligibility";
 import { awsClients } from "@/lib/aws";
 import { signExpiringToken } from "@/lib/crypto";
+import { loadRuntimeSecrets } from "@/workers/runtime-secrets";
 
 export async function handler(event: SQSEvent): Promise<SQSBatchResponse> {
+  await loadRuntimeSecrets();
   const failures: Array<{ itemIdentifier: string }> = [];
   for (const record of event.Records) {
     try { await sendOne(JSON.parse(record.body).messageId); } catch { failures.push({ itemIdentifier: record.messageId }); }

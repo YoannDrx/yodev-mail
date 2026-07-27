@@ -3,8 +3,10 @@ import Stripe from "stripe";
 import { requireDb } from "@/db/runtime";
 import { subscriptions, usageMonths, workspaces } from "@/db/schema";
 import { isPaidPlan, planCatalog } from "@/lib/plans";
+import { loadRuntimeSecrets } from "@/workers/runtime-secrets";
 
 export async function handler() {
+  await loadRuntimeSecrets();
   const secret = process.env.STRIPE_SECRET_KEY;
   if (!secret) throw new Error("STRIPE_SECRET_KEY is missing");
   const stripe = new Stripe(secret);

@@ -11,10 +11,12 @@ import {
   templateVersions,
 } from "@/db/schema";
 import { evaluateStoredMessage } from "@/features/sending/eligibility";
+import { loadRuntimeSecrets } from "@/workers/runtime-secrets";
 
 const PAGE_SIZE = 250;
 
 export async function handler(event: SQSEvent): Promise<SQSBatchResponse> {
+  await loadRuntimeSecrets();
   const failed: Array<{ itemIdentifier: string }> = [];
   for (const record of event.Records) {
     try {

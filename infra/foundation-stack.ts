@@ -40,10 +40,14 @@ export class VigieMailFoundationStack extends Stack {
 
     new CfnBudget(this, "AccountMonthlyBudget", {
       budget: {
-        budgetName: "vigiemail-account-monthly",
+        budgetName: "vigiemail-account-zero-cost",
         budgetType: "COST",
+        costTypes: {
+          includeCredit: false,
+          includeRefund: false,
+        },
         timeUnit: "MONTHLY",
-        budgetLimit: { amount: 125, unit: "USD" },
+        budgetLimit: { amount: 1, unit: "USD" },
       },
       notificationsWithSubscribers: subscribers.length
         ? [
@@ -51,8 +55,8 @@ export class VigieMailFoundationStack extends Stack {
               notification: {
                 comparisonOperator: "GREATER_THAN",
                 notificationType: "ACTUAL",
-                threshold: 50,
-                thresholdType: "PERCENTAGE",
+                threshold: 0.01,
+                thresholdType: "ABSOLUTE_VALUE",
               },
               subscribers,
             },
@@ -60,8 +64,8 @@ export class VigieMailFoundationStack extends Stack {
               notification: {
                 comparisonOperator: "GREATER_THAN",
                 notificationType: "ACTUAL",
-                threshold: 80,
-                thresholdType: "PERCENTAGE",
+                threshold: 0.1,
+                thresholdType: "ABSOLUTE_VALUE",
               },
               subscribers,
             },
@@ -69,8 +73,8 @@ export class VigieMailFoundationStack extends Stack {
               notification: {
                 comparisonOperator: "GREATER_THAN",
                 notificationType: "FORECASTED",
-                threshold: 100,
-                thresholdType: "PERCENTAGE",
+                threshold: 0.5,
+                thresholdType: "ABSOLUTE_VALUE",
               },
               subscribers,
             },

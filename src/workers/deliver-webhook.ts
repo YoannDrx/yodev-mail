@@ -8,8 +8,10 @@ import {
 } from "@/db/schema";
 import { decryptSecret, hmac } from "@/lib/crypto";
 import { validateWebhookUrl } from "@/features/webhooks/validate-url";
+import { loadRuntimeSecrets } from "@/workers/runtime-secrets";
 
 export async function handler(event: SQSEvent): Promise<SQSBatchResponse> {
+  await loadRuntimeSecrets();
   const failed: Array<{ itemIdentifier: string }> = [];
   for (const record of event.Records) {
     try {

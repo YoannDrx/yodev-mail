@@ -30,6 +30,7 @@ import {
 } from "@/workers/ses-event-utils";
 import { shouldAutoPause } from "@/features/sending/policy";
 import { utcDay } from "@/features/sending/eligibility";
+import { loadRuntimeSecrets } from "@/workers/runtime-secrets";
 
 interface SesEnvelope {
   detail?: Record<string, unknown>;
@@ -44,6 +45,7 @@ interface SesMail {
 }
 
 export async function handler(event: SQSEvent): Promise<SQSBatchResponse> {
+  await loadRuntimeSecrets();
   const batchItemFailures: Array<{ itemIdentifier: string }> = [];
   for (const record of event.Records) {
     try {

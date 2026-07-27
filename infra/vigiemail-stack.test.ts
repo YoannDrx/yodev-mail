@@ -5,7 +5,8 @@ import { VigieMailFoundationStack } from "./foundation-stack";
 import { VigieMailStack } from "./vigiemail-stack";
 
 let foundation: Template;
-let workload: Template;
+let standbyWorkload: Template;
+let activeProductionWorkload: Template;
 
 beforeAll(() => {
   const app = new App();
@@ -19,11 +20,21 @@ beforeAll(() => {
     alertTopic: foundationStack.alertTopic,
     environment: "dev",
     env,
+    standby: true,
+    vercelOidcProvider: foundationStack.vercelOidcProvider,
+    vercelTeam: "yoanndrxs-projects",
+  });
+  const productionStack = new VigieMailStack(app, "Production", {
+    alertTopic: foundationStack.alertTopic,
+    environment: "prod",
+    env,
+    standby: false,
     vercelOidcProvider: foundationStack.vercelOidcProvider,
     vercelTeam: "yoanndrxs-projects",
   });
   foundation = Template.fromStack(foundationStack);
-  workload = Template.fromStack(workloadStack);
+  standbyWorkload = Template.fromStack(workloadStack);
+  activeProductionWorkload = Template.fromStack(productionStack);
 });
 
 describe("VigieMail AWS infrastructure", () => {
@@ -32,7 +43,7 @@ describe("VigieMail AWS infrastructure", () => {
       ClientIDList: ["https://vercel.com/yoanndrxs-projects"],
       Url: "https://oidc.vercel.com/yoanndrxs-projects",
     });
-    workload.hasResourceProperties(
+    standbyWorkload.hasResourceProperties(
       "AWS::IAM::Role",
       Match.objectLike({
         AssumeRolePolicyDocument: Match.objectLike({
@@ -53,39 +64,64 @@ describe("VigieMail AWS infrastructure", () => {
     );
   });
 
-  test("encrypts every queue and alarms workers and backlogs", () => {
-    const queues = workload.findResources("AWS::SQS::Queue");
+  test("encrypts every queue and keeps standby resources passive", () => {
+    const queues = standbyWorkload.findResources("AWS::SQS::Queue");
 
     expect(Object.values(queues)).toHaveLength(8);
     for (const queue of Object.values(queues)) {
       expect(queue.Properties.SqsManagedSseEnabled).toBe(true);
     }
-    workload.resourceCountIs("AWS::CloudWatch::Alarm", 28);
-    workload.resourceCountIs("AWS::CloudWatch::Dashboard", 1);
+    standbyWorkload.resourceCountIs("AWS::CloudWatch::Alarm", 0);
+    standbyWorkload.resourceCountIs("AWS::Lambda::EventSourceMapping", 0);
+    standbyWorkload.resourceCountIs("AWS::CloudWatch::Dashboard", 1);
+    for (const rule of Object.values(
+      standbyWorkload.findResources("AWS::Events::Rule"),
+    )) {
+      expect(rule.Properties.State).toBe("DISABLED");
+    }
   });
 
-  test("caps email delivery without reserving scarce account concurrency", () => {
-    workload.hasResourceProperties("AWS::Lambda::EventSourceMapping", {
+  test("caps active email delivery without reserving scarce account concurrency", () => {
+    activeProductionWorkload.hasResourceProperties(
+      "AWS::Lambda::EventSourceMapping",
+      {
       BatchSize: 1,
       ScalingConfig: { MaximumConcurrency: 2 },
-    });
+      },
+    );
     for (const fn of Object.values(
-      workload.findResources("AWS::Lambda::Function"),
+      activeProductionWorkload.findResources("AWS::Lambda::Function"),
     )) {
       expect(fn.Properties.ReservedConcurrentExecutions).toBeUndefined();
     }
   });
 
-  test("creates cost alerts and a single shared operations topic", () => {
+  test("uses no more than the ten free alarms when production is active", () => {
+    activeProductionWorkload.resourceCountIs("AWS::CloudWatch::Alarm", 10);
+    activeProductionWorkload.resourceCountIs(
+      "AWS::Lambda::EventSourceMapping",
+      4,
+    );
+  });
+
+  test("creates cent-level cost alerts and a single shared operations topic", () => {
     foundation.resourceCountIs("AWS::Budgets::Budget", 1);
     foundation.resourceCountIs("AWS::SNS::Topic", 1);
     foundation.hasResourceProperties("AWS::Budgets::Budget", {
       Budget: Match.objectLike({
-        BudgetLimit: { Amount: 125, Unit: "USD" },
+        BudgetName: "vigiemail-account-zero-cost",
+        BudgetLimit: { Amount: 1, Unit: "USD" },
+        CostTypes: Match.objectLike({
+          IncludeCredit: false,
+          IncludeRefund: false,
+        }),
       }),
       NotificationsWithSubscribers: Match.arrayWith([
         Match.objectLike({
-          Notification: Match.objectLike({ Threshold: 80 }),
+          Notification: Match.objectLike({
+            Threshold: 0.01,
+            ThresholdType: "ABSOLUTE_VALUE",
+          }),
         }),
       ]),
     });

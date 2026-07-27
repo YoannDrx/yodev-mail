@@ -28,6 +28,7 @@
     "@aws-sdk/client-scheduler": "^3.1090.0",
     "@aws-sdk/client-sesv2": "^3.1090.0",
     "@aws-sdk/client-sqs": "^3.1090.0",
+    "@aws-sdk/client-ssm": "^3.1095.0",
     "@aws-sdk/client-sts": "^3.1090.0",
     "@aws-sdk/s3-request-presigner": "^3.1091.0",
     "@clerk/localizations": "^4.13.5",

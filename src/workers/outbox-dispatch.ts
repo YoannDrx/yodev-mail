@@ -2,6 +2,7 @@ import { SendMessageCommand, SQSClient } from "@aws-sdk/client-sqs";
 import { and, eq, lt, lte, or } from "drizzle-orm";
 import { requireDb } from "@/db/runtime";
 import { outboxJobs } from "@/db/schema";
+import { loadRuntimeSecrets } from "@/workers/runtime-secrets";
 
 const queueForKind = (kind: string) => {
   if (kind === "email") return process.env.EMAIL_QUEUE_URL;
@@ -111,5 +112,6 @@ export async function dispatchPendingOutbox(limit = 50) {
 }
 
 export async function handler() {
+  await loadRuntimeSecrets();
   return dispatchPendingOutbox();
 }

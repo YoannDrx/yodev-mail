@@ -38,9 +38,9 @@ import {
   HttpMethods,
 } from "aws-cdk-lib/aws-s3";
 import { CfnScheduleGroup } from "aws-cdk-lib/aws-scheduler";
-import { Secret } from "aws-cdk-lib/aws-secretsmanager";
 import { type ITopic } from "aws-cdk-lib/aws-sns";
 import { Queue, QueueEncryption } from "aws-cdk-lib/aws-sqs";
+import { StringParameter } from "aws-cdk-lib/aws-ssm";
 import type { Construct } from "constructs";
 
 export interface VigieMailStackProps extends StackProps {
@@ -48,6 +48,7 @@ export interface VigieMailStackProps extends StackProps {
   environment: "dev" | "prod";
   vercelOidcProvider: IOpenIdConnectProvider;
   vercelTeam: string;
+  standby: boolean;
 }
 
 export class VigieMailStack extends Stack {
@@ -55,6 +56,7 @@ export class VigieMailStack extends Stack {
     super(scope, id, props);
 
     const prod = props.environment === "prod";
+    const monitoringEnabled = prod && !props.standby;
     const prefix = `vigiemail-${props.environment}`;
     const oidcIssuer = `oidc.vercel.com/${props.vercelTeam}`;
     const oidcAudience = `https://vercel.com/${props.vercelTeam}`;
@@ -114,28 +116,32 @@ export class VigieMailStack extends Stack {
       removalPolicy: prod ? RemovalPolicy.RETAIN : RemovalPolicy.DESTROY,
     });
 
-    const databaseSecret = Secret.fromSecretNameV2(
-      this,
-      "DatabaseSecret",
-      `${prefix}/database`,
-    );
+    const secureParameter = (id: string, name: string) =>
+      StringParameter.fromSecureStringParameterAttributes(this, id, {
+        parameterName: `/${prefix}/runtime/${name}`,
+        version: 1,
+      });
+    const runtimeParameters = [
+      secureParameter("DatabaseUrlParameter", "database-url"),
+      secureParameter(
+        "UnsubscribeSigningSecretParameter",
+        "unsubscribe-signing-secret",
+      ),
+      secureParameter(
+        "WebhookSigningSecretParameter",
+        "webhook-signing-secret",
+      ),
+      secureParameter("StripeSecretKeyParameter", "stripe-secret-key"),
+    ];
     const common = {
       bundling: { minify: true, sourceMap: true },
       environment: {
         AWS_REGION_NAME: this.region,
-        DATABASE_URL: databaseSecret
-          .secretValueFromJson("DATABASE_URL")
-          .unsafeUnwrap(),
         NODE_OPTIONS: "--enable-source-maps",
         PUBLIC_LINKS_URL: prod
           ? "https://links.vigie-mail.fr"
           : "https://preview.vigie-mail.fr",
-        UNSUBSCRIBE_SIGNING_SECRET: databaseSecret
-          .secretValueFromJson("UNSUBSCRIBE_SIGNING_SECRET")
-          .unsafeUnwrap(),
-        WEBHOOK_SIGNING_SECRET: databaseSecret
-          .secretValueFromJson("WEBHOOK_SIGNING_SECRET")
-          .unsafeUnwrap(),
+        RUNTIME_PARAMETER_PREFIX: `/${prefix}/runtime`,
       },
       memorySize: 512,
       runtime: Runtime.NODEJS_22_X,
@@ -164,35 +170,21 @@ export class VigieMailStack extends Stack {
         handler: "handler",
         logGroup,
       });
-      databaseSecret.grantRead(fn);
-      const errors = fn
-        .metricErrors({ period: Duration.minutes(5) })
-        .createAlarm(this, `${name}ErrorsAlarm`, {
-          evaluationPeriods: 1,
-          threshold: 1,
-          treatMissingData: TreatMissingData.NOT_BREACHING,
-        });
-      errors.addAlarmAction(new SnsAction(props.alertTopic));
-      const throttles = fn
-        .metricThrottles({ period: Duration.minutes(5) })
-        .createAlarm(this, `${name}ThrottlesAlarm`, {
-          evaluationPeriods: 1,
-          threshold: 1,
-          treatMissingData: TreatMissingData.NOT_BREACHING,
-        });
-      throttles.addAlarmAction(new SnsAction(props.alertTopic));
+      for (const parameter of runtimeParameters) parameter.grantRead(fn);
       workerFunctions.push(fn);
       return fn;
     };
 
     const send = worker("SendEmail", "src/workers/send-email.ts");
-    send.addEventSource(
-      new SqsEventSource(email.main, {
-        batchSize: 1,
-        maxConcurrency: 2,
-        reportBatchItemFailures: true,
-      }),
-    );
+    if (!props.standby) {
+      send.addEventSource(
+        new SqsEventSource(email.main, {
+          batchSize: 1,
+          maxConcurrency: 2,
+          reportBatchItemFailures: true,
+        }),
+      );
+    }
     email.main.grantConsumeMessages(send);
     send.addToRolePolicy(
       new PolicyStatement({ actions: ["ses:SendEmail"], resources: ["*"] }),
@@ -203,24 +195,28 @@ export class VigieMailStack extends Stack {
       "src/workers/campaign-dispatch.ts",
       { EMAIL_QUEUE_URL: email.main.queueUrl },
     );
-    dispatch.addEventSource(
-      new SqsEventSource(campaign.main, {
-        batchSize: 1,
-        reportBatchItemFailures: true,
-      }),
-    );
+    if (!props.standby) {
+      dispatch.addEventSource(
+        new SqsEventSource(campaign.main, {
+          batchSize: 1,
+          reportBatchItemFailures: true,
+        }),
+      );
+    }
     campaign.main.grantConsumeMessages(dispatch);
     email.main.grantSendMessages(dispatch);
 
     const ingest = worker("SesEvents", "src/workers/ses-events.ts", {
       WEBHOOK_QUEUE_URL: webhooks.main.queueUrl,
     });
-    ingest.addEventSource(
-      new SqsEventSource(events.main, {
-        batchSize: 10,
-        reportBatchItemFailures: true,
-      }),
-    );
+    if (!props.standby) {
+      ingest.addEventSource(
+        new SqsEventSource(events.main, {
+          batchSize: 10,
+          reportBatchItemFailures: true,
+        }),
+      );
+    }
     events.main.grantConsumeMessages(ingest);
     webhooks.main.grantSendMessages(ingest);
 
@@ -228,20 +224,24 @@ export class VigieMailStack extends Stack {
       "CustomerWebhooks",
       "src/workers/deliver-webhook.ts",
     );
-    deliver.addEventSource(
-      new SqsEventSource(webhooks.main, {
-        batchSize: 10,
-        reportBatchItemFailures: true,
-      }),
-    );
+    if (!props.standby) {
+      deliver.addEventSource(
+        new SqsEventSource(webhooks.main, {
+          batchSize: 10,
+          reportBatchItemFailures: true,
+        }),
+      );
+    }
     webhooks.main.grantConsumeMessages(deliver);
 
     const importer = worker("ImportContacts", "src/workers/import-contacts.ts", {
       IMPORT_BUCKET: imports.bucketName,
     });
-    importer.addEventSource(
-      new S3EventSource(imports, { events: [EventType.OBJECT_CREATED] }),
-    );
+    if (!props.standby) {
+      importer.addEventSource(
+        new S3EventSource(imports, { events: [EventType.OBJECT_CREATED] }),
+      );
+    }
     imports.grantRead(importer);
 
     const outbox = worker(
@@ -257,6 +257,7 @@ export class VigieMailStack extends Stack {
     email.main.grantSendMessages(outbox);
     webhooks.main.grantSendMessages(outbox);
     new Rule(this, "OutboxSchedule", {
+      enabled: !props.standby,
       schedule: Schedule.rate(Duration.minutes(1)),
       targets: [new LambdaFunction(outbox)],
     });
@@ -269,6 +270,7 @@ export class VigieMailStack extends Stack {
       new PolicyStatement({ actions: ["ses:GetEmailIdentity"], resources: ["*"] }),
     );
     new Rule(this, "DomainHealthSchedule", {
+      enabled: !props.standby,
       schedule: Schedule.rate(Duration.minutes(15)),
       targets: [new LambdaFunction(domainHealth)],
     });
@@ -278,12 +280,10 @@ export class VigieMailStack extends Stack {
       "src/workers/report-stripe-usage.ts",
       {
         STRIPE_METER_EVENT_NAME: "vigiemail_emails_sent",
-        STRIPE_SECRET_KEY: databaseSecret
-          .secretValueFromJson("STRIPE_SECRET_KEY")
-          .unsafeUnwrap(),
       },
     );
     new Rule(this, "StripeUsageSchedule", {
+      enabled: !props.standby,
       schedule: Schedule.rate(Duration.hours(1)),
       targets: [new LambdaFunction(stripeUsage)],
     });
@@ -293,11 +293,13 @@ export class VigieMailStack extends Stack {
       "src/workers/warmup-progress.ts",
     );
     new Rule(this, "WarmupProgressSchedule", {
+      enabled: !props.standby,
       schedule: Schedule.cron({ hour: "1", minute: "15" }),
       targets: [new LambdaFunction(warmup)],
     });
 
     new Rule(this, "SesEventRule", {
+      enabled: !props.standby,
       eventPattern: { source: ["aws.ses"] },
       targets: [new SqsQueue(events.main)],
     });
@@ -337,21 +339,25 @@ export class VigieMailStack extends Stack {
     );
 
     for (const queuePair of [campaign, email, events, webhooks]) {
-      const age = queuePair.main
-        .metricApproximateAgeOfOldestMessage()
-        .createAlarm(this, `${queuePair.main.node.id}AgeAlarm`, {
-          evaluationPeriods: 2,
-          threshold: 300,
-        });
-      age.addAlarmAction(new SnsAction(props.alertTopic));
+      if (monitoringEnabled) {
+        const age = queuePair.main
+          .metricApproximateAgeOfOldestMessage()
+          .createAlarm(this, `${queuePair.main.node.id}AgeAlarm`, {
+            evaluationPeriods: 2,
+            threshold: 300,
+            treatMissingData: TreatMissingData.NOT_BREACHING,
+          });
+        age.addAlarmAction(new SnsAction(props.alertTopic));
 
-      const dlqMessages = queuePair.dlq
-        .metricApproximateNumberOfMessagesVisible()
-        .createAlarm(this, `${queuePair.dlq.node.id}MessagesAlarm`, {
-          evaluationPeriods: 1,
-          threshold: 1,
-        });
-      dlqMessages.addAlarmAction(new SnsAction(props.alertTopic));
+        const dlqMessages = queuePair.dlq
+          .metricApproximateNumberOfMessagesVisible()
+          .createAlarm(this, `${queuePair.dlq.node.id}MessagesAlarm`, {
+            evaluationPeriods: 1,
+            threshold: 1,
+            treatMissingData: TreatMissingData.NOT_BREACHING,
+          });
+        dlqMessages.addAlarmAction(new SnsAction(props.alertTopic));
+      }
 
       new CfnOutput(this, `${queuePair.main.node.id}Url`, {
         value: queuePair.main.queueUrl,
@@ -370,22 +376,24 @@ export class VigieMailStack extends Stack {
       period: Duration.minutes(5),
       statistic: "Average",
     });
-    const bounceAlarm = bounceRate.createAlarm(this, "SesBounceRateAlarm", {
-      evaluationPeriods: 1,
-      threshold: 0.05,
-      treatMissingData: TreatMissingData.IGNORE,
-    });
-    const complaintAlarm = complaintRate.createAlarm(
-      this,
-      "SesComplaintRateAlarm",
-      {
+    if (monitoringEnabled) {
+      const bounceAlarm = bounceRate.createAlarm(this, "SesBounceRateAlarm", {
         evaluationPeriods: 1,
-        threshold: 0.001,
+        threshold: 0.05,
         treatMissingData: TreatMissingData.IGNORE,
-      },
-    );
-    bounceAlarm.addAlarmAction(new SnsAction(props.alertTopic));
-    complaintAlarm.addAlarmAction(new SnsAction(props.alertTopic));
+      });
+      const complaintAlarm = complaintRate.createAlarm(
+        this,
+        "SesComplaintRateAlarm",
+        {
+          evaluationPeriods: 1,
+          threshold: 0.001,
+          treatMissingData: TreatMissingData.IGNORE,
+        },
+      );
+      bounceAlarm.addAlarmAction(new SnsAction(props.alertTopic));
+      complaintAlarm.addAlarmAction(new SnsAction(props.alertTopic));
+    }
 
     const dashboard = new CloudWatchDashboard(this, "OperationsDashboard", {
       dashboardName: `${prefix}-operations`,
@@ -436,6 +444,9 @@ export class VigieMailStack extends Stack {
     });
     new CfnOutput(this, "SchedulerRoleArn", {
       value: schedulerRole.roleArn,
+    });
+    new CfnOutput(this, "StandbyMode", {
+      value: String(props.standby),
     });
     new CfnOutput(this, "VercelRoleArn", { value: vercelRole.roleArn });
   }

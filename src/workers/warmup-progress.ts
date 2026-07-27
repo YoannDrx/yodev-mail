@@ -2,10 +2,12 @@ import { and, desc, eq, gt, sql } from "drizzle-orm";
 import { requireDb } from "@/db/runtime";
 import { auditEvents, usageDays, workspaces } from "@/db/schema";
 import { isPaidPlan, planCatalog } from "@/lib/plans";
+import { loadRuntimeSecrets } from "@/workers/runtime-secrets";
 
 const stageLimits = [200, 500, 1_000, 2_500, 5_000, 10_000] as const;
 
 export async function handler() {
+  await loadRuntimeSecrets();
   const db = requireDb();
   const eligibleBefore = new Date(Date.now() - 23 * 3600_000);
   const candidates = await db
