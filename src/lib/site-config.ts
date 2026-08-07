@@ -7,5 +7,5 @@ export const siteConfig = {
   appUrl: process.env.NEXT_PUBLIC_APP_URL ?? "https://mail.yodev.fr",
   apiUrl: "https://api.mail.yodev.fr",
   linksUrl: process.env.PUBLIC_LINKS_URL ?? "https://links.mail.yodev.fr",
-  supportEmail: "support@mail.yodev.fr",
+  supportEmail: "hello@yodev.fr",
 } as const;
