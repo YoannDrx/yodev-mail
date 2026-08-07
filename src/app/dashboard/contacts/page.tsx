@@ -49,7 +49,7 @@ export default async function Page() {
         <section className="rounded-2xl border bg-white p-5 shadow-sm">
           <h2 className="font-semibold">Listes statiques</h2>
           <form action={createContactListAction} className="mt-4 grid gap-3 sm:grid-cols-[1fr_auto]">
-            <Input name="name" placeholder="Clients VigieAds" required />
+            <Input name="name" placeholder="Clients Yodev" required />
             <Button type="submit" variant="outline"><ListPlus />Créer</Button>
             <Input className="sm:col-span-2" name="description" placeholder="Description facultative" />
           </form>

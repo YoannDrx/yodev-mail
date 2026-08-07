@@ -1,5 +1,5 @@
 {
-  "name": "vigie-mail",
+  "name": "@yodev/mail",
   "version": "0.1.0",
   "private": true,
   "scripts": {
@@ -16,9 +16,9 @@
     "db:migrate": "dotenv -e .env.local -- drizzle-kit migrate",
     "db:studio": "dotenv -e .env.local -- drizzle-kit studio",
     "infra:synth": "cdk synth",
-    "infra:deploy:foundation": "cdk deploy VigieMailFoundation",
-    "infra:deploy:dev": "cdk deploy VigieMailDev",
-    "infra:deploy:prod": "cdk deploy VigieMailProd",
+    "infra:deploy:foundation": "cdk deploy YodevMailFoundation",
+    "infra:deploy:dev": "cdk deploy YodevMailDev",
+    "infra:deploy:prod": "cdk deploy YodevMailProd",
     "infra:deploy:all": "cdk deploy --all",
     "stripe:sync": "dotenv -e .env.local -- tsx scripts/stripe-sync.ts",
     "stripe:verify": "dotenv -e .env.local -- tsx scripts/stripe-verify.ts"

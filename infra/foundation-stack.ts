@@ -5,16 +5,16 @@ import { Topic } from "aws-cdk-lib/aws-sns";
 import { EmailSubscription } from "aws-cdk-lib/aws-sns-subscriptions";
 import type { Construct } from "constructs";
 
-export interface VigieMailFoundationStackProps extends StackProps {
+export interface YodevMailFoundationStackProps extends StackProps {
   alertEmail?: string;
   vercelTeam: string;
 }
 
-export class VigieMailFoundationStack extends Stack {
+export class YodevMailFoundationStack extends Stack {
   readonly alertTopic: Topic;
   readonly vercelOidcProvider: OpenIdConnectProvider;
 
-  constructor(scope: Construct, id: string, props: VigieMailFoundationStackProps) {
+  constructor(scope: Construct, id: string, props: YodevMailFoundationStackProps) {
     super(scope, id, props);
 
     const issuerUrl = `https://oidc.vercel.com/${props.vercelTeam}`;
@@ -26,8 +26,8 @@ export class VigieMailFoundationStack extends Stack {
     });
 
     this.alertTopic = new Topic(this, "OperationsAlerts", {
-      displayName: "VigieMail operations alerts",
-      topicName: "vigiemail-operations-alerts",
+      displayName: "Mail by Yodev operations alerts",
+      topicName: "yodev-mail-operations-alerts",
     });
 
     if (props.alertEmail) {
@@ -40,7 +40,7 @@ export class VigieMailFoundationStack extends Stack {
 
     new CfnBudget(this, "AccountMonthlyBudget", {
       budget: {
-        budgetName: "vigiemail-account-zero-cost",
+        budgetName: "yodev-mail-account-zero-cost",
         budgetType: "COST",
         costTypes: {
           includeCredit: false,
@@ -82,7 +82,9 @@ export class VigieMailFoundationStack extends Stack {
         : undefined,
     });
 
-    Tags.of(this).add("application", "vigiemail");
+    Tags.of(this).add("Application", "yodev-mail");
+    Tags.of(this).add("Product", "mail");
+    Tags.of(this).add("Brand", "Yodev");
     Tags.of(this).add("managed-by", "aws-cdk");
 
     new CfnOutput(this, "OperationsAlertTopicArn", {

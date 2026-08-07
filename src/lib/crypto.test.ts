@@ -4,7 +4,7 @@ import { createApiKey, sha256, signExpiringToken, verifyExpiringToken } from "./
 describe("crypto helpers", () => {
   it("creates scoped API keys without storing the token", () => {
     const key = createApiKey("test", "a-very-long-pepper-value");
-    expect(key.token).toMatch(/^vm_test_/);
+    expect(key.token).toMatch(/^ym_test_/);
     expect(key.secretHash).toHaveLength(64);
     expect(key.secretHash).not.toContain(key.token);
   });
@@ -19,4 +19,3 @@ describe("crypto helpers", () => {
     expect(sha256("hello")).toBe(sha256("hello"));
   });
 });
-

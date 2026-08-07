@@ -43,7 +43,7 @@ import { Queue, QueueEncryption } from "aws-cdk-lib/aws-sqs";
 import { StringParameter } from "aws-cdk-lib/aws-ssm";
 import type { Construct } from "constructs";
 
-export interface VigieMailStackProps extends StackProps {
+export interface YodevMailStackProps extends StackProps {
   alertTopic: ITopic;
   environment: "dev" | "prod";
   vercelOidcProvider: IOpenIdConnectProvider;
@@ -51,13 +51,13 @@ export interface VigieMailStackProps extends StackProps {
   standby: boolean;
 }
 
-export class VigieMailStack extends Stack {
-  constructor(scope: Construct, id: string, props: VigieMailStackProps) {
+export class YodevMailStack extends Stack {
+  constructor(scope: Construct, id: string, props: YodevMailStackProps) {
     super(scope, id, props);
 
     const prod = props.environment === "prod";
     const monitoringEnabled = prod && !props.standby;
-    const prefix = `vigiemail-${props.environment}`;
+    const prefix = `yodev-mail-${props.environment}`;
     const oidcIssuer = `oidc.vercel.com/${props.vercelTeam}`;
     const oidcAudience = `https://vercel.com/${props.vercelTeam}`;
 
@@ -103,7 +103,7 @@ export class VigieMailStack extends Stack {
           allowedMethods: [HttpMethods.PUT],
           allowedOrigins: [
             "http://localhost:3000",
-            "https://app.vigie-mail.fr",
+            "https://mail.yodev.fr",
             "https://*.vercel.app",
           ],
           exposedHeaders: ["etag"],
@@ -139,8 +139,8 @@ export class VigieMailStack extends Stack {
         AWS_REGION_NAME: this.region,
         NODE_OPTIONS: "--enable-source-maps",
         PUBLIC_LINKS_URL: prod
-          ? "https://links.vigie-mail.fr"
-          : "https://preview.vigie-mail.fr",
+          ? "https://links.mail.yodev.fr"
+          : "https://preview-mail.yodev.fr",
         RUNTIME_PARAMETER_PREFIX: `/${prefix}/runtime`,
       },
       memorySize: 512,
@@ -279,7 +279,7 @@ export class VigieMailStack extends Stack {
       "StripeUsage",
       "src/workers/report-stripe-usage.ts",
       {
-        STRIPE_METER_EVENT_NAME: "vigiemail_emails_sent",
+        STRIPE_METER_EVENT_NAME: "yodev_mail_emails_sent",
       },
     );
     new Rule(this, "StripeUsageSchedule", {
@@ -310,9 +310,10 @@ export class VigieMailStack extends Stack {
         {
           StringEquals: {
             [`${oidcIssuer}:aud`]: oidcAudience,
-            [`${oidcIssuer}:sub`]: `owner:${props.vercelTeam}:project:vigie-mail:environment:${
-              prod ? "production" : "preview"
-            }`,
+            [`${oidcIssuer}:sub`]: [
+              `owner:${props.vercelTeam}:project:vigie-mail:environment:${prod ? "production" : "preview"}`,
+              `owner:${props.vercelTeam}:project:yodev-mail:environment:${prod ? "production" : "preview"}`,
+            ],
           },
         },
       ),
@@ -428,8 +429,10 @@ export class VigieMailStack extends Stack {
       }),
     );
 
-    Tags.of(this).add("application", "vigiemail");
-    Tags.of(this).add("environment", props.environment);
+    Tags.of(this).add("Application", "yodev-mail");
+    Tags.of(this).add("Product", "mail");
+    Tags.of(this).add("Brand", "Yodev");
+    Tags.of(this).add("Environment", props.environment);
     Tags.of(this).add("managed-by", "aws-cdk");
 
     new CfnOutput(this, "CampaignQueueArn", {

@@ -47,7 +47,7 @@ export async function provisionSesDomain(input: { workspaceId: string; domain: s
       ses.send(
         new CreateConfigurationSetEventDestinationCommand({
           ConfigurationSetName: name,
-          EventDestinationName: "vigiemail-eventbridge",
+          EventDestinationName: "yodev-mail-eventbridge",
           EventDestination: {
             Enabled: true,
             EventBridgeDestination: { EventBusArn: eventBusArn },

@@ -61,22 +61,22 @@ async function ingest(body: string) {
   const envelope = JSON.parse(body) as SesEnvelope;
   const detail = (envelope.detail ?? envelope) as Record<string, unknown>;
   const mail = (detail.mail ?? {}) as SesMail;
-  const workspaceId = firstTag(mail.tags, "vm_workspace_id");
-  const vigiemailMessageId = firstTag(mail.tags, "vm_message_id");
+  const workspaceId = firstTag(mail.tags, "ym_workspace_id");
+  const yodevMailMessageId = firstTag(mail.tags, "ym_message_id");
   const sesMessageId = mail.messageId;
 
-  if (!workspaceId || (!vigiemailMessageId && !sesMessageId)) return;
+  if (!workspaceId || (!yodevMailMessageId && !sesMessageId)) return;
 
   const db = requireDb();
   let message: typeof messages.$inferSelect | undefined;
-  if (vigiemailMessageId) {
+  if (yodevMailMessageId) {
     [message] = await db
       .select()
       .from(messages)
       .where(
         and(
           eq(messages.workspaceId, workspaceId),
-          eq(messages.id, vigiemailMessageId),
+          eq(messages.id, yodevMailMessageId),
         ),
       )
       .limit(1);

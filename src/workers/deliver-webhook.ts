@@ -67,12 +67,12 @@ async function deliver(deliveryId: string) {
       body,
       headers: {
         "content-type": "application/json",
-        "user-agent": "VigieMail-Webhooks/1.0",
-        "x-vigiemail-signature": hmac(
+        "user-agent": "Yodev-Mail-Webhooks/1.0",
+        "x-yodev-mail-signature": hmac(
           `${timestamp}.${body}`,
           signingSecret,
         ),
-        "x-vigiemail-timestamp": String(timestamp),
+        "x-yodev-mail-timestamp": String(timestamp),
       },
       method: "POST",
       redirect: "error",

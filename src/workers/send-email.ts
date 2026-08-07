@@ -101,7 +101,7 @@ async function sendOne(messageId: string) {
   }
   const configSuffix = claimed.stream === "transactional" ? "txn" : claimed.trackingClicks || claimed.trackingOpens ? "mkt-tracked" : "mkt-private";
   const unsubscribeToken = claimed.stream === "marketing" && claimed.contactId && process.env.UNSUBSCRIBE_SIGNING_SECRET ? signExpiringToken({ workspaceId: claimed.workspaceId, contactId: claimed.contactId }, process.env.UNSUBSCRIBE_SIGNING_SECRET, new Date(Date.now() + 366 * 864e5)) : null;
-  const unsubscribeUrl = unsubscribeToken ? `${process.env.PUBLIC_LINKS_URL ?? "https://links.vigie-mail.fr"}/u/${unsubscribeToken}` : null;
+  const unsubscribeUrl = unsubscribeToken ? `${process.env.PUBLIC_LINKS_URL ?? "https://links.mail.yodev.fr"}/u/${unsubscribeToken}` : null;
   const html = unsubscribeUrl ? `${claimed.html}<p style="margin-top:32px;font-size:12px;color:#71717a">Vous recevez cet email de ${claimed.fromName ?? claimed.fromEmail}. <a href="${unsubscribeUrl}">Se désabonner</a></p>` : claimed.html;
   const plainText = unsubscribeUrl ? `${claimed.plainText}\n\nSe désabonner : ${unsubscribeUrl}` : claimed.plainText;
   const { ses } = await awsClients();
@@ -114,7 +114,7 @@ async function sendOne(messageId: string) {
       Destination: { ToAddresses: [claimed.toName ? `${claimed.toName} <${claimed.toEmail}>` : claimed.toEmail] },
       ReplyToAddresses: claimed.replyTo ? [claimed.replyTo] : undefined,
       Content: { Simple: { Subject: { Data: claimed.subject, Charset: "UTF-8" }, Body: { Html: { Data: html, Charset: "UTF-8" }, Text: { Data: plainText, Charset: "UTF-8" } }, Headers: unsubscribeUrl ? [{ Name: "List-Unsubscribe", Value: `<${unsubscribeUrl}>` }, { Name: "List-Unsubscribe-Post", Value: "List-Unsubscribe=One-Click" }] : undefined } },
-      EmailTags: [{ Name: "vm_message_id", Value: claimed.id }, { Name: "vm_workspace_id", Value: claimed.workspaceId }],
+      EmailTags: [{ Name: "ym_message_id", Value: claimed.id }, { Name: "ym_workspace_id", Value: claimed.workspaceId }],
     }));
   } catch (error) {
     await db.update(messages).set({ status: "queued", lastError: error instanceof Error ? error.message : "SES send failed", updatedAt: new Date() }).where(and(eq(messages.id, claimed.id), eq(messages.workspaceId, claimed.workspaceId), eq(messages.status, "sending")));
@@ -122,7 +122,7 @@ async function sendOne(messageId: string) {
   }
 
   // SES accepted the message. From this point onward, never return it to `queued`:
-  // an event carrying the VigieMail tags will reconcile an ambiguous database write.
+  // an event carrying the Mail by Yodev tags will reconcile an ambiguous database write.
   const acceptedAt = new Date();
   const month = acceptedAt.toISOString().slice(0, 7);
   await db.transaction(async tx => {

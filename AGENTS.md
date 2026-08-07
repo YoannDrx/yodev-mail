@@ -1,6 +1,6 @@
-# VigieMail Guidance
+# Mail by Yodev Guidance
 
-- VigieMail is a French multi-tenant email SaaS built on Next.js 16, Clerk Organizations, Neon/Drizzle, Stripe and Amazon SES v2.
+- Mail by Yodev is a French multi-tenant email SaaS built on Next.js 16, Clerk Organizations, Neon/Drizzle, Stripe and Amazon SES v2.
 - Read `README.md`, `package.json`, the target file and the nearest schema/test before non-trivial edits.
 - Keep Server Components as the default. Client components are limited to interactive controls.
 - Every database access must receive and filter by an explicit `workspaceId`.
