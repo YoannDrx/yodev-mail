@@ -8,6 +8,12 @@ const region = "eu-west-3";
 const account = process.env.CDK_DEFAULT_ACCOUNT;
 const vercelTeam = String(app.node.tryGetContext("vercelTeam") ?? "yoanndrxs-projects");
 const alertEmail = process.env.VIGIEMAIL_ALERT_EMAIL;
+const activeEnvironments = new Set(
+  (process.env.VIGIEMAIL_AWS_ACTIVE_ENVIRONMENTS ?? "")
+    .split(",")
+    .map((value) => value.trim())
+    .filter(Boolean),
+);
 
 const foundation = new VigieMailFoundationStack(app, "VigieMailFoundation", {
   alertEmail,
@@ -27,6 +33,7 @@ for (const environment of ["dev", "prod"] as const) {
       terminationProtection: environment === "prod",
       vercelOidcProvider: foundation.vercelOidcProvider,
       vercelTeam,
+      standby: !activeEnvironments.has(environment),
     },
   );
   stack.addDependency(foundation);

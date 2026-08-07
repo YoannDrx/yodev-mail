@@ -10,5 +10,11 @@ export async function authenticateApiKey(request: Request, scope: string) {
   const db = requireDb();
   const [key] = await db.select().from(apiKeys).where(and(eq(apiKeys.secretHash, hmac(token, env.API_KEY_PEPPER)), isNull(apiKeys.revokedAt))).limit(1);
   if (!key || !key.scopes.includes(scope)) return null;
+  if (key.mode === "test" && !token.startsWith("vm_test_")) return null;
+  if (key.mode === "live" && !token.startsWith("vm_live_")) return null;
+  await db
+    .update(apiKeys)
+    .set({ lastUsedAt: new Date(), updatedAt: new Date() })
+    .where(eq(apiKeys.id, key.id));
   return key;
 }

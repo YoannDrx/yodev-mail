@@ -26,6 +26,19 @@ npm run stripe:sync -- --dry-run
 
 Copy `.env.example` to `.env.local` for local development. Vercel Development, Preview and Production values are managed separately. AWS access from Vercel uses OIDC and an IAM role, not static access keys.
 
+AWS workers are deployed in zero-cost standby mode by default: SQS polling,
+scheduled jobs and billable CloudWatch alarms remain disabled. Activate a tested
+environment explicitly when delivery is needed:
+
+```bash
+VIGIEMAIL_AWS_ACTIVE_ENVIRONMENTS=prod npm run infra:deploy:prod
+```
+
+Runtime worker secrets live in standard-tier SSM `SecureString` parameters under
+`/vigiemail-{environment}/runtime/`; this avoids recurring Secrets Manager storage
+charges. Production activation retains ten CloudWatch alarms, the account-wide
+always-free allowance.
+
 ## Safety contract
 
 - Every data query is scoped by the active Clerk organization workspace.

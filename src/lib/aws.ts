@@ -1,5 +1,6 @@
 import { SQSClient, SendMessageBatchCommand, SendMessageCommand } from "@aws-sdk/client-sqs";
 import { SESv2Client } from "@aws-sdk/client-sesv2";
+import { S3Client } from "@aws-sdk/client-s3";
 import { SchedulerClient } from "@aws-sdk/client-scheduler";
 import { awsCredentialsProvider } from "@vercel/oidc-aws-credentials-provider";
 import { env } from "@/lib/env";
@@ -15,7 +16,12 @@ function credentials() {
 
 export async function awsClients() {
   const shared = { region: env.AWS_REGION, credentials: credentials() };
-  return { ses: new SESv2Client(shared), sqs: new SQSClient(shared), scheduler: new SchedulerClient(shared) };
+  return {
+    s3: new S3Client(shared),
+    ses: new SESv2Client(shared),
+    sqs: new SQSClient(shared),
+    scheduler: new SchedulerClient(shared),
+  };
 }
 
 export async function enqueueMessage(messageId: string) {

@@ -1,10 +1,17 @@
-import { and, eq } from "drizzle-orm";
+import { and, desc, eq } from "drizzle-orm";
 import { NextResponse } from "next/server";
 import { requireDb } from "@/db";
-import { domains, idempotencyKeys, messages, templateVersions } from "@/db/schema";
+import {
+  domains,
+  idempotencyKeys,
+  messages,
+  outboxJobs,
+  templates,
+  templateVersions,
+} from "@/db/schema";
 import { authenticateApiKey } from "@/features/api/authenticate-api-key";
 import { sendEmailSchema } from "@/features/emails/schema";
-import { enqueueMessages } from "@/lib/aws";
+import { evaluateStoredMessage } from "@/features/sending/eligibility";
 import { sha256 } from "@/lib/crypto";
 
 export async function POST(request: Request) {
@@ -20,23 +27,64 @@ export async function POST(request: Request) {
   const [existing] = await db.select().from(idempotencyKeys).where(and(eq(idempotencyKeys.workspaceId, key.workspaceId), eq(idempotencyKeys.key, idempotencyKey))).limit(1);
   if (existing) return existing.requestHash === requestHash ? NextResponse.json({ data: existing.response.ids.map(id => ({ id, status: "queued" })) }, { status: 202 }) : NextResponse.json({ error: { code: "idempotency_conflict", message: "Cette clé a déjà été utilisée avec un corps différent." } }, { status: 409 });
   const domainName = parsed.data.from.email.split("@").at(-1)!;
-  const [domain] = await db.select().from(domains).where(and(eq(domains.workspaceId, key.workspaceId), eq(domains.name, domainName), eq(domains.status, "verified"))).limit(1);
+  const availableDomains = await db.select().from(domains).where(and(eq(domains.workspaceId, key.workspaceId), eq(domains.status, "verified")));
+  const domain = availableDomains.find((candidate) => domainName === candidate.name || domainName.endsWith(`.${candidate.name}`));
   if (!domain) return NextResponse.json({ error: { code: "domain_not_verified", message: "Le domaine expéditeur n'est pas vérifié." } }, { status: 403 });
   let html: string; let plainText: string;
   if (parsed.data.html !== undefined && parsed.data.text !== undefined) { html = parsed.data.html; plainText = parsed.data.text; }
   else {
     const templateId = parsed.data.templateId!;
     const variables = parsed.data.variables ?? {};
-    const [version] = await db.select().from(templateVersions).where(eq(templateVersions.templateId, templateId)).orderBy(templateVersions.version).limit(1);
+    const [version] = await db
+      .select({ html: templateVersions.html, plainText: templateVersions.plainText })
+      .from(templateVersions)
+      .innerJoin(templates, eq(templateVersions.templateId, templates.id))
+      .where(
+        and(
+          eq(templateVersions.templateId, templateId),
+          eq(templateVersions.workspaceId, key.workspaceId),
+          eq(templates.workspaceId, key.workspaceId),
+        ),
+      )
+      .orderBy(desc(templateVersions.version))
+      .limit(1);
     if (!version) return NextResponse.json({ error: { code: "template_not_found" } }, { status: 404 });
     const replace = (value: string) => value.replace(/{{\s*([\w.]+)\s*}}/g, (_, name: string) => String(variables[name] ?? ""));
     html = replace(version.html); plainText = replace(version.plainText);
   }
+  const eligibility = await Promise.all(
+    parsed.data.to.map((recipient, index) =>
+      evaluateStoredMessage(db, {
+        dailyOffset: index,
+        domainId: domain.id,
+        mode: key.mode,
+        stream: "transactional",
+        toEmail: recipient.email,
+        workspaceId: key.workspaceId,
+      }),
+    ),
+  );
+  const firstRejected = eligibility.find((result) => !result.allowed);
+  if (firstRejected && !firstRejected.allowed) {
+    return NextResponse.json(
+      {
+        error: {
+          code: firstRejected.code,
+          message: firstRejected.reason,
+        },
+      },
+      { status: 403 },
+    );
+  }
   const ids = parsed.data.to.map(() => crypto.randomUUID());
   await db.transaction(async tx => {
-    await tx.insert(messages).values(parsed.data.to.map((recipient, index) => ({ id: ids[index], workspaceId: key.workspaceId, domainId: domain.id, stream: "transactional" as const, fromEmail: parsed.data.from.email, fromName: parsed.data.from.name, toEmail: recipient.email, toName: recipient.name, replyTo: parsed.data.replyTo, subject: parsed.data.subject, html, plainText, tags: parsed.data.tags, trackingOpens: parsed.data.tracking.opens, trackingClicks: parsed.data.tracking.clicks, requestHash, contentExpiresAt: new Date(Date.now() + 30 * 864e5) })));
+    await tx.insert(messages).values(parsed.data.to.map((recipient, index) => ({ id: ids[index], workspaceId: key.workspaceId, domainId: domain.id, stream: "transactional" as const, source: "api", sendMode: key.mode, fromEmail: parsed.data.from.email, fromName: parsed.data.from.name, toEmail: recipient.email, toName: recipient.name, replyTo: parsed.data.replyTo, subject: parsed.data.subject, html, plainText, tags: parsed.data.tags, trackingOpens: parsed.data.tracking.opens, trackingClicks: parsed.data.tracking.clicks, requestHash, contentExpiresAt: new Date(Date.now() + 30 * 864e5) })));
+    await tx.insert(outboxJobs).values(ids.map((id) => ({
+      aggregateId: id,
+      kind: "email",
+      workspaceId: key.workspaceId,
+    })));
     await tx.insert(idempotencyKeys).values({ workspaceId: key.workspaceId, key: idempotencyKey, requestHash, response: { ids } });
   });
-  await enqueueMessages(ids);
   return NextResponse.json({ data: ids.map(id => ({ id, status: "queued" })) }, { status: 202 });
 }

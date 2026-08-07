@@ -40,6 +40,9 @@ export async function provisionSesDomain(input: { workspaceId: string; domain: s
   if (!accountId) throw new Error("AWS account ID unavailable");
   const eventBusArn = `arn:aws:events:${env.AWS_REGION}:${accountId}:event-bus/default`;
   for (const name of configurationSets) {
+    const trackingEvents = name.endsWith("-mkt-tracked")
+      ? (["OPEN", "CLICK"] as const)
+      : [];
     await ignoreExisting(() =>
       ses.send(
         new CreateConfigurationSetEventDestinationCommand({
@@ -55,6 +58,7 @@ export async function provisionSesDomain(input: { workspaceId: string; domain: s
               "COMPLAINT",
               "REJECT",
               "DELIVERY_DELAY",
+              ...trackingEvents,
             ],
           },
         }),
