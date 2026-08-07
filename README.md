@@ -34,6 +34,18 @@ environment explicitly when delivery is needed:
 YODEV_MAIL_AWS_ACTIVE_ENVIRONMENTS=prod npm run infra:deploy:prod
 ```
 
+During the VigieMail-to-Yodev coexistence window, reuse the Vercel OIDC provider
+owned by the legacy foundation stack instead of attempting to create a duplicate:
+
+```bash
+export YODEV_MAIL_VERCEL_OIDC_PROVIDER_ARN="arn:aws:iam::<account-id>:oidc-provider/oidc.vercel.com/yoanndrxs-projects"
+npm run infra:deploy:foundation
+```
+
+Keep the legacy foundation stack until the provider has been formally retained
+and imported into `YodevMailFoundation`; deleting its owning stack earlier would
+break Vercel authentication for both generations of workloads.
+
 Runtime worker secrets live in standard-tier SSM `SecureString` parameters under
 `/yodev-mail-{environment}/runtime/`; this avoids recurring Secrets Manager storage
 charges. Production activation retains ten CloudWatch alarms, the account-wide
