@@ -66,6 +66,26 @@ describe("Mail by Yodev AWS infrastructure", () => {
     );
   });
 
+  test("can reuse an OIDC provider owned by the legacy foundation stack", () => {
+    const app = new App();
+    const importedFoundation = new YodevMailFoundationStack(
+      app,
+      "ImportedFoundation",
+      {
+        env: { account: "123456789012", region: "eu-west-3" },
+        existingVercelOidcProviderArn:
+          "arn:aws:iam::123456789012:oidc-provider/oidc.vercel.com/yoanndrxs-projects",
+        vercelTeam: "yoanndrxs-projects",
+      },
+    );
+    const importedTemplate = Template.fromStack(importedFoundation);
+
+    importedTemplate.resourceCountIs(
+      "Custom::AWSCDKOpenIdConnectProvider",
+      0,
+    );
+  });
+
   test("encrypts every queue and keeps standby resources passive", () => {
     const queues = standbyWorkload.findResources("AWS::SQS::Queue");
 

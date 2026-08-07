@@ -8,6 +8,8 @@ const region = "eu-west-3";
 const account = process.env.CDK_DEFAULT_ACCOUNT;
 const vercelTeam = String(app.node.tryGetContext("vercelTeam") ?? "yoanndrxs-projects");
 const alertEmail = process.env.YODEV_MAIL_ALERT_EMAIL;
+const existingVercelOidcProviderArn =
+  process.env.YODEV_MAIL_VERCEL_OIDC_PROVIDER_ARN;
 const activeEnvironments = new Set(
   (process.env.YODEV_MAIL_AWS_ACTIVE_ENVIRONMENTS ?? "")
     .split(",")
@@ -18,6 +20,7 @@ const activeEnvironments = new Set(
 const foundation = new YodevMailFoundationStack(app, "YodevMailFoundation", {
   alertEmail,
   env: { account, region },
+  existingVercelOidcProviderArn,
   terminationProtection: true,
   vercelTeam,
 });

@@ -1,18 +1,22 @@
 import { CfnOutput, Stack, type StackProps, Tags } from "aws-cdk-lib";
 import { CfnBudget } from "aws-cdk-lib/aws-budgets";
-import { OpenIdConnectProvider } from "aws-cdk-lib/aws-iam";
+import {
+  OpenIdConnectProvider,
+  type IOpenIdConnectProvider,
+} from "aws-cdk-lib/aws-iam";
 import { Topic } from "aws-cdk-lib/aws-sns";
 import { EmailSubscription } from "aws-cdk-lib/aws-sns-subscriptions";
 import type { Construct } from "constructs";
 
 export interface YodevMailFoundationStackProps extends StackProps {
   alertEmail?: string;
+  existingVercelOidcProviderArn?: string;
   vercelTeam: string;
 }
 
 export class YodevMailFoundationStack extends Stack {
   readonly alertTopic: Topic;
-  readonly vercelOidcProvider: OpenIdConnectProvider;
+  readonly vercelOidcProvider: IOpenIdConnectProvider;
 
   constructor(scope: Construct, id: string, props: YodevMailFoundationStackProps) {
     super(scope, id, props);
@@ -20,10 +24,16 @@ export class YodevMailFoundationStack extends Stack {
     const issuerUrl = `https://oidc.vercel.com/${props.vercelTeam}`;
     const audience = `https://vercel.com/${props.vercelTeam}`;
 
-    this.vercelOidcProvider = new OpenIdConnectProvider(this, "VercelOidc", {
-      url: issuerUrl,
-      clientIds: [audience],
-    });
+    this.vercelOidcProvider = props.existingVercelOidcProviderArn
+      ? OpenIdConnectProvider.fromOpenIdConnectProviderArn(
+          this,
+          "VercelOidc",
+          props.existingVercelOidcProviderArn,
+        )
+      : new OpenIdConnectProvider(this, "VercelOidc", {
+          url: issuerUrl,
+          clientIds: [audience],
+        });
 
     this.alertTopic = new Topic(this, "OperationsAlerts", {
       displayName: "Mail by Yodev operations alerts",
