@@ -7,7 +7,7 @@ import { isClerkConfigured } from "@/lib/env";
 
 export async function currentWorkspace(options:{admin?:boolean}={}){
   if(!isClerkConfigured())throw new Error("Clerk must be configured for database mutations");
-  const session=await auth();if(!session.userId||!session.orgId)throw new Error("Select a VigieMail organization");
+  const session=await auth();if(!session.userId||!session.orgId)throw new Error("Sélectionnez une organisation Mail by Yodev");
   if(options.admin&&!session.has({role:"org:admin"}))throw new Error("Workspace administrator role required");
   const db = requireDb();
   let [workspace]=await db.select().from(workspaces).where(and(eq(workspaces.clerkOrganizationId,session.orgId), isNull(workspaces.deletedAt))).limit(1);

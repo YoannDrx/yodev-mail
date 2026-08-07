@@ -10,7 +10,7 @@ function credentials() {
   return awsCredentialsProvider({
     roleArn: env.AWS_ROLE_ARN,
     audience: env.AWS_OIDC_AUDIENCE,
-    roleSessionName: "vigiemail-vercel",
+    roleSessionName: "yodev-mail-vercel",
   });
 }
 

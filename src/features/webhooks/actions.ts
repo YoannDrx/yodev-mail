@@ -25,7 +25,7 @@ export async function createWebhookFormAction(_: WebhookFormState, formData: For
     const data = schema.parse({ eventTypes: formData.getAll("eventTypes"), url: formData.get("url") });
     const url = await validateWebhookUrl(data.url);
     const { workspace, userId } = await currentWorkspace({ admin: true });
-    const secret = `whsec_vm_${randomBytes(24).toString("base64url")}`;
+    const secret = `whsec_ym_${randomBytes(24).toString("base64url")}`;
     const [endpoint] = await requireDb().insert(webhookEndpoints).values({
       eventTypes: data.eventTypes,
       signingSecretEncrypted: encryptSecret(secret, env.WEBHOOK_SIGNING_SECRET),

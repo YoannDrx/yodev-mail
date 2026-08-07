@@ -22,7 +22,7 @@ export function constantTimeEqual(left: string, right: string) {
 }
 
 export function createApiKey(mode: "test" | "live", pepper: string) {
-  const prefix = mode === "test" ? "vm_test_" : "vm_live_";
+  const prefix = mode === "test" ? "ym_test_" : "ym_live_";
   const secret = randomBytes(30).toString("base64url");
   const token = `${prefix}${secret}`;
   return {

@@ -26,7 +26,7 @@ const schema = z.object({
   AWS_CAMPAIGN_QUEUE_ARN: z.string().optional(),
   AWS_IMPORT_BUCKET: z.string().optional(),
   AWS_SCHEDULER_ROLE_ARN: z.string().optional(),
-  AWS_SCHEDULER_GROUP: z.string().default("vigiemail"),
+  AWS_SCHEDULER_GROUP: z.string().default("yodev-mail"),
   STRIPE_SECRET_KEY: z.string().optional(),
   STRIPE_WEBHOOK_SECRET: z.string().optional(),
   STRIPE_PRICE_STARTER: z.string().optional(),
@@ -35,7 +35,7 @@ const schema = z.object({
   STRIPE_OVERAGE_STARTER: z.string().optional(),
   STRIPE_OVERAGE_PRO: z.string().optional(),
   STRIPE_OVERAGE_AGENCY: z.string().optional(),
-  STRIPE_METER_EVENT_NAME: z.string().default("vigiemail_emails_sent"),
+  STRIPE_METER_EVENT_NAME: z.string().default("yodev_mail_emails_sent"),
 });
 
 export const env = schema.parse(process.env);

@@ -1,6 +1,6 @@
-# VigieMail
+# Mail by Yodev
 
-VigieMail is a French, privacy-first email platform for small businesses and agencies. It combines marketing campaigns and a transactional API with Amazon SES tenant isolation, consent evidence, progressive quotas and transparent billing.
+Mail by Yodev is a French, privacy-first email platform for small businesses and agencies. It combines marketing campaigns and a transactional API with Amazon SES tenant isolation, consent evidence, progressive quotas and transparent billing.
 
 ## Stack
 
@@ -31,11 +31,11 @@ scheduled jobs and billable CloudWatch alarms remain disabled. Activate a tested
 environment explicitly when delivery is needed:
 
 ```bash
-VIGIEMAIL_AWS_ACTIVE_ENVIRONMENTS=prod npm run infra:deploy:prod
+YODEV_MAIL_AWS_ACTIVE_ENVIRONMENTS=prod npm run infra:deploy:prod
 ```
 
 Runtime worker secrets live in standard-tier SSM `SecureString` parameters under
-`/vigiemail-{environment}/runtime/`; this avoids recurring Secrets Manager storage
+`/yodev-mail-{environment}/runtime/`; this avoids recurring Secrets Manager storage
 charges. Production activation retains ten CloudWatch alarms, the account-wide
 always-free allowance.
 

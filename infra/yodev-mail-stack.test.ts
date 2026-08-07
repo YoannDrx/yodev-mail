@@ -1,8 +1,8 @@
 import { App } from "aws-cdk-lib";
 import { Match, Template } from "aws-cdk-lib/assertions";
 import { beforeAll, describe, expect, test } from "vitest";
-import { VigieMailFoundationStack } from "./foundation-stack";
-import { VigieMailStack } from "./vigiemail-stack";
+import { YodevMailFoundationStack } from "./foundation-stack";
+import { YodevMailStack } from "./yodev-mail-stack";
 
 let foundation: Template;
 let standbyWorkload: Template;
@@ -11,12 +11,12 @@ let activeProductionWorkload: Template;
 beforeAll(() => {
   const app = new App();
   const env = { account: "123456789012", region: "eu-west-3" };
-  const foundationStack = new VigieMailFoundationStack(app, "Foundation", {
+  const foundationStack = new YodevMailFoundationStack(app, "Foundation", {
     alertEmail: "alerts@example.com",
     env,
     vercelTeam: "yoanndrxs-projects",
   });
-  const workloadStack = new VigieMailStack(app, "Workload", {
+  const workloadStack = new YodevMailStack(app, "Workload", {
     alertTopic: foundationStack.alertTopic,
     environment: "dev",
     env,
@@ -24,7 +24,7 @@ beforeAll(() => {
     vercelOidcProvider: foundationStack.vercelOidcProvider,
     vercelTeam: "yoanndrxs-projects",
   });
-  const productionStack = new VigieMailStack(app, "Production", {
+  const productionStack = new YodevMailStack(app, "Production", {
     alertTopic: foundationStack.alertTopic,
     environment: "prod",
     env,
@@ -35,9 +35,9 @@ beforeAll(() => {
   foundation = Template.fromStack(foundationStack);
   standbyWorkload = Template.fromStack(workloadStack);
   activeProductionWorkload = Template.fromStack(productionStack);
-});
+}, 30_000);
 
-describe("VigieMail AWS infrastructure", () => {
+describe("Mail by Yodev AWS infrastructure", () => {
   test("uses the verified team-scoped Vercel OIDC claims", () => {
     foundation.hasResourceProperties("Custom::AWSCDKOpenIdConnectProvider", {
       ClientIDList: ["https://vercel.com/yoanndrxs-projects"],
@@ -53,8 +53,10 @@ describe("VigieMail AWS infrastructure", () => {
                 StringEquals: {
                   "oidc.vercel.com/yoanndrxs-projects:aud":
                     "https://vercel.com/yoanndrxs-projects",
-                  "oidc.vercel.com/yoanndrxs-projects:sub":
+                  "oidc.vercel.com/yoanndrxs-projects:sub": [
                     "owner:yoanndrxs-projects:project:vigie-mail:environment:preview",
+                    "owner:yoanndrxs-projects:project:yodev-mail:environment:preview",
+                  ],
                 },
               },
             }),
@@ -109,7 +111,7 @@ describe("VigieMail AWS infrastructure", () => {
     foundation.resourceCountIs("AWS::SNS::Topic", 1);
     foundation.hasResourceProperties("AWS::Budgets::Budget", {
       Budget: Match.objectLike({
-        BudgetName: "vigiemail-account-zero-cost",
+        BudgetName: "yodev-mail-account-zero-cost",
         BudgetLimit: { Amount: 1, Unit: "USD" },
         CostTypes: Match.objectLike({
           IncludeCredit: false,

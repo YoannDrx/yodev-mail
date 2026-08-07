@@ -33,9 +33,9 @@ describe("SES event reconciliation", () => {
   });
 
   test("extracts only a non-empty first technical tag", () => {
-    expect(firstTag({ vm_message_id: ["message-1"] }, "vm_message_id")).toBe(
+    expect(firstTag({ ym_message_id: ["message-1"] }, "ym_message_id")).toBe(
       "message-1",
     );
-    expect(firstTag({ vm_message_id: [] }, "vm_message_id")).toBeUndefined();
+    expect(firstTag({ ym_message_id: [] }, "ym_message_id")).toBeUndefined();
   });
 });

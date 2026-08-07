@@ -4,21 +4,21 @@ import { mapRuntimeParameters } from "@/workers/runtime-secrets";
 describe("worker runtime parameters", () => {
   test("maps every encrypted parameter without exposing names in logs", () => {
     expect(
-      mapRuntimeParameters("/vigiemail-dev/runtime", [
+      mapRuntimeParameters("/yodev-mail-dev/runtime", [
         {
-          Name: "/vigiemail-dev/runtime/database-url",
+          Name: "/yodev-mail-dev/runtime/database-url",
           Value: "postgres://example",
         },
         {
-          Name: "/vigiemail-dev/runtime/stripe-secret-key",
+          Name: "/yodev-mail-dev/runtime/stripe-secret-key",
           Value: "sk_test_example",
         },
         {
-          Name: "/vigiemail-dev/runtime/unsubscribe-signing-secret",
+          Name: "/yodev-mail-dev/runtime/unsubscribe-signing-secret",
           Value: "unsubscribe-secret",
         },
         {
-          Name: "/vigiemail-dev/runtime/webhook-signing-secret",
+          Name: "/yodev-mail-dev/runtime/webhook-signing-secret",
           Value: "webhook-secret",
         },
       ]),
@@ -32,9 +32,9 @@ describe("worker runtime parameters", () => {
 
   test("fails closed when a required parameter is missing", () => {
     expect(() =>
-      mapRuntimeParameters("/vigiemail-prod/runtime", []),
+      mapRuntimeParameters("/yodev-mail-prod/runtime", []),
     ).toThrow(
-      "Required runtime parameter is missing: /vigiemail-prod/runtime/database-url",
+      "Required runtime parameter is missing: /yodev-mail-prod/runtime/database-url",
     );
   });
 });

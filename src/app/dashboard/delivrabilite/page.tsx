@@ -29,7 +29,7 @@ export default async function Page() {
     <DashboardPage description="Authentification, quotas SES et réputation calculée sur les 30 derniers jours." title="Délivrabilité">
       <div className="grid gap-5 md:grid-cols-2 xl:grid-cols-4">
         <Card healthy={verified === domainRows.length && domainRows.length > 0} icon={verified === domainRows.length && domainRows.length ? CheckCircle2 : ShieldAlert} text={`${verified} / ${domainRows.length} domaines vérifiés`} title="Authentification" />
-        <Card healthy={bounce < 2 && complaint < 0.1} icon={Activity} text={`${reputation.accepted.toLocaleString("fr-FR")} acceptés · ${reputation.delivered.toLocaleString("fr-FR")} délivrés`} title="Réputation VigieMail" />
+        <Card healthy={bounce < 2 && complaint < 0.1} icon={Activity} text={`${reputation.accepted.toLocaleString("fr-FR")} acceptés · ${reputation.delivered.toLocaleString("fr-FR")} délivrés`} title="Réputation Mail by Yodev" />
         <Card healthy={context.workspace.status === "approved"} icon={ShieldAlert} text={`Étape ${context.workspace.warmupStage} · ${context.workspace.dailyLimit.toLocaleString("fr-FR")} emails/jour`} title="Quota workspace" />
         <Card healthy={Boolean(ses?.sendingEnabled && ses.productionAccess && ses.enforcementStatus === "HEALTHY")} icon={Gauge} text={ses ? `${number.format(ses.sentLast24Hours)} / ${number.format(ses.max24HourSend)} sur 24 h` : "Quota SES indisponible"} title="Compte Amazon SES" />
       </div>

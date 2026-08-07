@@ -1,4 +1,5 @@
 import Link from "next/link";
+import type { Metadata } from "next";
 import { ArrowRight, Check, Code2, Gauge, Radar, ShieldCheck, Sparkles } from "lucide-react";
 import { MarketingHeader } from "@/components/marketing-header";
 import { MarketingFooter } from "@/components/marketing-footer";
@@ -12,12 +13,16 @@ const benefits = [
   { icon: Code2, title: "API simple, infrastructure solide", text: "Idempotence, webhooks signés et files durables sans avoir à opérer AWS vous-même." },
 ];
 
+export const metadata: Metadata = {
+  alternates: { canonical: "https://mail.yodev.fr" },
+};
+
 export default function Home() {
   return <><MarketingHeader/><main>
     <section className="relative overflow-hidden px-5 pb-24 pt-20 sm:pt-28"><div className="mx-auto max-w-6xl text-center">
       <Badge variant="secondary" className="mb-7 border border-primary/15 bg-primary/5 text-primary"><Sparkles className="mr-1 size-3"/> Bêta privée · Made in France</Badge>
       <h1 className="mx-auto max-w-4xl text-balance text-5xl font-semibold tracking-[-.045em] sm:text-7xl">Tous vos emails.<br/><span className="bg-gradient-to-r from-violet-600 to-rose-500 bg-clip-text text-transparent">Zéro angle mort.</span></h1>
-      <p className="mx-auto mt-7 max-w-2xl text-balance text-lg leading-8 text-muted-foreground sm:text-xl">Envoyez vos campagnes et emails transactionnels avec Amazon SES, sans subir sa complexité. VigieMail protège votre réputation, projet par projet.</p>
+      <p className="mx-auto mt-7 max-w-2xl text-balance text-lg leading-8 text-muted-foreground sm:text-xl">Envoyez vos campagnes et emails transactionnels avec Amazon SES, sans subir sa complexité. Mail by Yodev protège votre réputation, projet par projet.</p>
       <div className="mt-9 flex flex-col justify-center gap-3 sm:flex-row"><Button asChild size="lg" className="h-12 px-6"><Link href="/inscription">Rejoindre la bêta <ArrowRight/></Link></Button><Button asChild size="lg" variant="outline" className="h-12 bg-white"><Link href="/docs">Explorer l'API</Link></Button></div>
       <div className="mx-auto mt-14 max-w-5xl rounded-[2rem] border bg-[#17151f] p-3 text-left shadow-2xl shadow-violet-900/15"><div className="rounded-3xl border border-white/10 bg-[#211e2c] p-6 text-white sm:p-8"><div className="flex items-center justify-between"><div><p className="text-sm text-white/55">Vue d'ensemble</p><p className="mt-1 text-xl font-medium">Bonjour Yoann, tout est sous contrôle.</p></div><span className="hidden rounded-full bg-emerald-400/10 px-3 py-1 text-xs text-emerald-300 sm:block">● Systèmes opérationnels</span></div><div className="mt-8 grid gap-3 sm:grid-cols-4">{[["Emails ce mois","48 294"],["Délivrés","99,42 %"],["Bounces","0,71 %"],["Plaintes","0,03 %"]].map(([a,b])=><div key={a} className="rounded-2xl border border-white/8 bg-white/[.04] p-4"><p className="text-xs text-white/45">{a}</p><p className="mt-2 text-2xl font-medium">{b}</p></div>)}</div></div></div>
     </div></section>
