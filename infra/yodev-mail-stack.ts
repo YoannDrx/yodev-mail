@@ -310,10 +310,8 @@ export class YodevMailStack extends Stack {
         {
           StringEquals: {
             [`${oidcIssuer}:aud`]: oidcAudience,
-            [`${oidcIssuer}:sub`]: [
-              `owner:${props.vercelTeam}:project:vigie-mail:environment:${prod ? "production" : "preview"}`,
+            [`${oidcIssuer}:sub`]:
               `owner:${props.vercelTeam}:project:yodev-mail:environment:${prod ? "production" : "preview"}`,
-            ],
           },
         },
       ),

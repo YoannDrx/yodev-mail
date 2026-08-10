@@ -53,10 +53,8 @@ describe("Mail by Yodev AWS infrastructure", () => {
                 StringEquals: {
                   "oidc.vercel.com/yoanndrxs-projects:aud":
                     "https://vercel.com/yoanndrxs-projects",
-                  "oidc.vercel.com/yoanndrxs-projects:sub": [
-                    "owner:yoanndrxs-projects:project:vigie-mail:environment:preview",
+                  "oidc.vercel.com/yoanndrxs-projects:sub":
                     "owner:yoanndrxs-projects:project:yodev-mail:environment:preview",
-                  ],
                 },
               },
             }),
