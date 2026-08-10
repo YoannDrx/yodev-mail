@@ -2,8 +2,8 @@ const APP_HOST = "mail.yodev.fr";
 const API_HOST = "api.mail.yodev.fr";
 const LINKS_HOST = "links.mail.yodev.fr";
 
-const apiPaths = ["/v1", "/openapi.json", "/api/health"];
-const linkPaths = ["/u", "/api/health"];
+const apiPaths = ["/v1", "/openapi.json", "/health", "/api/health"];
+const linkPaths = ["/u", "/health", "/api/health"];
 
 function isWithin(pathname: string, roots: string[]) {
   return roots.some((root) => pathname === root || pathname.startsWith(`${root}/`));
@@ -27,7 +27,7 @@ export function canonicalUrlForHost(hostHeader: string | null, url: URL) {
     return canonical;
   }
 
-  if (hostname === APP_HOST && isWithin(url.pathname, ["/v1", "/openapi.json"])) {
+  if (hostname === APP_HOST && isWithin(url.pathname, ["/v1", "/openapi.json", "/health"])) {
     canonical.hostname = API_HOST;
     return canonical;
   }
@@ -38,7 +38,7 @@ export function canonicalUrlForHost(hostHeader: string | null, url: URL) {
   }
 
   if (hostname === "vigie-mail.vercel.app" || hostname === "yodev-mail.vercel.app") {
-    canonical.hostname = isWithin(url.pathname, ["/v1", "/openapi.json"])
+    canonical.hostname = isWithin(url.pathname, ["/v1", "/openapi.json", "/health"])
       ? API_HOST
       : isWithin(url.pathname, ["/u"])
         ? LINKS_HOST

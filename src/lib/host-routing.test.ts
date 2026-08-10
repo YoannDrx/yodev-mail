@@ -19,6 +19,15 @@ describe("canonical host routing", () => {
       .toBe("https://mail.yodev.fr/");
   });
 
+  test("serves the conventional health endpoint on both service hosts", () => {
+    expect(canonicalUrlForHost("api.mail.yodev.fr", new URL("https://api.mail.yodev.fr/health")))
+      .toBeNull();
+    expect(canonicalUrlForHost("links.mail.yodev.fr", new URL("https://links.mail.yodev.fr/health")))
+      .toBeNull();
+    expect(canonicalUrlForHost("mail.yodev.fr", new URL("https://mail.yodev.fr/health"))?.toString())
+      .toBe("https://api.mail.yodev.fr/health");
+  });
+
   test("leaves localhost and previews untouched", () => {
     expect(canonicalUrlForHost("localhost:3000", new URL("http://localhost:3000/v1/emails"))).toBeNull();
   });
