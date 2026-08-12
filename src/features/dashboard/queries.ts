@@ -1,11 +1,11 @@
 import { and, desc, eq, gte, sql } from "drizzle-orm";
 import { requireDb } from "@/db";
 import {
-  campaigns,
   emailEvents,
   messageAttempts,
   messages,
   subscriptions,
+  transactionalProfiles,
   usageDays,
   usageMonths,
   workspaces,
@@ -17,7 +17,7 @@ export async function getDashboardData(workspaceId: string) {
   const now = new Date();
   const month = now.toISOString().slice(0, 7);
   const since = utcDay(new Date(now.getTime() - 29 * 864e5));
-  const [workspace, usage, today, activity, recentCampaigns, statusCounts, subscription] =
+  const [workspace, usage, today, activity, recentMessages, statusCounts, subscription] =
     await Promise.all([
       db
         .select()
@@ -57,12 +57,10 @@ export async function getDashboardData(workspaceId: string) {
           ),
         )
         .orderBy(usageDays.day),
-      db
-        .select()
-        .from(campaigns)
-        .where(eq(campaigns.workspaceId, workspaceId))
-        .orderBy(desc(campaigns.createdAt))
-        .limit(5),
+      db.select({ id: messages.id, status: messages.status, category: transactionalProfiles.key, createdAt: messages.createdAt })
+        .from(messages)
+        .innerJoin(transactionalProfiles, and(eq(transactionalProfiles.id, messages.transactionalProfileId), eq(transactionalProfiles.workspaceId, messages.workspaceId)))
+        .where(eq(messages.workspaceId, workspaceId)).orderBy(desc(messages.createdAt)).limit(5),
       db
         .select({ count: sql<number>`count(*)::int`, status: messages.status })
         .from(messages)
@@ -88,7 +86,7 @@ export async function getDashboardData(workspaceId: string) {
   return {
     activity,
     currentMonthAccepted: usage?.acceptedEmails ?? 0,
-    recentCampaigns,
+    recentMessages,
     statusCounts: Object.fromEntries(statusCounts.map((row) => [row.status, row.count])),
     subscription,
     todayAccepted: today?.acceptedEmails ?? 0,
@@ -101,19 +99,19 @@ export async function getRecentMessages(workspaceId: string, limit = 100) {
   return requireDb()
     .select({
       acceptedAt: messages.acceptedAt,
+      category: transactionalProfiles.key,
       createdAt: messages.createdAt,
       deliveredAt: messages.deliveredAt,
       fromEmail: messages.fromEmail,
       id: messages.id,
       lastError: messages.lastError,
       lastEventAt: messages.lastEventAt,
-      source: messages.source,
       status: messages.status,
-      stream: messages.stream,
       subject: messages.subject,
       toEmail: messages.toEmail,
     })
     .from(messages)
+    .innerJoin(transactionalProfiles, and(eq(transactionalProfiles.id, messages.transactionalProfileId), eq(transactionalProfiles.workspaceId, messages.workspaceId)))
     .where(eq(messages.workspaceId, workspaceId))
     .orderBy(desc(messages.createdAt))
     .limit(Math.min(limit, 250));

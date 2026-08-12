@@ -22,6 +22,34 @@
       "when": 1784641966582,
       "tag": "0002_wonderful_zzzax",
       "breakpoints": true
+    },
+    {
+      "idx": 3,
+      "version": "7",
+      "when": 1786534690698,
+      "tag": "0003_certain_the_fury",
+      "breakpoints": true
+    },
+    {
+      "idx": 4,
+      "version": "7",
+      "when": 1786536067179,
+      "tag": "0004_dusty_senator_kelly",
+      "breakpoints": true
+    },
+    {
+      "idx": 5,
+      "version": "7",
+      "when": 1786536235135,
+      "tag": "0005_wealthy_human_fly",
+      "breakpoints": true
+    },
+    {
+      "idx": 6,
+      "version": "7",
+      "when": 1786536772230,
+      "tag": "0006_lean_mystique",
+      "breakpoints": true
     }
   ]
 }

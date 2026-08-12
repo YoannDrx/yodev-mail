@@ -6,7 +6,7 @@ export default function robots(): MetadataRoute.Robots {
       {
         userAgent: "*",
         allow: ["/", "/fonctionnalites", "/tarifs", "/delivrabilite", "/conformite", "/docs"],
-        disallow: ["/admin", "/dashboard", "/onboarding", "/api", "/v1", "/u"],
+        disallow: ["/admin", "/dashboard", "/onboarding", "/api", "/v1"],
       },
     ],
     sitemap: "https://mail.yodev.fr/sitemap.xml",

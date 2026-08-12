@@ -1,9 +1,178 @@
 "use server";
+
 import { and, eq } from "drizzle-orm";
 import { revalidatePath } from "next/cache";
 import { z } from "zod";
 import { requireDb } from "@/db";
-import { adminReviews, auditEvents, subscriptions, workspaces } from "@/db/schema";
+import {
+  adminReviews,
+  auditEvents,
+  domainProviderBindings,
+  domains,
+  subscriptions,
+  templates,
+  transactionalProfiles,
+  workspaceProviderAccounts,
+  workspaces,
+} from "@/db/schema";
+import { enqueueProviderProvisioning } from "@/lib/aws";
 import { requireAdmin } from "@/lib/page-auth";
-const idSchema=z.string().uuid();
-export async function reviewWorkspaceAction(workspaceId:string,decision:"approved"|"rejected"|"limited"){const id=idSchema.parse(workspaceId);const {userId}=await requireAdmin();const db=requireDb();await db.transaction(async(tx)=>{if(decision==="approved"){await tx.update(workspaces).set({approvedAt:new Date(),dailyLimit:500,pauseReason:null,pausedAt:null,status:"approved",warmupAdvancedAt:new Date(),warmupStage:1,updatedAt:new Date()}).where(eq(workspaces.id,id));await tx.update(subscriptions).set({status:"trialing",graceEndsAt:new Date(Date.now()+14*864e5),updatedAt:new Date()}).where(eq(subscriptions.workspaceId,id))}else if(decision==="rejected"){await tx.update(workspaces).set({pauseReason:"admin_rejected",status:"rejected",updatedAt:new Date()}).where(eq(workspaces.id,id))}else{await tx.update(workspaces).set({dailyLimit:200,pauseReason:"admin_limited",pausedAt:new Date(),status:"paused",updatedAt:new Date()}).where(eq(workspaces.id,id))}const [review]=await tx.select().from(adminReviews).where(eq(adminReviews.workspaceId,id)).orderBy(adminReviews.createdAt).limit(1);if(review)await tx.update(adminReviews).set({decision:decision==="limited"?"pending":decision,reviewedAt:new Date(),reviewedBy:userId,updatedAt:new Date()}).where(and(eq(adminReviews.id,review.id),eq(adminReviews.workspaceId,id)));await tx.insert(auditEvents).values({action:`workspace.${decision}`,actorUserId:userId,entityId:id,entityType:"workspace",workspaceId:id})});revalidatePath("/admin")}
+import { provisionBinding } from "@/workers/provider-provisioning";
+
+const idSchema = z.string().uuid();
+
+export async function reviewWorkspaceAction(workspaceId: string, decision: "approved" | "rejected" | "limited") {
+  const id = idSchema.parse(workspaceId);
+  const { userId } = await requireAdmin();
+  const db = requireDb();
+  await db.transaction(async (tx) => {
+    if (decision === "approved") {
+      await tx.update(workspaces).set({ approvedAt: new Date(), dailyLimit: 50, pauseReason: null, pausedAt: null, status: "approved", warmupAdvancedAt: new Date(), warmupStage: 1, updatedAt: new Date() }).where(eq(workspaces.id, id));
+      await tx.update(subscriptions).set({ plan: "beta", status: "inactive", graceEndsAt: null, updatedAt: new Date() }).where(eq(subscriptions.workspaceId, id));
+    } else if (decision === "rejected") {
+      await tx.update(workspaces).set({ pauseReason: "admin_rejected", status: "rejected", updatedAt: new Date() }).where(eq(workspaces.id, id));
+    } else {
+      await tx.update(workspaces).set({ dailyLimit: 50, pauseReason: "admin_limited", pausedAt: new Date(), status: "paused", updatedAt: new Date() }).where(eq(workspaces.id, id));
+    }
+    const [review] = await tx.select().from(adminReviews).where(eq(adminReviews.workspaceId, id)).orderBy(adminReviews.createdAt).limit(1);
+    if (review) await tx.update(adminReviews).set({ decision: decision === "limited" ? "pending" : decision, reviewedAt: new Date(), reviewedBy: userId, updatedAt: new Date() }).where(and(eq(adminReviews.id, review.id), eq(adminReviews.workspaceId, id)));
+    await tx.insert(auditEvents).values({ action: `workspace.${decision}`, actorUserId: userId, entityId: id, entityType: "workspace", workspaceId: id, metadata: { initialDailyLimit: 50 } });
+  });
+  revalidatePath("/admin");
+}
+
+export async function setWorkspaceContentPolicyAction(workspaceId: string, policy: "template_only" | "hybrid") {
+  const id = idSchema.parse(workspaceId);
+  const { userId } = await requireAdmin();
+  await requireDb().transaction(async (tx) => {
+    await tx.update(workspaces).set({ contentPolicy: policy, updatedAt: new Date() }).where(eq(workspaces.id, id));
+    await tx.insert(auditEvents).values({ workspaceId: id, actorUserId: userId, action: "workspace.content_policy_changed", entityType: "workspace", entityId: id, metadata: { policy } });
+  });
+  revalidatePath("/admin");
+}
+
+export async function reviewTransactionalProfileAction(profileId: string, decision: "approved" | "rejected") {
+  const id = idSchema.parse(profileId);
+  const { userId } = await requireAdmin();
+  const db = requireDb();
+  const [profile] = await db.select().from(transactionalProfiles).where(eq(transactionalProfiles.id, id)).limit(1);
+  if (!profile) throw new Error("Profile not found");
+  await db.transaction(async (tx) => {
+    await tx.update(transactionalProfiles).set({ status: decision, approvedAt: decision === "approved" ? new Date() : null, approvedBy: decision === "approved" ? userId : null, updatedAt: new Date() }).where(and(eq(transactionalProfiles.id, id), eq(transactionalProfiles.workspaceId, profile.workspaceId)));
+    await tx.insert(auditEvents).values({ workspaceId: profile.workspaceId, actorUserId: userId, action: `transactional_profile.${decision}`, entityType: "transactional_profile", entityId: id });
+  });
+  revalidatePath("/admin");
+}
+
+export async function reviewTemplateAction(templateId: string, decision: "approved" | "rejected") {
+  const id = idSchema.parse(templateId);
+  const { userId } = await requireAdmin();
+  const db = requireDb();
+  const [template] = await db.select().from(templates).where(eq(templates.id, id)).limit(1);
+  if (!template) throw new Error("Template not found");
+  await db.transaction(async (tx) => {
+    await tx.update(templates).set({ reviewStatus: decision, approvedAt: decision === "approved" ? new Date() : null, approvedBy: decision === "approved" ? userId : null, updatedAt: new Date() }).where(and(eq(templates.id, id), eq(templates.workspaceId, template.workspaceId)));
+    await tx.insert(auditEvents).values({ workspaceId: template.workspaceId, actorUserId: userId, action: `template.${decision}`, entityType: "template", entityId: id });
+  });
+  revalidatePath("/admin");
+}
+
+export async function provisionDomainAction(domainId: string, provider: "postmark" | "ses") {
+  const id = idSchema.parse(domainId);
+  const { userId } = await requireAdmin();
+  const db = requireDb();
+  const [domain] = await db.select().from(domains).where(eq(domains.id, id)).limit(1);
+  if (!domain) throw new Error("Domain not found");
+  const [workspace] = await db.select().from(workspaces).where(eq(workspaces.id, domain.workspaceId)).limit(1);
+  if (!workspace || workspace.status !== "approved") throw new Error("Workspace must be approved first");
+  if (provider === "ses" && process.env.SES_ENABLED !== "true") throw new Error("SES is disabled until AWS production approval");
+  if (provider === "postmark" && process.env.POSTMARK_ENABLED !== "true") throw new Error("Postmark is not enabled");
+  const [binding] = await db.insert(domainProviderBindings).values({ workspaceId: workspace.id, domainId: domain.id, provider, status: "pending" }).onConflictDoUpdate({
+    target: [domainProviderBindings.domainId, domainProviderBindings.provider],
+    set: { status: "pending", lastCheckError: null, updatedAt: new Date() },
+  }).returning();
+  await db.insert(auditEvents).values({ workspaceId: workspace.id, actorUserId: userId, action: "domain.provider_provisioning_requested", entityType: "domain", entityId: domain.id, metadata: { provider } });
+  const queued = await enqueueProviderProvisioning(binding.id);
+  if (queued.local) await provisionBinding(binding.id);
+  revalidatePath("/admin");
+  revalidatePath("/dashboard/domaines");
+}
+
+export async function activateDomainBindingAction(bindingId: string) {
+  const id = idSchema.parse(bindingId);
+  const { userId } = await requireAdmin();
+  const db = requireDb();
+  const [binding] = await db.select().from(domainProviderBindings).where(eq(domainProviderBindings.id, id)).limit(1);
+  if (!binding || binding.status !== "verified") throw new Error("Binding must be verified first");
+  await db.transaction(async (tx) => {
+    await tx.update(domainProviderBindings).set({ isActive: false, updatedAt: new Date() }).where(eq(domainProviderBindings.domainId, binding.domainId));
+    await tx.update(domainProviderBindings).set({ isActive: true, updatedAt: new Date() }).where(eq(domainProviderBindings.id, id));
+    await tx.update(domains).set({ activeProvider: binding.provider, status: "verified", updatedAt: new Date() }).where(and(eq(domains.id, binding.domainId), eq(domains.workspaceId, binding.workspaceId)));
+    await tx.update(workspaces).set({ defaultProvider: binding.provider, updatedAt: new Date() }).where(eq(workspaces.id, binding.workspaceId));
+    await tx.insert(auditEvents).values({ workspaceId: binding.workspaceId, actorUserId: userId, action: "domain.provider_activated", entityType: "domain_binding", entityId: id, metadata: { provider: binding.provider } });
+  });
+  revalidatePath("/admin");
+  revalidatePath("/dashboard/domaines");
+}
+
+export async function setProviderAccountStatusAction(accountId: string, status: "ready" | "paused" | "disabled") {
+  const id = idSchema.parse(accountId);
+  const { userId } = await requireAdmin();
+  const db = requireDb();
+  const [account] = await db.select().from(workspaceProviderAccounts).where(eq(workspaceProviderAccounts.id, id)).limit(1);
+  if (!account) throw new Error("Provider account not found");
+  if (status === "ready" && !account.externalAccountId) throw new Error("The provider account is not provisioned");
+  await db.transaction(async (tx) => {
+    await tx.update(workspaceProviderAccounts).set({
+      status,
+      pausedAt: status === "paused" ? new Date() : null,
+      pauseReason: status === "paused" ? "admin_pause" : status === "disabled" ? "admin_disabled" : null,
+      updatedAt: new Date(),
+    }).where(and(eq(workspaceProviderAccounts.id, id), eq(workspaceProviderAccounts.workspaceId, account.workspaceId)));
+    await tx.insert(auditEvents).values({ workspaceId: account.workspaceId, actorUserId: userId, action: `provider_account.${status}`, entityType: "provider_account", entityId: id, metadata: { provider: account.provider } });
+  });
+  revalidatePath("/admin");
+}
+
+export async function disableDomainBindingAction(bindingId: string) {
+  const id = idSchema.parse(bindingId);
+  const { userId } = await requireAdmin();
+  const db = requireDb();
+  const [binding] = await db.select().from(domainProviderBindings).where(eq(domainProviderBindings.id, id)).limit(1);
+  if (!binding) throw new Error("Binding not found");
+  await db.transaction(async (tx) => {
+    await tx.update(domainProviderBindings).set({ isActive: false, status: "disabled", updatedAt: new Date() }).where(and(eq(domainProviderBindings.id, id), eq(domainProviderBindings.workspaceId, binding.workspaceId)));
+    if (binding.isActive) {
+      await tx.update(domains).set({ activeProvider: null, status: "disabled", updatedAt: new Date() }).where(and(eq(domains.id, binding.domainId), eq(domains.workspaceId, binding.workspaceId)));
+    }
+    await tx.insert(auditEvents).values({ workspaceId: binding.workspaceId, actorUserId: userId, action: "domain.provider_disabled", entityType: "domain_binding", entityId: id, metadata: { provider: binding.provider } });
+  });
+  revalidatePath("/admin");
+  revalidatePath("/dashboard/domaines");
+}
+
+export async function disableTransactionalProfileAction(profileId: string) {
+  const id = idSchema.parse(profileId);
+  const { userId } = await requireAdmin();
+  const db = requireDb();
+  const [profile] = await db.select().from(transactionalProfiles).where(eq(transactionalProfiles.id, id)).limit(1);
+  if (!profile) throw new Error("Profile not found");
+  await db.transaction(async (tx) => {
+    await tx.update(transactionalProfiles).set({ status: "disabled", updatedAt: new Date() }).where(and(eq(transactionalProfiles.id, id), eq(transactionalProfiles.workspaceId, profile.workspaceId)));
+    await tx.insert(auditEvents).values({ workspaceId: profile.workspaceId, actorUserId: userId, action: "transactional_profile.disabled_by_admin", entityType: "transactional_profile", entityId: id });
+  });
+  revalidatePath("/admin");
+}
+
+export async function disableTemplateAction(templateId: string) {
+  const id = idSchema.parse(templateId);
+  const { userId } = await requireAdmin();
+  const db = requireDb();
+  const [template] = await db.select().from(templates).where(eq(templates.id, id)).limit(1);
+  if (!template) throw new Error("Template not found");
+  await db.transaction(async (tx) => {
+    await tx.update(templates).set({ reviewStatus: "disabled", updatedAt: new Date() }).where(and(eq(templates.id, id), eq(templates.workspaceId, template.workspaceId)));
+    await tx.insert(auditEvents).values({ workspaceId: template.workspaceId, actorUserId: userId, action: "template.disabled_by_admin", entityType: "template", entityId: id });
+  });
+  revalidatePath("/admin");
+}

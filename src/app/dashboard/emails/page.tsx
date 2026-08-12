@@ -22,7 +22,7 @@ export default async function Page() {
   const rows = context ? await getRecentMessages(context.workspace.id) : [];
   return (
     <DashboardPage
-      description="Chaque message individualisé, son état SES et sa dernière erreur technique."
+      description="Chaque message transactionnel et son statut normalisé, indépendamment du service de livraison utilisé."
       title="Emails"
     >
       <div className="overflow-hidden rounded-2xl border bg-white shadow-sm">
@@ -30,7 +30,7 @@ export default async function Page() {
           <table className="w-full text-sm">
             <thead>
               <tr className="border-b text-left text-muted-foreground">
-                {['Date', 'Destinataire', 'Sujet', 'Flux', 'Source', 'Statut'].map((label) => (
+                {['Date', 'Destinataire', 'Sujet', 'Catégorie', 'Statut'].map((label) => (
                   <th className="px-5 py-3 font-medium" key={label}>{label}</th>
                 ))}
               </tr>
@@ -41,12 +41,11 @@ export default async function Page() {
                   <td className="whitespace-nowrap px-5 py-4 text-muted-foreground">{new Intl.DateTimeFormat('fr-FR', { dateStyle: 'short', timeStyle: 'short' }).format(message.createdAt)}</td>
                   <td className="px-5 py-4 font-mono text-xs">{maskEmail(message.toEmail)}</td>
                   <td className="max-w-64 truncate px-5 py-4"><Link className="font-medium hover:text-primary" href={`/dashboard/emails/${message.id}`}>{message.subject}</Link></td>
-                  <td className="px-5 py-4"><Badge variant="outline">{message.stream}</Badge></td>
-                  <td className="px-5 py-4 text-muted-foreground">{message.source}</td>
+                  <td className="px-5 py-4"><Badge variant="outline">{message.category}</Badge></td>
                   <td className="px-5 py-4"><Badge variant={statusVariant(message.status)}>{message.status}</Badge></td>
                 </tr>
               ))}
-              {!rows.length && <tr><td className="px-5 py-12 text-center text-muted-foreground" colSpan={6}>Aucun message n’a encore été créé.</td></tr>}
+              {!rows.length && <tr><td className="px-5 py-12 text-center text-muted-foreground" colSpan={5}>Aucun message n’a encore été créé.</td></tr>}
             </tbody>
           </table>
         </div>

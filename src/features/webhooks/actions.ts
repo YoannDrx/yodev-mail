@@ -11,7 +11,7 @@ import { currentWorkspace } from "@/lib/current-workspace";
 import { env } from "@/lib/env";
 import { validateWebhookUrl } from "@/features/webhooks/validate-url";
 
-const events = ["sent", "delivered", "bounced", "complained", "failed", "suppressed"] as const;
+const events = ["email.queued", "email.sent", "email.delivered", "email.soft_bounced", "email.hard_bounced", "email.complained", "email.failed", "email.suppressed"] as const;
 const schema = z.object({
   eventTypes: z.array(z.enum(events)).min(1),
   url: z.string().url(),

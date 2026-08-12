@@ -1,4 +1,6 @@
 import { desc, eq } from "drizzle-orm";
+
+export const dynamic = "force-dynamic";
 import { DashboardPage } from "@/components/dashboard-page";
 import { WebhookForm } from "@/components/webhook-form";
 import { Badge } from "@/components/ui/badge";

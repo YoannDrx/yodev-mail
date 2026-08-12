@@ -6,14 +6,12 @@ import { loadRuntimeSecrets } from "@/workers/runtime-secrets";
 
 const queueForKind = (kind: string) => {
   if (kind === "email") return process.env.EMAIL_QUEUE_URL;
-  if (kind === "campaign") return process.env.CAMPAIGN_QUEUE_URL;
   if (kind === "webhook") return process.env.WEBHOOK_QUEUE_URL;
   return undefined;
 };
 
 const bodyForJob = (kind: string, aggregateId: string) => {
   if (kind === "email") return { messageId: aggregateId };
-  if (kind === "campaign") return { campaignId: aggregateId };
   if (kind === "webhook") return { deliveryId: aggregateId };
   throw new Error(`Unsupported outbox job kind: ${kind}`);
 };

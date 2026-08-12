@@ -28,19 +28,19 @@ export default async function Page({ params }: { params: Promise<{ id: string }>
   return (
     <DashboardPage
       action={<Link className="inline-flex items-center gap-2 text-sm text-muted-foreground hover:text-foreground" href="/dashboard/emails"><ArrowLeft className="size-4" />Tous les emails</Link>}
-      description="Chronologie SES, données de routage et diagnostic de cette livraison."
+      description="Chronologie Yodev et diagnostic normalisé de cette livraison."
       title={message.subject}
     >
       <div className="grid gap-6 lg:grid-cols-[1.1fr_0.9fr]">
         <section className="rounded-2xl border bg-white p-6 shadow-sm">
-          <div className="flex flex-wrap items-center gap-3"><Badge>{message.status}</Badge><Badge variant="outline">{message.stream}</Badge><Badge variant="secondary">{message.source} · {message.sendMode}</Badge></div>
+          <div className="flex flex-wrap items-center gap-3"><Badge>{message.status}</Badge><Badge variant="outline">{message.contentKind}</Badge><Badge variant="secondary">{message.sendMode}</Badge></div>
           <dl className="mt-6 grid gap-5 text-sm sm:grid-cols-2">
             <div><dt className="text-muted-foreground">De</dt><dd className="mt-1 font-medium">{message.fromName ? `${message.fromName} <${message.fromEmail}>` : message.fromEmail}</dd></div>
             <div><dt className="text-muted-foreground">À</dt><dd className="mt-1 font-medium">{message.toName ? `${message.toName} <${message.toEmail}>` : message.toEmail}</dd></div>
             <div><dt className="text-muted-foreground">Créé</dt><dd className="mt-1">{formatDate(message.createdAt)}</dd></div>
-            <div><dt className="text-muted-foreground">Accepté par SES</dt><dd className="mt-1">{formatDate(message.acceptedAt)}</dd></div>
+            <div><dt className="text-muted-foreground">Accepté pour livraison</dt><dd className="mt-1">{formatDate(message.providerAcceptedAt)}</dd></div>
             <div><dt className="text-muted-foreground">Délivré</dt><dd className="mt-1">{formatDate(message.deliveredAt)}</dd></div>
-            <div><dt className="text-muted-foreground">Identifiant SES</dt><dd className="mt-1 break-all font-mono text-xs">{message.sesMessageId ?? "—"}</dd></div>
+            <div><dt className="text-muted-foreground">Référence Yodev</dt><dd className="mt-1 break-all font-mono text-xs">{message.id}</dd></div>
           </dl>
           {message.lastError && <div className="mt-6 rounded-xl border border-red-200 bg-red-50 p-4 text-sm text-red-800"><strong>Dernière erreur</strong><p className="mt-1">{message.lastError}</p></div>}
           <div className="mt-6 border-t pt-5"><p className="text-xs text-muted-foreground">Le contenu complet est conservé jusqu’au {formatDate(message.contentExpiresAt)}. Il n’est pas affiché dans ce diagnostic afin de limiter l’exposition des données.</p></div>

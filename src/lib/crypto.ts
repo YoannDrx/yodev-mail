@@ -59,16 +59,3 @@ export function decryptSecret(value: string, keyMaterial: string) {
     decipher.final(),
   ]).toString("utf8");
 }
-
-export function signExpiringToken(payload: Record<string, string>, secret: string, expiresAt: Date) {
-  const body = Buffer.from(JSON.stringify({ ...payload, exp: expiresAt.getTime() })).toString("base64url");
-  return `${body}.${hmac(body, secret)}`;
-}
-
-export function verifyExpiringToken(token: string, secret: string) {
-  const [body, signature] = token.split(".");
-  if (!body || !signature || !constantTimeEqual(hmac(body, secret), signature)) return null;
-  const data = JSON.parse(Buffer.from(body, "base64url").toString("utf8")) as Record<string, string> & { exp: number };
-  if (!Number.isFinite(data.exp) || data.exp < Date.now()) return null;
-  return data;
-}

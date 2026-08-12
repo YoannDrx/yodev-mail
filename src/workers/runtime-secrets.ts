@@ -1,9 +1,9 @@
-import { GetParametersCommand, SSMClient } from "@aws-sdk/client-ssm";
+import { GetParametersCommand } from "@aws-sdk/client-ssm";
+import { awsClients } from "@/lib/aws";
 
 const parameterSuffixes = {
   DATABASE_URL: "database-url",
   STRIPE_SECRET_KEY: "stripe-secret-key",
-  UNSUBSCRIBE_SIGNING_SECRET: "unsubscribe-signing-secret",
   WEBHOOK_SIGNING_SECRET: "webhook-signing-secret",
 } as const;
 
@@ -39,7 +39,6 @@ export async function loadRuntimeSecrets() {
   if (
     process.env.DATABASE_URL &&
     process.env.STRIPE_SECRET_KEY &&
-    process.env.UNSUBSCRIBE_SIGNING_SECRET &&
     process.env.WEBHOOK_SIGNING_SECRET
   ) {
     return;
@@ -49,7 +48,7 @@ export async function loadRuntimeSecrets() {
     const names = Object.values(parameterSuffixes).map(
       (suffix) => `${prefix}/${suffix}`,
     );
-    const client = new SSMClient({ region: process.env.AWS_REGION_NAME });
+    const { ssm: client } = await awsClients();
     const response = await client.send(
       new GetParametersCommand({ Names: names, WithDecryption: true }),
     );
@@ -66,4 +65,19 @@ export async function loadRuntimeSecrets() {
   });
 
   await loading;
+}
+
+const secureParameterCache = new Map<string, string>();
+
+export async function getSecureParameter(name: string) {
+  const cached = secureParameterCache.get(name);
+  if (cached) return cached;
+  const { ssm: client } = await awsClients();
+  const response = await client.send(
+    new GetParametersCommand({ Names: [name], WithDecryption: true }),
+  );
+  const value = response.Parameters?.[0]?.Value;
+  if (!value) throw new Error("Required provider credential is unavailable.");
+  secureParameterCache.set(name, value);
+  return value;
 }

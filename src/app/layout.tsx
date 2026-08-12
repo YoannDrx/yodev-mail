@@ -22,8 +22,8 @@ const monoFont = Fira_Code({
 
 export const metadata: Metadata = {
   metadataBase: new URL(process.env.NEXT_PUBLIC_APP_URL || "http://localhost:3000"),
-  title: { default: "Mail by Yodev — Tous vos emails. Zéro angle mort.", template: "%s — Mail by Yodev" },
-  description: "La plateforme française d'email transactionnel et marketing, propulsée par Amazon SES.",
+  title: { default: "Mail by Yodev — Passerelle email transactionnelle gérée", template: "%s — Mail by Yodev" },
+  description: "Une API d’envoi transactionnel opérée par Yodev pour des applications, domaines et cas d’usage vérifiés.",
 };
 
 export default function RootLayout({
