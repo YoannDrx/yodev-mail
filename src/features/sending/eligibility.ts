@@ -1,26 +1,22 @@
 import { and, eq } from "drizzle-orm";
 import type { requireDb } from "@/db/runtime";
 import {
-  contacts,
+  domainProviderBindings,
   domains,
   subscriptions,
   suppressions,
+  transactionalProfiles,
   usageDays,
+  workspaceProviderAccounts,
   workspaces,
 } from "@/db/schema";
-import { suppressionHash } from "@/features/contacts/normalization";
+import { suppressionHash } from "@/features/email-address/normalization";
 import {
   evaluateSendingEligibility,
   type EligibilityResult,
 } from "@/features/sending/policy";
 
 type Database = ReturnType<typeof requireDb>;
-
-export const SES_SIMULATOR_DOMAIN = "simulator.amazonses.com";
-
-export function isSesSimulatorAddress(email: string) {
-  return email.trim().toLowerCase().endsWith(`@${SES_SIMULATOR_DOMAIN}`);
-}
 
 export function utcDay(value = new Date()) {
   return value.toISOString().slice(0, 10);
@@ -32,16 +28,51 @@ export async function evaluateStoredMessage(
     workspaceId: string;
     domainId: string;
     toEmail: string;
-    stream: "transactional" | "marketing";
     mode: "test" | "live";
-    contactId?: string | null;
+    profileId: string;
+    provider: "ses" | "postmark";
     dailyOffset?: number;
     now?: Date;
   },
 ): Promise<EligibilityResult> {
   const now = input.now ?? new Date();
-  const [workspace, domain, subscription, usage, suppression, contact] =
+  const [binding, providerAccount, profile, workspace, domain, subscription, usage, suppression] =
     await Promise.all([
+      db
+        .select()
+        .from(domainProviderBindings)
+        .where(
+          and(
+            eq(domainProviderBindings.domainId, input.domainId),
+            eq(domainProviderBindings.workspaceId, input.workspaceId),
+            eq(domainProviderBindings.provider, input.provider),
+            eq(domainProviderBindings.isActive, true),
+          ),
+        )
+        .limit(1)
+        .then((rows) => rows[0]),
+      db
+        .select()
+        .from(workspaceProviderAccounts)
+        .where(
+          and(
+            eq(workspaceProviderAccounts.workspaceId, input.workspaceId),
+            eq(workspaceProviderAccounts.provider, input.provider),
+          ),
+        )
+        .limit(1)
+        .then((rows) => rows[0]),
+      db
+        .select()
+        .from(transactionalProfiles)
+        .where(
+          and(
+            eq(transactionalProfiles.id, input.profileId),
+            eq(transactionalProfiles.workspaceId, input.workspaceId),
+          ),
+        )
+        .limit(1)
+        .then((rows) => rows[0]),
       db
         .select()
         .from(workspaces)
@@ -87,19 +118,6 @@ export async function evaluateStoredMessage(
         )
         .limit(1)
         .then((rows) => rows[0]),
-      input.contactId
-        ? db
-            .select()
-            .from(contacts)
-            .where(
-              and(
-                eq(contacts.id, input.contactId),
-                eq(contacts.workspaceId, input.workspaceId),
-              ),
-            )
-            .limit(1)
-            .then((rows) => rows[0])
-        : Promise.resolve(undefined),
     ]);
 
   if (!workspace || !domain) {
@@ -110,11 +128,27 @@ export async function evaluateStoredMessage(
     };
   }
 
-  if (input.mode === "test" && !isSesSimulatorAddress(input.toEmail)) {
+  if (!profile || profile.status !== "approved") {
     return {
       allowed: false,
-      code: "test_recipient_forbidden",
-      reason: "Une clé de test ne peut envoyer qu'au simulateur Amazon SES.",
+      code: "transactional_profile_not_approved",
+      reason: "Le cas d’usage transactionnel doit être approuvé.",
+    };
+  }
+
+  if (!binding || binding.status !== "verified" || !binding.isActive) {
+    return {
+      allowed: false,
+      code: "provider_binding_not_ready",
+      reason: "Le domaine expéditeur n’est pas prêt pour la livraison.",
+    };
+  }
+
+  if (!providerAccount || providerAccount.status !== "ready") {
+    return {
+      allowed: false,
+      code: "provider_account_not_ready",
+      reason: "Le service de livraison du workspace n’est pas prêt.",
     };
   }
 
@@ -122,17 +156,10 @@ export async function evaluateStoredMessage(
     billingStatus: subscription?.status ?? "inactive",
     dailyLimit: workspace.dailyLimit,
     dailySent: (usage?.acceptedEmails ?? 0) + (input.dailyOffset ?? 0),
-    domainVerified:
-      domain.status === "verified" && domain.dkimStatus === "verified",
+    domainVerified: domain.status === "verified" && binding.dkimStatus === "verified",
     graceEndsAt: subscription?.graceEndsAt,
-    marketingConsent:
-      input.stream === "marketing" && contact
-        ? contact.status === "active" &&
-          (contact.marketingConsent || Boolean(contact.legalBasis))
-        : undefined,
     mode: input.mode,
     now,
-    stream: input.stream,
     suppressed: Boolean(suppression),
     workspaceStatus: workspace.status,
   });

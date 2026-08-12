@@ -51,7 +51,7 @@ async function deliver(deliveryId: string) {
     created_at: row.event.occurredAt,
     data: { message_id: row.event.messageId },
     id: row.event.id,
-    type: `email.${row.event.type.toLowerCase()}`,
+    type: row.event.type,
   });
   const timestamp = Math.floor(Date.now() / 1000);
   const encryptionKey = process.env.WEBHOOK_SIGNING_SECRET;

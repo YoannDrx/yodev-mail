@@ -28,6 +28,7 @@ beforeAll(() => {
     alertTopic: foundationStack.alertTopic,
     environment: "prod",
     env,
+    malwareProtectionEnabled: true,
     standby: false,
     vercelOidcProvider: foundationStack.vercelOidcProvider,
     vercelTeam: "yoanndrxs-projects",
@@ -116,12 +117,33 @@ describe("Mail by Yodev AWS infrastructure", () => {
     }
   });
 
-  test("uses no more than the ten free alarms when production is active", () => {
-    activeProductionWorkload.resourceCountIs("AWS::CloudWatch::Alarm", 10);
+  test("adds explicit attachment and ambiguous-outcome alarms in production", () => {
+    activeProductionWorkload.resourceCountIs("AWS::CloudWatch::Alarm", 14);
     activeProductionWorkload.resourceCountIs(
       "AWS::Lambda::EventSourceMapping",
       4,
     );
+  });
+
+  test("protects 24-hour attachment storage with KMS and GuardDuty", () => {
+    activeProductionWorkload.resourceCountIs("AWS::GuardDuty::MalwareProtectionPlan", 1);
+    activeProductionWorkload.hasResourceProperties("AWS::S3::Bucket", Match.objectLike({
+      BucketEncryption: Match.objectLike({ ServerSideEncryptionConfiguration: Match.anyValue() }),
+      LifecycleConfiguration: Match.objectLike({ Rules: Match.arrayWith([Match.objectLike({ ExpirationInDays: 1 })]) }),
+      PublicAccessBlockConfiguration: {
+        BlockPublicAcls: true,
+        BlockPublicPolicy: true,
+        IgnorePublicAcls: true,
+        RestrictPublicBuckets: true,
+      },
+    }));
+  });
+
+  test("transforms SES events before enqueueing them", () => {
+    activeProductionWorkload.hasResourceProperties("AWS::Events::Rule", Match.objectLike({
+      EventPattern: Match.objectLike({ source: ["aws.ses"] }),
+      Targets: Match.arrayWith([Match.objectLike({ InputTransformer: Match.anyValue() })]),
+    }));
   });
 
   test("creates cent-level cost alerts and a single shared operations topic", () => {

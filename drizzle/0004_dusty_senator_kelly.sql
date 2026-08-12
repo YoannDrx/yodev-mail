@@ -1,0 +1,1 @@
+ALTER TABLE "usage_days" ADD COLUMN "reserved_emails" integer DEFAULT 0 NOT NULL;

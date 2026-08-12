@@ -1,6 +1,6 @@
 import { ImageResponse } from "next/og";
 
-export const alt = "Mail by Yodev — email transactionnel et marketing";
+export const alt = "Mail by Yodev — passerelle email transactionnelle gérée";
 export const size = { width: 1200, height: 630 };
 export const contentType = "image/png";
 
@@ -12,7 +12,7 @@ export default function OpenGraphImage() {
         <span style={{ color: "#A7B0BE", fontSize: 24, letterSpacing: 5 }}>BY YODEV</span>
       </div>
       <div style={{ display: "flex", maxWidth: 930, fontSize: 58, fontWeight: 700, lineHeight: 1.1 }}>
-        Tous vos emails. Zéro angle mort.
+        Un appel. Un événement. Un destinataire.
       </div>
       <div style={{ display: "flex", color: "#A7B0BE", fontSize: 24 }}>mail.yodev.fr</div>
     </div>,

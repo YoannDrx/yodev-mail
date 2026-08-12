@@ -36,7 +36,8 @@ export async function POST(request: Request) {
       const session = event.data.object;
       const workspaceId = session.metadata?.workspaceId;
       const requestedPlan = session.metadata?.plan ?? "";
-      if (workspaceId && isPaidPlan(requestedPlan) && typeof session.customer === "string" && typeof session.subscription === "string") {
+      const paymentConfirmed = session.payment_status === "paid" || session.payment_status === "no_payment_required";
+      if (workspaceId && session.client_reference_id === workspaceId && paymentConfirmed && isPaidPlan(requestedPlan) && typeof session.customer === "string" && typeof session.subscription === "string") {
         const plan = requestedPlan;
         await tx.update(subscriptions).set({
           plan,

@@ -1,11 +1,9 @@
 export type SendingEligibilityInput = {
   mode?: "test" | "live";
-  stream: "transactional" | "marketing";
   workspaceStatus: "sandbox" | "pending_review" | "approved" | "paused" | "rejected";
   billingStatus: "inactive" | "trialing" | "active" | "past_due" | "canceled";
   domainVerified: boolean;
   suppressed: boolean;
-  marketingConsent?: boolean;
   dailySent: number;
   dailyLimit: number;
   now?: Date;
@@ -29,16 +27,12 @@ export function evaluateSendingEligibility(input: SendingEligibilityInput): Elig
   if (input.suppressed) {
     return { allowed: false, code: "recipient_suppressed", reason: "Cette adresse est présente dans la liste de suppression." };
   }
-  if (input.stream === "marketing" && !input.marketingConsent) {
-    return { allowed: false, code: "consent_required", reason: "Un consentement marketing ou une base légale documentée est requis." };
-  }
   if (input.dailySent >= input.dailyLimit) {
     return { allowed: false, code: "daily_limit_reached", reason: "Le quota quotidien progressif est atteint." };
   }
   if (mode === "test") return { allowed: true };
   if (input.billingStatus === "active" || input.billingStatus === "trialing") return { allowed: true };
   if (
-    input.stream === "transactional" &&
     input.billingStatus === "past_due" &&
     input.graceEndsAt &&
     input.graceEndsAt > now
@@ -49,6 +43,6 @@ export function evaluateSendingEligibility(input: SendingEligibilityInput): Elig
 }
 
 export function shouldAutoPause({ sent, hardBounces, complaints }: { sent: number; hardBounces: number; complaints: number }) {
-  if (sent < 100) return false;
-  return hardBounces / sent >= 0.05 || complaints / sent >= 0.002;
+  if (complaints > 0 || hardBounces >= 3) return true;
+  return sent >= 50 && hardBounces / sent >= 0.02;
 }

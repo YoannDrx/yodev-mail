@@ -10,7 +10,3 @@ export function normalizeEmail(email: string) {
 export function suppressionHash(email: string) {
   return createHash("sha256").update(normalizeEmail(email)).digest("hex");
 }
-
-export function mergeImportedConsent(current: boolean, imported: boolean, hasConsentEvidence = false) {
-  return current || (imported && hasConsentEvidence);
-}

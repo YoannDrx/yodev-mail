@@ -1,4 +1,6 @@
 import { eq } from "drizzle-orm";
+
+export const dynamic = "force-dynamic";
 import { DashboardPage } from "@/components/dashboard-page";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";

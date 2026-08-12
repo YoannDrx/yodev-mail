@@ -14,10 +14,6 @@ describe("worker runtime parameters", () => {
           Value: "sk_test_example",
         },
         {
-          Name: "/yodev-mail-dev/runtime/unsubscribe-signing-secret",
-          Value: "unsubscribe-secret",
-        },
-        {
           Name: "/yodev-mail-dev/runtime/webhook-signing-secret",
           Value: "webhook-secret",
         },
@@ -25,7 +21,6 @@ describe("worker runtime parameters", () => {
     ).toEqual({
       DATABASE_URL: "postgres://example",
       STRIPE_SECRET_KEY: "sk_test_example",
-      UNSUBSCRIBE_SIGNING_SECRET: "unsubscribe-secret",
       WEBHOOK_SIGNING_SECRET: "webhook-secret",
     });
   });

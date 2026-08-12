@@ -41,7 +41,7 @@ export async function handler() {
     if (delta <= 0) continue;
     await stripe.billing.meterEvents.create({
       event_name: process.env.STRIPE_METER_EVENT_NAME ?? "yodev_mail_emails_sent",
-      identifier: `vm-${row.usageId}-${totalOverage}`,
+      identifier: `ym-${row.usageId}-${totalOverage}`,
       payload: {
         stripe_customer_id: row.customerId,
         value: String(delta),

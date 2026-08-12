@@ -1,0 +1,1 @@
+ALTER TYPE "public"."billing_plan" ADD VALUE 'beta';

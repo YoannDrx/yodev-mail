@@ -6,7 +6,9 @@ import {
   CreateTenantCommand,
   CreateTenantResourceAssociationCommand,
   GetEmailIdentityCommand,
+  GetTenantCommand,
   PutEmailIdentityMailFromAttributesCommand,
+  UpdateReputationEntityPolicyCommand,
 } from "@aws-sdk/client-sesv2";
 import { STSClient, GetCallerIdentityCommand } from "@aws-sdk/client-sts";
 import { awsClients } from "@/lib/aws";
@@ -19,9 +21,17 @@ async function ignoreExisting(operation: () => Promise<unknown>) {
 
 export async function provisionSesDomain(input: { workspaceId: string; domain: string }) {
   const { ses } = await awsClients();
-  const tenantName = safeName(`vm-${input.workspaceId}`);
+  const tenantName = safeName(`ym-${input.workspaceId}`);
   await ignoreExisting(() => ses.send(new CreateTenantCommand({ TenantName: tenantName, SuppressionAttributes: { SuppressedReasons: ["BOUNCE", "COMPLAINT"], SuppressionScope: "TENANT" } })));
-  const configurationSets = [`${tenantName}-txn`, `${tenantName}-mkt-private`, `${tenantName}-mkt-tracked`];
+  const tenant = await ses.send(new GetTenantCommand({ TenantName: tenantName }));
+  if (tenant.Tenant?.TenantArn) {
+    await ses.send(new UpdateReputationEntityPolicyCommand({
+      ReputationEntityType: "RESOURCE",
+      ReputationEntityReference: tenant.Tenant.TenantArn,
+      ReputationEntityPolicy: `arn:aws:ses:${env.AWS_REGION}:aws:reputation-policy/strict`,
+    }));
+  }
+  const configurationSets = [`${tenantName}-txn`];
   for (const name of configurationSets) await ignoreExisting(() => ses.send(new CreateConfigurationSetCommand({ ConfigurationSetName: name, SendingOptions: { SendingEnabled: true }, ReputationOptions: { ReputationMetricsEnabled: true } })));
   await ignoreExisting(() =>
     ses.send(
@@ -40,9 +50,6 @@ export async function provisionSesDomain(input: { workspaceId: string; domain: s
   if (!accountId) throw new Error("AWS account ID unavailable");
   const eventBusArn = `arn:aws:events:${env.AWS_REGION}:${accountId}:event-bus/default`;
   for (const name of configurationSets) {
-    const trackingEvents = name.endsWith("-mkt-tracked")
-      ? (["OPEN", "CLICK"] as const)
-      : [];
     await ignoreExisting(() =>
       ses.send(
         new CreateConfigurationSetEventDestinationCommand({
@@ -52,13 +59,11 @@ export async function provisionSesDomain(input: { workspaceId: string; domain: s
             Enabled: true,
             EventBridgeDestination: { EventBusArn: eventBusArn },
             MatchingEventTypes: [
-              "SEND",
               "DELIVERY",
               "BOUNCE",
               "COMPLAINT",
               "REJECT",
               "DELIVERY_DELAY",
-              ...trackingEvents,
             ],
           },
         }),

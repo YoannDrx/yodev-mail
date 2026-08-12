@@ -9,13 +9,18 @@ const account = process.env.CDK_DEFAULT_ACCOUNT;
 const vercelTeam = String(app.node.tryGetContext("vercelTeam") ?? "yoanndrxs-projects");
 const alertEmail = process.env.YODEV_MAIL_ALERT_EMAIL;
 const existingVercelOidcProviderArn =
-  process.env.YODEV_MAIL_VERCEL_OIDC_PROVIDER_ARN;
+  process.env.YODEV_MAIL_VERCEL_OIDC_PROVIDER_ARN ??
+  (account
+    ? `arn:aws:iam::${account}:oidc-provider/oidc.vercel.com/${vercelTeam}`
+    : undefined);
 const activeEnvironments = new Set(
   (process.env.YODEV_MAIL_AWS_ACTIVE_ENVIRONMENTS ?? "")
     .split(",")
     .map((value) => value.trim())
     .filter(Boolean),
 );
+const malwareProtectionEnabled =
+  process.env.YODEV_MAIL_GUARDDUTY_ENABLED === "true";
 
 const foundation = new YodevMailFoundationStack(app, "YodevMailFoundation", {
   alertEmail,
@@ -33,6 +38,7 @@ for (const environment of ["dev", "prod"] as const) {
       alertTopic: foundation.alertTopic,
       environment,
       env: { account, region },
+      malwareProtectionEnabled,
       terminationProtection: environment === "prod",
       vercelOidcProvider: foundation.vercelOidcProvider,
       vercelTeam,

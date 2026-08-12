@@ -13,6 +13,7 @@ import {
   uuid,
   varchar,
 } from "drizzle-orm/pg-core";
+import { sql } from "drizzle-orm";
 
 const timestamps = {
   createdAt: timestamp("created_at", { withTimezone: true }).defaultNow().notNull(),
@@ -26,7 +27,7 @@ export const workspaceStatusEnum = pgEnum("workspace_status", [
   "paused",
   "rejected",
 ]);
-export const billingPlanEnum = pgEnum("billing_plan", ["sandbox", "starter", "pro", "agency"]);
+export const billingPlanEnum = pgEnum("billing_plan", ["sandbox", "starter", "pro", "agency", "beta"]);
 export const billingStatusEnum = pgEnum("billing_status", [
   "inactive",
   "trialing",
@@ -69,6 +70,7 @@ export const campaignStatusEnum = pgEnum("campaign_status", [
 ]);
 export const messageStreamEnum = pgEnum("message_stream", ["transactional", "marketing"]);
 export const messageStatusEnum = pgEnum("message_status", [
+  "simulated",
   "queued",
   "sending",
   "sent",
@@ -88,6 +90,51 @@ export const suppressionReasonEnum = pgEnum("suppression_reason", [
 ]);
 export const apiKeyModeEnum = pgEnum("api_key_mode", ["test", "live"]);
 export const reviewDecisionEnum = pgEnum("review_decision", ["pending", "approved", "rejected"]);
+export const emailProviderEnum = pgEnum("email_provider", ["ses", "postmark"]);
+export const providerAccountStatusEnum = pgEnum("provider_account_status", [
+  "pending",
+  "ready",
+  "paused",
+  "failed",
+  "disabled",
+]);
+export const providerBindingStatusEnum = pgEnum("provider_binding_status", [
+  "pending",
+  "dns_pending",
+  "verified",
+  "failed",
+  "disabled",
+]);
+export const contentPolicyEnum = pgEnum("content_policy", ["template_only", "hybrid"]);
+export const transactionalProfileStatusEnum = pgEnum("transactional_profile_status", [
+  "draft",
+  "pending_review",
+  "approved",
+  "rejected",
+  "disabled",
+]);
+export const templateReviewStatusEnum = pgEnum("template_review_status", [
+  "draft",
+  "pending_review",
+  "approved",
+  "rejected",
+  "disabled",
+]);
+export const attachmentStatusEnum = pgEnum("attachment_status", [
+  "pending_upload",
+  "scanning",
+  "clean",
+  "rejected",
+  "expired",
+  "deleted",
+]);
+export const messageContentKindEnum = pgEnum("message_content_kind", ["template", "raw"]);
+export const messageAttemptOutcomeEnum = pgEnum("message_attempt_outcome", [
+  "accepted",
+  "definitive_failure",
+  "transient_failure",
+  "ambiguous",
+]);
 
 export const workspaces = pgTable(
   "workspaces",
@@ -100,6 +147,8 @@ export const workspaces = pgTable(
     status: workspaceStatusEnum("status").default("sandbox").notNull(),
     plan: billingPlanEnum("plan").default("sandbox").notNull(),
     sesTenantName: varchar("ses_tenant_name", { length: 64 }),
+    defaultProvider: emailProviderEnum("default_provider"),
+    contentPolicy: contentPolicyEnum("content_policy").default("template_only").notNull(),
     websiteUrl: text("website_url"),
     useCase: text("use_case"),
     expectedMonthlyVolume: integer("expected_monthly_volume").default(0).notNull(),
@@ -182,6 +231,7 @@ export const usageDays = pgTable(
       .notNull(),
     day: varchar("day", { length: 10 }).notNull(),
     acceptedEmails: integer("accepted_emails").default(0).notNull(),
+    reservedEmails: integer("reserved_emails").default(0).notNull(),
     deliveredEmails: integer("delivered_emails").default(0).notNull(),
     hardBounces: integer("hard_bounces").default(0).notNull(),
     complaints: integer("complaints").default(0).notNull(),
@@ -204,6 +254,7 @@ export const domains = pgTable(
       .notNull(),
     name: varchar("name", { length: 253 }).notNull(),
     status: domainStatusEnum("status").default("pending").notNull(),
+    activeProvider: emailProviderEnum("active_provider"),
     sesIdentityArn: text("ses_identity_arn"),
     mailFromDomain: varchar("mail_from_domain", { length: 253 }),
     dkimStatus: varchar("dkim_status", { length: 32 }).default("pending").notNull(),
@@ -219,6 +270,62 @@ export const domains = pgTable(
   (table) => [
     uniqueIndex("domains_workspace_name_idx").on(table.workspaceId, table.name),
     index("domains_workspace_status_idx").on(table.workspaceId, table.status),
+  ],
+);
+
+export const workspaceProviderAccounts = pgTable(
+  "workspace_provider_accounts",
+  {
+    id: uuid("id").defaultRandom().primaryKey(),
+    workspaceId: uuid("workspace_id")
+      .references(() => workspaces.id, { onDelete: "cascade" })
+      .notNull(),
+    provider: emailProviderEnum("provider").notNull(),
+    status: providerAccountStatusEnum("status").default("pending").notNull(),
+    externalAccountId: varchar("external_account_id", { length: 180 }),
+    credentialParameterName: text("credential_parameter_name"),
+    reputationPolicy: varchar("reputation_policy", { length: 32 }),
+    pausedAt: timestamp("paused_at", { withTimezone: true }),
+    pauseReason: varchar("pause_reason", { length: 160 }),
+    ...timestamps,
+  },
+  (table) => [
+    uniqueIndex("workspace_provider_accounts_workspace_provider_idx").on(table.workspaceId, table.provider),
+    index("workspace_provider_accounts_status_idx").on(table.provider, table.status),
+  ],
+);
+
+export const domainProviderBindings = pgTable(
+  "domain_provider_bindings",
+  {
+    id: uuid("id").defaultRandom().primaryKey(),
+    workspaceId: uuid("workspace_id")
+      .references(() => workspaces.id, { onDelete: "cascade" })
+      .notNull(),
+    domainId: uuid("domain_id").references(() => domains.id, { onDelete: "cascade" }).notNull(),
+    provider: emailProviderEnum("provider").notNull(),
+    status: providerBindingStatusEnum("status").default("pending").notNull(),
+    externalDomainId: text("external_domain_id"),
+    mailFromDomain: varchar("mail_from_domain", { length: 253 }),
+    dnsRecords: jsonb("dns_records")
+      .$type<Array<{ type: string; name: string; value: string }>>()
+      .default([])
+      .notNull(),
+    dkimStatus: varchar("dkim_status", { length: 32 }).default("pending").notNull(),
+    returnPathStatus: varchar("return_path_status", { length: 32 }).default("pending").notNull(),
+    dmarcStatus: varchar("dmarc_status", { length: 32 }).default("unknown").notNull(),
+    isActive: boolean("is_active").default(false).notNull(),
+    verifiedAt: timestamp("verified_at", { withTimezone: true }),
+    lastCheckedAt: timestamp("last_checked_at", { withTimezone: true }),
+    lastCheckError: text("last_check_error"),
+    ...timestamps,
+  },
+  (table) => [
+    uniqueIndex("domain_provider_bindings_domain_provider_idx").on(table.domainId, table.provider),
+    uniqueIndex("domain_provider_bindings_active_idx")
+      .on(table.domainId)
+      .where(sql`${table.isActive} = true`),
+    index("domain_provider_bindings_workspace_status_idx").on(table.workspaceId, table.status),
   ],
 );
 
@@ -342,12 +449,39 @@ export const suppressions = pgTable(
     emailHash: varchar("email_hash", { length: 64 }).notNull(),
     reason: suppressionReasonEnum("reason").notNull(),
     sourceMessageId: uuid("source_message_id"),
+    provider: emailProviderEnum("provider"),
     expiresAt: timestamp("expires_at", { withTimezone: true }),
     createdAt: timestamp("created_at", { withTimezone: true }).defaultNow().notNull(),
   },
   (table) => [
     uniqueIndex("suppressions_workspace_hash_idx").on(table.workspaceId, table.emailHash),
     index("suppressions_workspace_reason_idx").on(table.workspaceId, table.reason),
+  ],
+);
+
+export const transactionalProfiles = pgTable(
+  "transactional_profiles",
+  {
+    id: uuid("id").defaultRandom().primaryKey(),
+    workspaceId: uuid("workspace_id")
+      .references(() => workspaces.id, { onDelete: "cascade" })
+      .notNull(),
+    key: varchar("key", { length: 80 }).notNull(),
+    name: varchar("name", { length: 160 }).notNull(),
+    triggerDescription: text("trigger_description").notNull(),
+    recipientRelationship: text("recipient_relationship").notNull(),
+    expectedMonthlyVolume: integer("expected_monthly_volume").default(0).notNull(),
+    contentExample: text("content_example").notNull(),
+    status: transactionalProfileStatusEnum("status").default("draft").notNull(),
+    submittedAt: timestamp("submitted_at", { withTimezone: true }),
+    approvedAt: timestamp("approved_at", { withTimezone: true }),
+    approvedBy: varchar("approved_by", { length: 64 }),
+    rejectionReason: text("rejection_reason"),
+    ...timestamps,
+  },
+  (table) => [
+    uniqueIndex("transactional_profiles_workspace_key_idx").on(table.workspaceId, table.key),
+    index("transactional_profiles_workspace_status_idx").on(table.workspaceId, table.status),
   ],
 );
 
@@ -358,10 +492,19 @@ export const templates = pgTable(
     workspaceId: uuid("workspace_id")
       .references(() => workspaces.id, { onDelete: "cascade" })
       .notNull(),
+    transactionalProfileId: uuid("transactional_profile_id").references(() => transactionalProfiles.id, {
+      onDelete: "restrict",
+    }),
     name: varchar("name", { length: 160 }).notNull(),
     subject: varchar("subject", { length: 255 }).notNull(),
     preheader: varchar("preheader", { length: 255 }),
     currentVersion: integer("current_version").default(1).notNull(),
+    reviewStatus: templateReviewStatusEnum("review_status").default("draft").notNull(),
+    contentHash: varchar("content_hash", { length: 64 }),
+    submittedAt: timestamp("submitted_at", { withTimezone: true }),
+    approvedAt: timestamp("approved_at", { withTimezone: true }),
+    approvedBy: varchar("approved_by", { length: 64 }),
+    rejectionReason: text("rejection_reason"),
     ...timestamps,
   },
   (table) => [index("templates_workspace_idx").on(table.workspaceId, table.updatedAt)],
@@ -448,6 +591,12 @@ export const messages = pgTable(
     campaignId: uuid("campaign_id").references(() => campaigns.id, { onDelete: "set null" }),
     contactId: uuid("contact_id").references(() => contacts.id, { onDelete: "set null" }),
     domainId: uuid("domain_id").references(() => domains.id, { onDelete: "restrict" }).notNull(),
+    transactionalProfileId: uuid("transactional_profile_id").references(() => transactionalProfiles.id, {
+      onDelete: "restrict",
+    }),
+    provider: emailProviderEnum("provider"),
+    providerMessageId: varchar("provider_message_id", { length: 180 }),
+    contentKind: messageContentKindEnum("content_kind"),
     stream: messageStreamEnum("stream").notNull(),
     source: varchar("source", { length: 32 }).default("api").notNull(),
     sendMode: apiKeyModeEnum("send_mode").default("live").notNull(),
@@ -470,6 +619,9 @@ export const messages = pgTable(
     contentExpiresAt: timestamp("content_expires_at", { withTimezone: true }),
     queuedAt: timestamp("queued_at", { withTimezone: true }).defaultNow().notNull(),
     acceptedAt: timestamp("accepted_at", { withTimezone: true }),
+    providerAcceptedAt: timestamp("provider_accepted_at", { withTimezone: true }),
+    sendDeadlineAt: timestamp("send_deadline_at", { withTimezone: true }),
+    ambiguousAt: timestamp("ambiguous_at", { withTimezone: true }),
     lastEventAt: timestamp("last_event_at", { withTimezone: true }),
     sentAt: timestamp("sent_at", { withTimezone: true }),
     deliveredAt: timestamp("delivered_at", { withTimezone: true }),
@@ -479,6 +631,7 @@ export const messages = pgTable(
   (table) => [
     uniqueIndex("messages_workspace_idempotency_idx").on(table.workspaceId, table.idempotencyKey),
     uniqueIndex("messages_ses_id_idx").on(table.sesMessageId),
+    uniqueIndex("messages_provider_id_idx").on(table.provider, table.providerMessageId),
     index("messages_workspace_status_idx").on(table.workspaceId, table.status, table.createdAt),
     index("messages_campaign_idx").on(table.campaignId, table.status),
   ],
@@ -536,6 +689,8 @@ export const messageAttempts = pgTable(
     messageId: uuid("message_id").references(() => messages.id, { onDelete: "cascade" }).notNull(),
     attempt: integer("attempt").notNull(),
     status: varchar("status", { length: 32 }).notNull(),
+    provider: emailProviderEnum("provider"),
+    outcome: messageAttemptOutcomeEnum("outcome"),
     errorCode: varchar("error_code", { length: 120 }),
     errorMessage: text("error_message"),
     createdAt: timestamp("created_at", { withTimezone: true }).defaultNow().notNull(),
@@ -552,14 +707,43 @@ export const emailEvents = pgTable(
       .notNull(),
     messageId: uuid("message_id").references(() => messages.id, { onDelete: "cascade" }).notNull(),
     externalEventId: varchar("external_event_id", { length: 180 }).notNull(),
+    provider: emailProviderEnum("provider"),
     type: varchar("type", { length: 48 }).notNull(),
     occurredAt: timestamp("occurred_at", { withTimezone: true }).notNull(),
     payload: jsonb("payload").$type<Record<string, unknown>>().notNull(),
     createdAt: timestamp("created_at", { withTimezone: true }).defaultNow().notNull(),
   },
   (table) => [
-    uniqueIndex("email_events_external_idx").on(table.externalEventId),
+    uniqueIndex("email_events_provider_external_idx").on(table.provider, table.externalEventId),
     index("email_events_workspace_message_idx").on(table.workspaceId, table.messageId, table.occurredAt),
+  ],
+);
+
+export const attachments = pgTable(
+  "attachments",
+  {
+    id: uuid("id").defaultRandom().primaryKey(),
+    workspaceId: uuid("workspace_id")
+      .references(() => workspaces.id, { onDelete: "cascade" })
+      .notNull(),
+    messageId: uuid("message_id").references(() => messages.id, { onDelete: "set null" }),
+    fileName: varchar("file_name", { length: 180 }).notNull(),
+    declaredContentType: varchar("declared_content_type", { length: 120 }).notNull(),
+    detectedContentType: varchar("detected_content_type", { length: 120 }),
+    sizeBytes: integer("size_bytes").notNull(),
+    expectedSha256: varchar("expected_sha256", { length: 64 }).notNull(),
+    verifiedSha256: varchar("verified_sha256", { length: 64 }),
+    storageKey: text("storage_key").notNull(),
+    status: attachmentStatusEnum("status").default("pending_upload").notNull(),
+    scanResult: varchar("scan_result", { length: 64 }),
+    expiresAt: timestamp("expires_at", { withTimezone: true }).notNull(),
+    deletedAt: timestamp("deleted_at", { withTimezone: true }),
+    ...timestamps,
+  },
+  (table) => [
+    uniqueIndex("attachments_storage_key_idx").on(table.storageKey),
+    index("attachments_workspace_status_idx").on(table.workspaceId, table.status),
+    index("attachments_expiration_idx").on(table.expiresAt, table.status),
   ],
 );
 
@@ -581,6 +765,18 @@ export const apiKeys = pgTable(
     ...timestamps,
   },
   (table) => [uniqueIndex("api_keys_hash_idx").on(table.secretHash), index("api_keys_workspace_idx").on(table.workspaceId, table.revokedAt)],
+);
+
+export const apiRateLimits = pgTable(
+  "api_rate_limits",
+  {
+    id: uuid("id").defaultRandom().primaryKey(),
+    workspaceId: uuid("workspace_id").references(() => workspaces.id, { onDelete: "cascade" }).notNull(),
+    mode: apiKeyModeEnum("mode").notNull(),
+    minute: timestamp("minute", { withTimezone: true }).notNull(),
+    requestCount: integer("request_count").default(1).notNull(),
+  },
+  (table) => [uniqueIndex("api_rate_limits_workspace_mode_minute_idx").on(table.workspaceId, table.mode, table.minute)],
 );
 
 export const idempotencyKeys = pgTable(

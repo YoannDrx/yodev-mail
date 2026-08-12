@@ -7,15 +7,11 @@ import {
   Tags,
   type StackProps,
 } from "aws-cdk-lib";
-import {
-  Dashboard as CloudWatchDashboard,
-  GraphWidget,
-  Metric,
-  TreatMissingData,
-} from "aws-cdk-lib/aws-cloudwatch";
+import { Dashboard, GraphWidget, Metric, TreatMissingData } from "aws-cdk-lib/aws-cloudwatch";
 import { SnsAction } from "aws-cdk-lib/aws-cloudwatch-actions";
-import { Rule, Schedule } from "aws-cdk-lib/aws-events";
+import { EventField, Rule, RuleTargetInput, Schedule } from "aws-cdk-lib/aws-events";
 import { LambdaFunction, SqsQueue } from "aws-cdk-lib/aws-events-targets";
+import { CfnMalwareProtectionPlan } from "aws-cdk-lib/aws-guardduty";
 import {
   type IOpenIdConnectProvider,
   PolicyStatement,
@@ -23,21 +19,12 @@ import {
   ServicePrincipal,
   WebIdentityPrincipal,
 } from "aws-cdk-lib/aws-iam";
+import { Key } from "aws-cdk-lib/aws-kms";
 import { Runtime } from "aws-cdk-lib/aws-lambda";
-import {
-  S3EventSource,
-  SqsEventSource,
-} from "aws-cdk-lib/aws-lambda-event-sources";
+import { SqsEventSource } from "aws-cdk-lib/aws-lambda-event-sources";
 import { NodejsFunction } from "aws-cdk-lib/aws-lambda-nodejs";
 import { LogGroup, RetentionDays } from "aws-cdk-lib/aws-logs";
-import {
-  BlockPublicAccess,
-  Bucket,
-  BucketEncryption,
-  EventType,
-  HttpMethods,
-} from "aws-cdk-lib/aws-s3";
-import { CfnScheduleGroup } from "aws-cdk-lib/aws-scheduler";
+import { BlockPublicAccess, Bucket, BucketEncryption, HttpMethods } from "aws-cdk-lib/aws-s3";
 import { type ITopic } from "aws-cdk-lib/aws-sns";
 import { Queue, QueueEncryption } from "aws-cdk-lib/aws-sqs";
 import { StringParameter } from "aws-cdk-lib/aws-ssm";
@@ -46,6 +33,7 @@ import type { Construct } from "constructs";
 export interface YodevMailStackProps extends StackProps {
   alertTopic: ITopic;
   environment: "dev" | "prod";
+  malwareProtectionEnabled?: boolean;
   vercelOidcProvider: IOpenIdConnectProvider;
   vercelTeam: string;
   standby: boolean;
@@ -54,7 +42,6 @@ export interface YodevMailStackProps extends StackProps {
 export class YodevMailStack extends Stack {
   constructor(scope: Construct, id: string, props: YodevMailStackProps) {
     super(scope, id, props);
-
     const prod = props.environment === "prod";
     const monitoringEnabled = prod && !props.standby;
     const prefix = `yodev-mail-${props.environment}`;
@@ -79,96 +66,116 @@ export class YodevMailStack extends Stack {
       return { dlq, main };
     };
 
-    const campaign = queue("campaign-dispatch", 300);
     const email = queue("email-send", 180);
-    const events = queue("ses-events", 120);
+    const providerEvents = queue("provider-events", 120);
+    const providerProvisioning = queue("provider-provisioning", 300);
     const webhooks = queue("customer-webhooks", 120);
+    const queues = [email, providerEvents, providerProvisioning, webhooks];
 
-    const scheduleGroup = new CfnScheduleGroup(this, "ScheduleGroup", {
-      name: prefix,
+    const attachmentKey = new Key(this, "AttachmentKey", {
+      alias: `${prefix}-attachments`,
+      enableKeyRotation: true,
+      removalPolicy: prod ? RemovalPolicy.RETAIN : RemovalPolicy.DESTROY,
     });
-    const schedulerRole = new Role(this, "SchedulerRole", {
-      assumedBy: new ServicePrincipal("scheduler.amazonaws.com"),
-      roleName: `${prefix}-scheduler`,
+    const providerCredentialsKey = new Key(this, "ProviderCredentialsKey", {
+      alias: `${prefix}-provider-credentials`,
+      enableKeyRotation: true,
+      removalPolicy: prod ? RemovalPolicy.RETAIN : RemovalPolicy.DESTROY,
     });
-    campaign.main.grantSendMessages(schedulerRole);
-
-    const imports = new Bucket(this, "Imports", {
+    const attachmentBucket = new Bucket(this, "Attachments", {
       autoDeleteObjects: !prod,
       blockPublicAccess: BlockPublicAccess.BLOCK_ALL,
-      bucketName: `${prefix}-imports-${this.account}`,
-      cors: [
-        {
-          allowedHeaders: ["content-type"],
-          allowedMethods: [HttpMethods.PUT],
-          allowedOrigins: [
-            "http://localhost:3000",
-            "https://mail.yodev.fr",
-            "https://*.vercel.app",
-          ],
-          exposedHeaders: ["etag"],
-          maxAge: 300,
-        },
-      ],
-      encryption: BucketEncryption.S3_MANAGED,
+      bucketName: `${prefix}-attachments-${this.account}`,
+      cors: [{
+        allowedHeaders: ["content-type", "x-amz-checksum-sha256"],
+        allowedMethods: [HttpMethods.PUT],
+        allowedOrigins: ["http://localhost:3000", "https://mail.yodev.fr", "https://*.vercel.app"],
+        exposedHeaders: ["etag", "x-amz-checksum-sha256"],
+        maxAge: 300,
+      }],
+      encryption: BucketEncryption.KMS,
+      encryptionKey: attachmentKey,
       enforceSSL: true,
-      lifecycleRules: [{ expiration: Duration.days(7) }],
+      lifecycleRules: [{ expiration: Duration.days(1) }],
       removalPolicy: prod ? RemovalPolicy.RETAIN : RemovalPolicy.DESTROY,
     });
 
-    const secureParameter = (id: string, name: string) =>
-      StringParameter.fromSecureStringParameterAttributes(this, id, {
-        parameterName: `/${prefix}/runtime/${name}`,
-        version: 1,
+    if (props.malwareProtectionEnabled) {
+      const malwareRole = new Role(this, "GuardDutyMalwareRole", {
+        assumedBy: new ServicePrincipal("malware-protection-plan.guardduty.amazonaws.com"),
+        roleName: `${prefix}-guardduty-malware`,
       });
+      attachmentBucket.grantRead(malwareRole);
+      attachmentBucket.grantPut(malwareRole);
+      attachmentKey.grantDecrypt(malwareRole);
+      malwareRole.addToPolicy(new PolicyStatement({
+        actions: ["s3:GetObjectTagging", "s3:PutObjectTagging", "s3:GetObjectVersionTagging", "s3:PutObjectVersionTagging"],
+        resources: [attachmentBucket.arnForObjects("*")],
+      }));
+      malwareRole.addToPolicy(new PolicyStatement({
+        actions: ["events:PutRule", "events:DeleteRule", "events:PutTargets", "events:RemoveTargets"],
+        resources: [`arn:aws:events:${this.region}:${this.account}:rule/DO-NOT-DELETE-AmazonGuardDutyMalwareProtectionS3*`],
+        conditions: { StringLike: { "events:ManagedBy": "malware-protection-plan.guardduty.amazonaws.com" } },
+      }));
+      malwareRole.addToPolicy(new PolicyStatement({
+        actions: ["events:DescribeRule", "events:ListTargetsByRule"],
+        resources: [`arn:aws:events:${this.region}:${this.account}:rule/DO-NOT-DELETE-AmazonGuardDutyMalwareProtectionS3*`],
+      }));
+      malwareRole.addToPolicy(new PolicyStatement({
+        actions: ["s3:PutBucketNotification", "s3:GetBucketNotification", "s3:ListBucket"],
+        resources: [attachmentBucket.bucketArn],
+      }));
+      malwareRole.addToPolicy(new PolicyStatement({
+        actions: ["kms:GenerateDataKey", "kms:Decrypt"],
+        resources: [attachmentKey.keyArn],
+        conditions: { StringLike: { "kms:ViaService": `s3.${this.region}.amazonaws.com` } },
+      }));
+      const protectionPlan = new CfnMalwareProtectionPlan(this, "AttachmentMalwareProtection", {
+        actions: { tagging: { status: "ENABLED" } },
+        protectedResource: { s3Bucket: { bucketName: attachmentBucket.bucketName, objectPrefixes: ["pending/"] } },
+        role: malwareRole.roleArn,
+        tags: [{ key: "Application", value: "yodev-mail" }],
+      });
+      protectionPlan.node.addDependency(attachmentBucket, malwareRole);
+    }
+
+    const secureParameter = (id: string, name: string) => StringParameter.fromSecureStringParameterAttributes(this, id, {
+      parameterName: `/${prefix}/runtime/${name}`,
+      version: 1,
+    });
     const runtimeParameters = [
       secureParameter("DatabaseUrlParameter", "database-url"),
-      secureParameter(
-        "UnsubscribeSigningSecretParameter",
-        "unsubscribe-signing-secret",
-      ),
-      secureParameter(
-        "WebhookSigningSecretParameter",
-        "webhook-signing-secret",
-      ),
+      secureParameter("WebhookSigningSecretParameter", "webhook-signing-secret"),
       secureParameter("StripeSecretKeyParameter", "stripe-secret-key"),
     ];
-    const common = {
-      bundling: { minify: true, sourceMap: true },
-      environment: {
-        AWS_REGION_NAME: this.region,
-        NODE_OPTIONS: "--enable-source-maps",
-        PUBLIC_LINKS_URL: prod
-          ? "https://links.mail.yodev.fr"
-          : "https://preview-mail.yodev.fr",
-        RUNTIME_PARAMETER_PREFIX: `/${prefix}/runtime`,
-      },
-      memorySize: 512,
-      runtime: Runtime.NODEJS_22_X,
-      timeout: Duration.seconds(60),
+    const commonEnvironment = {
+      ATTACHMENTS_BUCKET_NAME: attachmentBucket.bucketName,
+      AWS_REGION_NAME: this.region,
+      DEPLOYMENT_ENVIRONMENT: props.environment,
+      NODE_OPTIONS: "--enable-source-maps",
+      POSTMARK_ENABLED: "true",
+      PROVIDER_CREDENTIALS_KMS_KEY_ARN: providerCredentialsKey.keyArn,
+      RUNTIME_PARAMETER_PREFIX: `/${prefix}/runtime`,
+      SES_ENABLED: prod ? "false" : "true",
     };
     const workerFunctions: NodejsFunction[] = [];
-
-    const worker = (
-      name: string,
-      entry: string,
-      extra: Record<string, string> = {},
-    ) => {
+    const worker = (name: string, entry: string, extra: Record<string, string> = {}) => {
       const functionName = `${prefix}-${name.toLowerCase()}`;
       const logGroup = new LogGroup(this, `${name}Logs`, {
         logGroupName: `/aws/lambda/${functionName}`,
         removalPolicy: prod ? RemovalPolicy.RETAIN : RemovalPolicy.DESTROY,
-        retention: prod
-          ? RetentionDays.THREE_MONTHS
-          : RetentionDays.ONE_MONTH,
+        retention: prod ? RetentionDays.THREE_MONTHS : RetentionDays.ONE_MONTH,
       });
       const fn = new NodejsFunction(this, name, {
-        ...common,
+        bundling: { minify: true, sourceMap: true },
         entry: path.join(process.cwd(), entry),
-        environment: { ...common.environment, ...extra },
+        environment: { ...commonEnvironment, ...extra },
         functionName,
         handler: "handler",
         logGroup,
+        memorySize: 512,
+        runtime: Runtime.NODEJS_22_X,
+        timeout: Duration.seconds(60),
       });
       for (const parameter of runtimeParameters) parameter.grantRead(fn);
       workerFunctions.push(fn);
@@ -176,255 +183,141 @@ export class YodevMailStack extends Stack {
     };
 
     const send = worker("SendEmail", "src/workers/send-email.ts");
-    if (!props.standby) {
-      send.addEventSource(
-        new SqsEventSource(email.main, {
-          batchSize: 1,
-          maxConcurrency: 2,
-          reportBatchItemFailures: true,
-        }),
-      );
-    }
+    if (!props.standby) send.addEventSource(new SqsEventSource(email.main, { batchSize: 1, maxConcurrency: 2, reportBatchItemFailures: true }));
     email.main.grantConsumeMessages(send);
-    send.addToRolePolicy(
-      new PolicyStatement({ actions: ["ses:SendEmail"], resources: ["*"] }),
-    );
+    send.addToRolePolicy(new PolicyStatement({
+      actions: ["s3:GetObject"],
+      resources: [attachmentBucket.arnForObjects("*")],
+      conditions: { StringEquals: { "s3:ExistingObjectTag/GuardDutyMalwareScanStatus": "NO_THREATS_FOUND" } },
+    }));
+    attachmentBucket.grantDelete(send);
+    attachmentKey.grantDecrypt(send);
+    send.addToRolePolicy(new PolicyStatement({ actions: ["ses:SendEmail"], resources: ["*"] }));
+    send.addToRolePolicy(new PolicyStatement({ actions: ["ssm:GetParameter"], resources: [`arn:aws:ssm:${this.region}:${this.account}:parameter/${prefix}/providers/*`] }));
+    providerCredentialsKey.grantDecrypt(send);
 
-    const dispatch = worker(
-      "CampaignDispatch",
-      "src/workers/campaign-dispatch.ts",
-      { EMAIL_QUEUE_URL: email.main.queueUrl },
-    );
-    if (!props.standby) {
-      dispatch.addEventSource(
-        new SqsEventSource(campaign.main, {
-          batchSize: 1,
-          reportBatchItemFailures: true,
-        }),
-      );
-    }
-    campaign.main.grantConsumeMessages(dispatch);
-    email.main.grantSendMessages(dispatch);
+    const ingest = worker("ProviderEvents", "src/workers/ses-events.ts");
+    if (!props.standby) ingest.addEventSource(new SqsEventSource(providerEvents.main, { batchSize: 10, reportBatchItemFailures: true }));
+    providerEvents.main.grantConsumeMessages(ingest);
 
-    const ingest = worker("SesEvents", "src/workers/ses-events.ts", {
-      WEBHOOK_QUEUE_URL: webhooks.main.queueUrl,
-    });
-    if (!props.standby) {
-      ingest.addEventSource(
-        new SqsEventSource(events.main, {
-          batchSize: 10,
-          reportBatchItemFailures: true,
-        }),
-      );
-    }
-    events.main.grantConsumeMessages(ingest);
-    webhooks.main.grantSendMessages(ingest);
+    const provision = worker("ProviderProvisioning", "src/workers/provider-provisioning.ts", {},);
+    if (!props.standby) provision.addEventSource(new SqsEventSource(providerProvisioning.main, { batchSize: 1, reportBatchItemFailures: true }));
+    providerProvisioning.main.grantConsumeMessages(provision);
+    provision.addToRolePolicy(new PolicyStatement({ actions: ["ssm:GetParameter", "ssm:PutParameter"], resources: [`arn:aws:ssm:${this.region}:${this.account}:parameter/${prefix}/providers/*`] }));
+    providerCredentialsKey.grantEncryptDecrypt(provision);
+    provision.addToRolePolicy(new PolicyStatement({ actions: ["ses:CreateConfigurationSet", "ses:CreateConfigurationSetEventDestination", "ses:CreateEmailIdentity", "ses:CreateTenant", "ses:CreateTenantResourceAssociation", "ses:GetEmailIdentity", "ses:GetTenant", "ses:PutEmailIdentityMailFromAttributes", "ses:UpdateReputationEntityPolicy"], resources: ["*"] }));
 
-    const deliver = worker(
-      "CustomerWebhooks",
-      "src/workers/deliver-webhook.ts",
-    );
-    if (!props.standby) {
-      deliver.addEventSource(
-        new SqsEventSource(webhooks.main, {
-          batchSize: 10,
-          reportBatchItemFailures: true,
-        }),
-      );
-    }
+    const deliver = worker("CustomerWebhooks", "src/workers/deliver-webhook.ts");
+    if (!props.standby) deliver.addEventSource(new SqsEventSource(webhooks.main, { batchSize: 10, reportBatchItemFailures: true }));
     webhooks.main.grantConsumeMessages(deliver);
 
-    const importer = worker("ImportContacts", "src/workers/import-contacts.ts", {
-      IMPORT_BUCKET: imports.bucketName,
+    const outbox = worker("OutboxDispatch", "src/workers/outbox-dispatch.ts", {
+      EMAIL_QUEUE_URL: email.main.queueUrl,
+      WEBHOOK_QUEUE_URL: webhooks.main.queueUrl,
     });
-    if (!props.standby) {
-      importer.addEventSource(
-        new S3EventSource(imports, { events: [EventType.OBJECT_CREATED] }),
-      );
-    }
-    imports.grantRead(importer);
-
-    const outbox = worker(
-      "OutboxDispatch",
-      "src/workers/outbox-dispatch.ts",
-      {
-        CAMPAIGN_QUEUE_URL: campaign.main.queueUrl,
-        EMAIL_QUEUE_URL: email.main.queueUrl,
-        WEBHOOK_QUEUE_URL: webhooks.main.queueUrl,
-      },
-    );
-    campaign.main.grantSendMessages(outbox);
     email.main.grantSendMessages(outbox);
     webhooks.main.grantSendMessages(outbox);
-    new Rule(this, "OutboxSchedule", {
-      enabled: !props.standby,
-      schedule: Schedule.rate(Duration.minutes(1)),
-      targets: [new LambdaFunction(outbox)],
-    });
+    new Rule(this, "OutboxSchedule", { enabled: !props.standby, schedule: Schedule.rate(Duration.minutes(1)), targets: [new LambdaFunction(outbox)] });
 
-    const domainHealth = worker(
-      "DomainHealth",
-      "src/workers/domain-health.ts",
-    );
-    domainHealth.addToRolePolicy(
-      new PolicyStatement({ actions: ["ses:GetEmailIdentity"], resources: ["*"] }),
-    );
-    new Rule(this, "DomainHealthSchedule", {
-      enabled: !props.standby,
-      schedule: Schedule.rate(Duration.minutes(15)),
-      targets: [new LambdaFunction(domainHealth)],
-    });
+    const domainHealth = worker("DomainHealth", "src/workers/domain-health.ts");
+    domainHealth.addToRolePolicy(new PolicyStatement({ actions: ["ses:GetEmailIdentity"], resources: ["*"] }));
+    domainHealth.addToRolePolicy(new PolicyStatement({ actions: ["ssm:GetParameter"], resources: [`arn:aws:ssm:${this.region}:${this.account}:parameter/${prefix}/providers/*`] }));
+    providerCredentialsKey.grantDecrypt(domainHealth);
+    new Rule(this, "DomainHealthSchedule", { enabled: !props.standby, schedule: Schedule.rate(Duration.minutes(15)), targets: [new LambdaFunction(domainHealth)] });
 
-    const stripeUsage = worker(
-      "StripeUsage",
-      "src/workers/report-stripe-usage.ts",
-      {
-        STRIPE_METER_EVENT_NAME: "yodev_mail_emails_sent",
-      },
-    );
-    new Rule(this, "StripeUsageSchedule", {
-      enabled: !props.standby,
-      schedule: Schedule.rate(Duration.hours(1)),
-      targets: [new LambdaFunction(stripeUsage)],
-    });
+    const stripeUsage = worker("StripeUsage", "src/workers/report-stripe-usage.ts", { STRIPE_METER_EVENT_NAME: "yodev_mail_emails_sent" });
+    new Rule(this, "StripeUsageSchedule", { enabled: !props.standby, schedule: Schedule.rate(Duration.hours(1)), targets: [new LambdaFunction(stripeUsage)] });
+    const warmup = worker("WarmupProgress", "src/workers/warmup-progress.ts");
+    new Rule(this, "WarmupProgressSchedule", { enabled: !props.standby, schedule: Schedule.cron({ hour: "1", minute: "15" }), targets: [new LambdaFunction(warmup)] });
 
-    const warmup = worker(
-      "WarmupProgress",
-      "src/workers/warmup-progress.ts",
-    );
-    new Rule(this, "WarmupProgressSchedule", {
-      enabled: !props.standby,
-      schedule: Schedule.cron({ hour: "1", minute: "15" }),
-      targets: [new LambdaFunction(warmup)],
+    const scan = worker("AttachmentScan", "src/workers/attachment-scan.ts");
+    attachmentBucket.grantRead(scan);
+    attachmentKey.grantDecrypt(scan);
+    new Rule(this, "AttachmentScanResultRule", {
+      enabled: Boolean(props.malwareProtectionEnabled && !props.standby),
+      eventPattern: { source: ["aws.guardduty"], detailType: ["GuardDuty Malware Protection Object Scan Result"] },
+      targets: [new LambdaFunction(scan)],
     });
+    const purge = worker("AttachmentPurge", "src/workers/purge-attachments.ts");
+    attachmentBucket.grantDelete(purge);
+    new Rule(this, "AttachmentPurgeSchedule", { enabled: !props.standby, schedule: Schedule.rate(Duration.hours(1)), targets: [new LambdaFunction(purge)] });
+    const retention = worker("RetentionPurge", "src/workers/purge-retention.ts");
+    new Rule(this, "RetentionPurgeSchedule", { enabled: !props.standby, schedule: Schedule.cron({ hour: "2", minute: "30" }), targets: [new LambdaFunction(retention)] });
 
     new Rule(this, "SesEventRule", {
       enabled: !props.standby,
-      eventPattern: { source: ["aws.ses"] },
-      targets: [new SqsQueue(events.main)],
+      eventPattern: {
+        source: ["aws.ses"],
+        detail: {
+          eventType: ["Delivery", "Bounce", "Complaint", "Reject", "DeliveryDelay"],
+          mail: { tags: { ym_workspace_id: [{ exists: true }], ym_message_id: [{ exists: true }] } },
+        },
+      },
+      targets: [new SqsQueue(providerEvents.main, {
+        message: RuleTargetInput.fromObject({
+          eventId: EventField.eventId,
+          eventType: EventField.fromPath("$.detail.eventType"),
+          providerMessageId: EventField.fromPath("$.detail.mail.messageId"),
+          messageId: EventField.fromPath("$.detail.mail.tags.ym_message_id[0]"),
+          workspaceId: EventField.fromPath("$.detail.mail.tags.ym_workspace_id[0]"),
+          occurredAt: EventField.fromPath("$.detail.mail.timestamp"),
+          bounceType: EventField.fromPath("$.detail.bounce.bounceType"),
+        }),
+      })],
     });
 
     const vercelRole = new Role(this, "VercelRole", {
-      assumedBy: new WebIdentityPrincipal(
-        props.vercelOidcProvider.openIdConnectProviderArn,
-        {
-          StringEquals: {
-            [`${oidcIssuer}:aud`]: oidcAudience,
-            [`${oidcIssuer}:sub`]:
-              `owner:${props.vercelTeam}:project:yodev-mail:environment:${prod ? "production" : "preview"}`,
-          },
+      assumedBy: new WebIdentityPrincipal(props.vercelOidcProvider.openIdConnectProviderArn, {
+        StringEquals: {
+          [`${oidcIssuer}:aud`]: oidcAudience,
+          [`${oidcIssuer}:sub`]: `owner:${props.vercelTeam}:project:yodev-mail:environment:${prod ? "production" : "preview"}`,
         },
-      ),
+      }),
       roleName: `${prefix}-vercel`,
     });
     email.main.grantSendMessages(vercelRole);
-    campaign.main.grantSendMessages(vercelRole);
-    imports.grantReadWrite(vercelRole);
-    vercelRole.addToPolicy(
-      new PolicyStatement({
-        actions: [
-          "ses:CreateConfigurationSet",
-          "ses:CreateConfigurationSetEventDestination",
-          "ses:CreateEmailIdentity",
-          "ses:CreateTenant",
-          "ses:CreateTenantResourceAssociation",
-          "ses:GetEmailIdentity",
-          "ses:GetAccount",
-          "ses:GetTenant",
-          "ses:PutEmailIdentityMailFromAttributes",
-        ],
-        resources: ["*"],
-      }),
-    );
+    providerEvents.main.grantSendMessages(vercelRole);
+    providerProvisioning.main.grantSendMessages(vercelRole);
+    attachmentBucket.grantPut(vercelRole);
+    attachmentKey.grantEncrypt(vercelRole);
+    vercelRole.addToPolicy(new PolicyStatement({ actions: ["ssm:GetParameter"], resources: [`arn:aws:ssm:${this.region}:${this.account}:parameter/${prefix}/providers/*`] }));
+    providerCredentialsKey.grantDecrypt(vercelRole);
 
-    for (const queuePair of [campaign, email, events, webhooks]) {
+    for (const pair of queues) {
       if (monitoringEnabled) {
-        const age = queuePair.main
-          .metricApproximateAgeOfOldestMessage()
-          .createAlarm(this, `${queuePair.main.node.id}AgeAlarm`, {
-            evaluationPeriods: 2,
-            threshold: 300,
-            treatMissingData: TreatMissingData.NOT_BREACHING,
-          });
+        const age = pair.main.metricApproximateAgeOfOldestMessage().createAlarm(this, `${pair.main.node.id}AgeAlarm`, { evaluationPeriods: 2, threshold: 300, treatMissingData: TreatMissingData.NOT_BREACHING });
         age.addAlarmAction(new SnsAction(props.alertTopic));
-
-        const dlqMessages = queuePair.dlq
-          .metricApproximateNumberOfMessagesVisible()
-          .createAlarm(this, `${queuePair.dlq.node.id}MessagesAlarm`, {
-            evaluationPeriods: 1,
-            threshold: 1,
-            treatMissingData: TreatMissingData.NOT_BREACHING,
-          });
-        dlqMessages.addAlarmAction(new SnsAction(props.alertTopic));
+        const dlq = pair.dlq.metricApproximateNumberOfMessagesVisible().createAlarm(this, `${pair.dlq.node.id}MessagesAlarm`, { evaluationPeriods: 1, threshold: 1, treatMissingData: TreatMissingData.NOT_BREACHING });
+        dlq.addAlarmAction(new SnsAction(props.alertTopic));
       }
-
-      new CfnOutput(this, `${queuePair.main.node.id}Url`, {
-        value: queuePair.main.queueUrl,
-      });
+      new CfnOutput(this, `${pair.main.node.id}Url`, { value: pair.main.queueUrl });
     }
 
-    const bounceRate = new Metric({
-      metricName: "Reputation.BounceRate",
-      namespace: "AWS/SES",
-      period: Duration.minutes(5),
-      statistic: "Average",
-    });
-    const complaintRate = new Metric({
-      metricName: "Reputation.ComplaintRate",
-      namespace: "AWS/SES",
-      period: Duration.minutes(5),
-      statistic: "Average",
-    });
+    const bounceRate = new Metric({ metricName: "Reputation.BounceRate", namespace: "AWS/SES", period: Duration.minutes(5), statistic: "Average" });
+    const complaintRate = new Metric({ metricName: "Reputation.ComplaintRate", namespace: "AWS/SES", period: Duration.minutes(5), statistic: "Average" });
+    const attachmentRejections = new Metric({ metricName: "AttachmentScanRejected", namespace: "Yodev/Mail", dimensionsMap: { Environment: props.environment }, period: Duration.minutes(5), statistic: "Sum" });
+    const unknownOutcomes = new Metric({ metricName: "ProviderOutcomeUnknown", namespace: "Yodev/Mail", dimensionsMap: { Environment: props.environment }, period: Duration.minutes(5), statistic: "Sum" });
+    const purgeFailures = new Metric({ metricName: "AttachmentPurgeFailure", namespace: "Yodev/Mail", dimensionsMap: { Environment: props.environment }, period: Duration.minutes(5), statistic: "Sum" });
     if (monitoringEnabled) {
-      const bounceAlarm = bounceRate.createAlarm(this, "SesBounceRateAlarm", {
-        evaluationPeriods: 1,
-        threshold: 0.05,
-        treatMissingData: TreatMissingData.IGNORE,
-      });
-      const complaintAlarm = complaintRate.createAlarm(
-        this,
-        "SesComplaintRateAlarm",
-        {
-          evaluationPeriods: 1,
-          threshold: 0.001,
-          treatMissingData: TreatMissingData.IGNORE,
-        },
-      );
-      bounceAlarm.addAlarmAction(new SnsAction(props.alertTopic));
-      complaintAlarm.addAlarmAction(new SnsAction(props.alertTopic));
+      const bounce = bounceRate.createAlarm(this, "SesBounceRateAlarm", { evaluationPeriods: 1, threshold: 0.02, treatMissingData: TreatMissingData.IGNORE });
+      const complaint = complaintRate.createAlarm(this, "SesComplaintRateAlarm", { evaluationPeriods: 1, threshold: 0.001, treatMissingData: TreatMissingData.IGNORE });
+      bounce.addAlarmAction(new SnsAction(props.alertTopic));
+      complaint.addAlarmAction(new SnsAction(props.alertTopic));
+      const malware = attachmentRejections.createAlarm(this, "AttachmentScanRejectedAlarm", { evaluationPeriods: 1, threshold: 1, treatMissingData: TreatMissingData.NOT_BREACHING });
+      const unknown = unknownOutcomes.createAlarm(this, "ProviderOutcomeUnknownAlarm", { evaluationPeriods: 1, threshold: 1, treatMissingData: TreatMissingData.NOT_BREACHING });
+      const purgeFailure = purgeFailures.createAlarm(this, "AttachmentPurgeFailureAlarm", { evaluationPeriods: 1, threshold: 1, treatMissingData: TreatMissingData.NOT_BREACHING });
+      const billingFailure = stripeUsage.metricErrors().createAlarm(this, "StripeUsageFailureAlarm", { evaluationPeriods: 1, threshold: 1, treatMissingData: TreatMissingData.NOT_BREACHING });
+      malware.addAlarmAction(new SnsAction(props.alertTopic));
+      unknown.addAlarmAction(new SnsAction(props.alertTopic));
+      purgeFailure.addAlarmAction(new SnsAction(props.alertTopic));
+      billingFailure.addAlarmAction(new SnsAction(props.alertTopic));
     }
-
-    const dashboard = new CloudWatchDashboard(this, "OperationsDashboard", {
-      dashboardName: `${prefix}-operations`,
-    });
+    const dashboard = new Dashboard(this, "OperationsDashboard", { dashboardName: `${prefix}-operations` });
     dashboard.addWidgets(
-      new GraphWidget({
-        left: [
-          new Metric({ metricName: "Send", namespace: "AWS/SES", statistic: "Sum" }),
-          new Metric({ metricName: "Delivery", namespace: "AWS/SES", statistic: "Sum" }),
-          new Metric({ metricName: "Bounce", namespace: "AWS/SES", statistic: "Sum" }),
-          new Metric({ metricName: "Complaint", namespace: "AWS/SES", statistic: "Sum" }),
-        ],
-        title: "SES sending events",
-        width: 12,
-      }),
-      new GraphWidget({
-        left: [bounceRate, complaintRate],
-        title: "SES account reputation",
-        width: 12,
-      }),
-      new GraphWidget({
-        left: [campaign, email, events, webhooks].map((pair) =>
-          pair.main.metricApproximateAgeOfOldestMessage(),
-        ),
-        title: "Queue age",
-        width: 12,
-      }),
-      new GraphWidget({
-        left: workerFunctions.map((fn) => fn.metricErrors()),
-        title: "Lambda errors",
-        width: 12,
-      }),
+      new GraphWidget({ left: queues.map((pair) => pair.main.metricApproximateAgeOfOldestMessage()), title: "Provider-neutral queue age", width: 12 }),
+      new GraphWidget({ left: workerFunctions.map((fn) => fn.metricErrors()), title: "Lambda errors", width: 12 }),
+      new GraphWidget({ left: [bounceRate, complaintRate], title: "SES account reputation", width: 12 }),
+      new GraphWidget({ left: [attachmentRejections, unknownOutcomes, purgeFailures], title: "Security and ambiguous outcomes", width: 12 }),
     );
 
     Tags.of(this).add("Application", "yodev-mail");
@@ -432,23 +325,9 @@ export class YodevMailStack extends Stack {
     Tags.of(this).add("Brand", "Yodev");
     Tags.of(this).add("Environment", props.environment);
     Tags.of(this).add("managed-by", "aws-cdk");
-
-    new CfnOutput(this, "CampaignQueueArn", {
-      value: campaign.main.queueArn,
-    });
-    new CfnOutput(this, "DefaultEventBusArn", {
-      value: `arn:aws:events:${this.region}:${this.account}:event-bus/default`,
-    });
-    new CfnOutput(this, "ImportsBucket", { value: imports.bucketName });
-    new CfnOutput(this, "ScheduleGroupName", {
-      value: scheduleGroup.name ?? prefix,
-    });
-    new CfnOutput(this, "SchedulerRoleArn", {
-      value: schedulerRole.roleArn,
-    });
-    new CfnOutput(this, "StandbyMode", {
-      value: String(props.standby),
-    });
+    new CfnOutput(this, "AttachmentsBucket", { value: attachmentBucket.bucketName });
+    new CfnOutput(this, "DefaultEventBusArn", { value: `arn:aws:events:${this.region}:${this.account}:event-bus/default` });
+    new CfnOutput(this, "StandbyMode", { value: String(props.standby) });
     new CfnOutput(this, "VercelRoleArn", { value: vercelRole.roleArn });
   }
 }
