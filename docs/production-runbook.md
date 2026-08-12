@@ -6,9 +6,9 @@
 - a Neon restore branch exists and schema/table counters are exported;
 - Postmark Platform is approved and the 28-day retention option is active;
 - the Postmark Account Token exists in SSM without appearing in logs;
-- Vercel, Clerk, Stripe, AWS and DNS inventories are exported without secret values;
+- Vercel, Better Auth, Stripe, AWS and DNS inventories are exported without secret values;
 - `SES_ENABLED=false` is present in Vercel Production and the production workload;
-- `support@mail.yodev.fr` and `abuse@mail.yodev.fr` receive mail;
+- `support@yodev.fr` and `abuse@yodev.fr` receive mail;
 - public legal pages contain the final RNE/RCS wording from the official INPI extract.
 - the AWS account has completed the one-time “GuardDuty Malware Protection for S3 only” enrollment before `YODEV_MAIL_GUARDDUTY_ENABLED=true` is used or `AWS_ATTACHMENTS_BUCKET` is exposed to Vercel;
 

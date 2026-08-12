@@ -34,6 +34,7 @@ export interface YodevMailStackProps extends StackProps {
   alertTopic: ITopic;
   environment: "dev" | "prod";
   malwareProtectionEnabled?: boolean;
+  postmarkEnabled?: boolean;
   vercelOidcProvider: IOpenIdConnectProvider;
   vercelTeam: string;
   standby: boolean;
@@ -153,7 +154,7 @@ export class YodevMailStack extends Stack {
       AWS_REGION_NAME: this.region,
       DEPLOYMENT_ENVIRONMENT: props.environment,
       NODE_OPTIONS: "--enable-source-maps",
-      POSTMARK_ENABLED: "true",
+      POSTMARK_ENABLED: props.postmarkEnabled ? "true" : "false",
       POSTMARK_WEBHOOK_BASE_URL: prod ? "https://mail.yodev.fr" : "",
       PROVIDER_CREDENTIALS_KMS_KEY_ARN: providerCredentialsKey.keyArn,
       RUNTIME_PARAMETER_PREFIX: `/${prefix}/runtime`,
@@ -235,7 +236,7 @@ export class YodevMailStack extends Stack {
     attachmentBucket.grantRead(scan);
     attachmentKey.grantDecrypt(scan);
     new Rule(this, "AttachmentScanResultRule", {
-      enabled: Boolean(props.malwareProtectionEnabled && !props.standby),
+      enabled: Boolean(props.malwareProtectionEnabled),
       eventPattern: { source: ["aws.guardduty"], detailType: ["GuardDuty Malware Protection Object Scan Result"] },
       targets: [new LambdaFunction(scan)],
     });

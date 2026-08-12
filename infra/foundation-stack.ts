@@ -11,6 +11,7 @@ import type { Construct } from "constructs";
 export interface YodevMailFoundationStackProps extends StackProps {
   alertEmail?: string;
   existingVercelOidcProviderArn?: string;
+  guardDutyBudgetEmail?: string;
   vercelTeam: string;
 }
 
@@ -91,6 +92,45 @@ export class YodevMailFoundationStack extends Stack {
           ]
         : undefined,
     });
+
+    if (props.guardDutyBudgetEmail) {
+      const guardDutySubscribers = [
+        { address: props.guardDutyBudgetEmail, subscriptionType: "EMAIL" },
+      ];
+      new CfnBudget(this, "GuardDutyMonthlyBudget", {
+        budget: {
+          budgetName: "yodev-mail-guardduty-monthly",
+          budgetType: "COST",
+          budgetLimit: { amount: 5, unit: "USD" },
+          costFilters: { Service: ["Amazon GuardDuty"] },
+          costTypes: {
+            includeCredit: false,
+            includeRefund: false,
+          },
+          timeUnit: "MONTHLY",
+        },
+        notificationsWithSubscribers: [
+          {
+            notification: {
+              comparisonOperator: "GREATER_THAN",
+              notificationType: "FORECASTED",
+              threshold: 80,
+              thresholdType: "PERCENTAGE",
+            },
+            subscribers: guardDutySubscribers,
+          },
+          {
+            notification: {
+              comparisonOperator: "GREATER_THAN",
+              notificationType: "ACTUAL",
+              threshold: 100,
+              thresholdType: "PERCENTAGE",
+            },
+            subscribers: guardDutySubscribers,
+          },
+        ],
+      });
+    }
 
     Tags.of(this).add("Application", "yodev-mail");
     Tags.of(this).add("Product", "mail");

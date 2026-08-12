@@ -50,6 +50,13 @@
       "when": 1786536772230,
       "tag": "0006_lean_mystique",
       "breakpoints": true
+    },
+    {
+      "idx": 7,
+      "version": "7",
+      "when": 1786546857696,
+      "tag": "0007_better-auth-expansion",
+      "breakpoints": true
     }
   ]
 }

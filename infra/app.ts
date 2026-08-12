@@ -21,11 +21,13 @@ const activeEnvironments = new Set(
 );
 const malwareProtectionEnabled =
   process.env.YODEV_MAIL_GUARDDUTY_ENABLED === "true";
+const postmarkEnabled = process.env.YODEV_MAIL_POSTMARK_ENABLED === "true";
 
 const foundation = new YodevMailFoundationStack(app, "YodevMailFoundation", {
   alertEmail,
   env: { account, region },
   existingVercelOidcProviderArn,
+  guardDutyBudgetEmail: "hello@yodev.fr",
   terminationProtection: true,
   vercelTeam,
 });
@@ -39,6 +41,7 @@ for (const environment of ["dev", "prod"] as const) {
       environment,
       env: { account, region },
       malwareProtectionEnabled,
+      postmarkEnabled,
       terminationProtection: environment === "prod",
       vercelOidcProvider: foundation.vercelOidcProvider,
       vercelTeam,

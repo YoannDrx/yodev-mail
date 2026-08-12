@@ -11,7 +11,7 @@ const pages:Record<string,LegalPage>={
       ["Usages interdits","Sont interdits : campagnes, newsletters, publicité, prospection à froid, scraping, listes achetées, louées ou échangées, phishing, usurpation, contenu illicite et contournement d’une suspension."],
       ["Contrôles","Yodev examine l’identité, l’application, le domaine, le cas d’usage et les templates. Les quotas démarrent à 50 emails par jour et n’augmentent qu’après observation de métriques propres."],
       ["Suspension","Toute plainte provoque une pause et une revue manuelle. Une pause intervient aussi à trois hard bounces, ou à un taux de hard bounce d’au moins 2 % après 50 envois."],
-      ["Signalement","Un abus peut être signalé à abuse@mail.yodev.fr avec les en-têtes utiles. Ne transmettez pas de mot de passe ni de contenu sensible inutile."],
+      ["Signalement","Un abus peut être signalé à abuse@yodev.fr avec les en-têtes utiles. Ne transmettez pas de mot de passe ni de contenu sensible inutile."],
     ],
   },
   confidentialite:{
@@ -23,7 +23,7 @@ const pages:Record<string,LegalPage>={
       ["Finalités","Les données servent à authentifier les utilisateurs, vérifier les domaines, livrer les messages, traiter les incidents de délivrabilité, prévenir les abus, facturer l’usage et satisfaire les obligations légales."],
       ["Conservation","Les corps sont conservés 30 jours maximum, les pièces jointes 24 heures maximum et les événements techniques expurgés 90 jours. Les données contractuelles, de facturation et d’audit sont conservées pendant les durées nécessaires aux obligations applicables."],
       ["Transferts","Certains sous-traitants peuvent traiter des données hors de l’Espace économique européen. Yodev s’appuie alors sur les mécanismes de transfert déclarés par ces prestataires, notamment les clauses contractuelles types lorsqu’elles sont applicables."],
-      ["Droits et contact","Les demandes d’accès, rectification, effacement, limitation ou opposition peuvent être adressées à support@mail.yodev.fr. Une réclamation peut être déposée auprès de la CNIL."],
+      ["Droits et contact","Les demandes d’accès, rectification, effacement, limitation ou opposition peuvent être adressées à support@yodev.fr. Une réclamation peut être déposée auprès de la CNIL."],
     ],
   },
   cgu:{
@@ -47,7 +47,7 @@ const pages:Record<string,LegalPage>={
       ["Régime de TVA","TVA non applicable, article 293 B du Code général des impôts."],
       ["Adresse professionnelle","11 rue de la Chine, 75020 Paris, France."],
       ["Directeur de la publication","Yoann Andrieux."],
-      ["Contact","support@mail.yodev.fr."],
+      ["Contact","support@yodev.fr."],
       ["Hébergement","L’application est hébergée par Vercel Inc., 440 N Barranca Avenue #4133, Covina, CA 91723, États-Unis. La base applicative est fournie par Neon. Les autres sous-traitants sont listés sur la page dédiée."],
     ],
   },
@@ -69,7 +69,7 @@ const pages:Record<string,LegalPage>={
     sections:[
       ["Vercel","Hébergement de l’application web et des fonctions HTTP. Société américaine ; localisation et mécanismes de transfert selon le contrat Vercel applicable."],
       ["Neon","Base de données PostgreSQL managée, configurée dans une région européenne pour ce service."],
-      ["Clerk","Authentification, comptes utilisateurs et organisations. Traitements et transferts selon les engagements contractuels Clerk applicables."],
+      ["Google","Fournisseur de connexion OAuth facultatif pour les membres invités. Les autres données d’authentification et d’organisation sont stockées par Yodev avec Better Auth."],
       ["Stripe","Abonnement, facturation, paiement et portail client. Les données de paiement sont traitées directement par Stripe."],
       ["Amazon Web Services","Files, fonctions, stockage temporaire, chiffrement, antivirus et, lorsqu’il est activé, transport transactionnel dans la région AWS configurée."],
       ["Postmark / ActiveCampaign","Transport transactionnel initial, authentification de domaine, événements de livraison, bounce et plainte. Le contenu est réglé sur une rétention maximale de 28 jours lorsque l’option contractuelle est active."],
@@ -81,7 +81,7 @@ const pages:Record<string,LegalPage>={
     sections:[
       ["Périmètre bêta","La bêta est un service accompagné sans engagement de disponibilité financièrement garanti. Yodev vise une disponibilité mensuelle de 99,5 %, hors maintenance annoncée et dépendances externes."],
       ["Priorités","Un incident critique empêche toute acceptation ou crée un risque de sécurité ; un incident majeur dégrade une fonction essentielle ; un incident mineur dispose d’un contournement acceptable."],
-      ["Communication","Les incidents critiques sont pris en charge en priorité et communiqués aux clients affectés par le canal disponible. Les demandes de support sont adressées à support@mail.yodev.fr."],
+      ["Communication","Les incidents critiques sont pris en charge en priorité et communiqués aux clients affectés par le canal disponible. Les demandes de support sont adressées à support@yodev.fr."],
       ["Sécurité","Une suspicion de violation, de clé compromise ou d’abus doit être signalée immédiatement. Yodev peut suspendre les envois pendant l’enquête et notifier les parties selon les obligations applicables."],
       ["Maintenance","Les maintenances planifiées sont annoncées lorsque possible. Les changements de domaine sont drainés avant bascule et ne provoquent jamais de failover automatique d’un message déjà transmis."],
     ],

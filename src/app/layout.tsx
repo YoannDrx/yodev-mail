@@ -1,8 +1,6 @@
 import type { Metadata } from "next";
 import { DM_Sans, Fira_Code, Plus_Jakarta_Sans } from "next/font/google";
-import { ClerkProvider } from "@clerk/nextjs";
 import { TooltipProvider } from "@/components/ui/tooltip";
-import { isClerkConfigured } from "@/lib/env";
 import "./globals.css";
 
 const bodyFont = DM_Sans({
@@ -37,11 +35,7 @@ export default function RootLayout({
       className={`${bodyFont.variable} ${displayFont.variable} ${monoFont.variable} h-full antialiased`}
     >
       <body className="min-h-full flex flex-col">
-        {isClerkConfigured() ? (
-          <ClerkProvider><TooltipProvider>{children}</TooltipProvider></ClerkProvider>
-        ) : (
-          <TooltipProvider>{children}</TooltipProvider>
-        )}
+        <TooltipProvider>{children}</TooltipProvider>
       </body>
     </html>
   );

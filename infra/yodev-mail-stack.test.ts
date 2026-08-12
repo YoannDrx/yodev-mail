@@ -29,6 +29,7 @@ beforeAll(() => {
     environment: "prod",
     env,
     malwareProtectionEnabled: true,
+    postmarkEnabled: false,
     standby: false,
     vercelOidcProvider: foundationStack.vercelOidcProvider,
     vercelTeam: "yoanndrxs-projects",
@@ -137,6 +138,20 @@ describe("Mail by Yodev AWS infrastructure", () => {
         RestrictPublicBuckets: true,
       },
     }));
+  });
+
+  test("keeps SES and Postmark disabled before external approval", () => {
+    activeProductionWorkload.hasResourceProperties(
+      "AWS::Lambda::Function",
+      Match.objectLike({
+        Environment: Match.objectLike({
+          Variables: Match.objectLike({
+            POSTMARK_ENABLED: "false",
+            SES_ENABLED: "false",
+          }),
+        }),
+      }),
+    );
   });
 
   test("transforms SES events before enqueueing them", () => {

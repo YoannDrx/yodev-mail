@@ -120,7 +120,7 @@ export async function provisionPostmarkDomain(input: {
     records: [
       ...(dkimName && dkimValue ? [{ type: "TXT", name: dkimName, value: dkimValue }] : []),
       ...(domain.ReturnPathDomain && domain.ReturnPathDomainCNAMEValue ? [{ type: "CNAME", name: domain.ReturnPathDomain, value: domain.ReturnPathDomainCNAMEValue }] : []),
-      { type: "TXT", name: `_dmarc.${input.domain}`, value: "v=DMARC1; p=none; rua=mailto:abuse@mail.yodev.fr" },
+      { type: "TXT", name: `_dmarc.${input.domain}`, value: "v=DMARC1; p=none; rua=mailto:dmarc@yodev.fr; adkim=r; aspf=r; pct=100" },
     ],
   };
 }

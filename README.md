@@ -7,7 +7,7 @@ The public contract never accepts a provider, `cc`, `bcc`, tracking option, camp
 ## Stack
 
 - Next.js 16, React 19 and TypeScript
-- Clerk Organizations
+- Better Auth avec Google OAuth, organisations, passkeys et authentification email optionnelle
 - Neon Postgres and Drizzle migrations
 - Postmark Platform and Amazon SES v2 behind a provider-neutral delivery interface
 - SQS, Lambda, EventBridge, S3, KMS, GuardDuty Malware Protection and SSM SecureString
@@ -62,14 +62,20 @@ Always pass the existing OIDC provider ARN when diffing or deploying. Omitting `
 
 `YODEV_MAIL_GUARDDUTY_ENABLED` remains `false` until the account has completed the one-time “GuardDuty Malware Protection for S3 only” enrollment. The attachment API stays disabled in Vercel until a subsequent deployment with this flag set to `true` succeeds.
 
+`YODEV_MAIL_POSTMARK_ENABLED` also remains `false` until Postmark has approved the account, Platform and 28-day retention are active, and the system domain and webhooks have been verified.
+
 Production CDK sets `SES_ENABLED=false`. Postmark credentials are stored under:
 
 ```text
 /yodev-mail-prod/providers/postmark/account-token
+/yodev-mail-prod/providers/postmark/system/server-token
+/yodev-mail-prod/providers/postmark/system/webhook-password
 /yodev-mail-prod/providers/postmark/workspaces/{workspaceId}/server-token
 /yodev-mail-prod/providers/postmark/workspaces/{workspaceId}/webhook-password
 ```
 
 Runtime database, webhook and Stripe secrets are stored under `/yodev-mail-{environment}/runtime/`. Vercel accesses AWS through its project-scoped OIDC role, never a static AWS access key.
+
+Better Auth uses a distinct `BETTER_AUTH_SECRET` and Google OAuth client in every environment. Public organization creation is disabled; the first organization is rebound to the existing workspace only for `AUTH_BOOTSTRAP_EMAIL`. Email/password stays disabled until the Postmark system Server is approved and configured.
 
 See [architecture](docs/architecture.md) and the [production runbook](docs/production-runbook.md).

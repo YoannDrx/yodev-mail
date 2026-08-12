@@ -1,6 +1,6 @@
 # Mail by Yodev Guidance
 
-- Mail by Yodev is a French multi-tenant transactional email gateway built on Next.js 16, Clerk Organizations, Neon/Drizzle, Stripe, Postmark and Amazon SES v2.
+- Mail by Yodev is a French multi-tenant transactional email gateway built on Next.js 16, Better Auth Organizations, Neon/Drizzle, Stripe, Postmark and Amazon SES v2.
 - Read `README.md`, `package.json`, the target file and the nearest schema/test before non-trivial edits.
 - Keep Server Components as the default. Client components are limited to interactive controls.
 - Every database access must receive and filter by an explicit `workspaceId`.
