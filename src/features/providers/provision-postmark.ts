@@ -42,7 +42,7 @@ export async function provisionPostmarkDomain(input: {
 }) {
   const accountParameter = process.env.POSTMARK_ACCOUNT_TOKEN_PARAMETER ?? `/yodev-mail-${input.environment}/providers/postmark/account-token`;
   const accountToken = await getSecureParameter(accountParameter);
-  const serverName = `Mail by Yodev · ${input.workspaceName}`;
+  const serverName = `Mail by Yodev · ${input.workspaceName} · ${input.environment.toUpperCase()}`;
   const listedServers = input.existingAccount ? [] : (await postmark<PostmarkList<PostmarkServer>>("/servers?count=500&offset=0", accountToken)).Servers ?? [];
   const priorServer = listedServers.find((item) => item.Name === serverName);
   const server = input.existingAccount
@@ -82,7 +82,11 @@ export async function provisionPostmarkDomain(input: {
     input.existingAccount ? Promise.resolve() : ssm.send(new PutParameterCommand({ KeyId: keyId, Name: `${credentialPrefix}/server-token`, Type: "SecureString", Value: serverToken, Overwrite: true })),
     input.existingAccount ? Promise.resolve() : ssm.send(new PutParameterCommand({ KeyId: keyId, Name: webhookParameterName, Type: "SecureString", Value: webhookPassword, Overwrite: true })),
   ]);
-  const webhookUrl = `${process.env.NEXT_PUBLIC_APP_URL ?? "https://mail.yodev.fr"}/api/providers/postmark/${input.bindingId}`;
+  const webhookBaseUrl = process.env.POSTMARK_WEBHOOK_BASE_URL?.replace(/\/$/, "");
+  if (!webhookBaseUrl) {
+    throw new Error("POSTMARK_WEBHOOK_BASE_URL is required before provisioning Postmark.");
+  }
+  const webhookUrl = `${webhookBaseUrl}/api/providers/postmark/${input.bindingId}`;
   const existingWebhooks = await fetch("https://api.postmarkapp.com/webhooks?MessageStream=outbound", {
     headers: { Accept: "application/json", "X-Postmark-Server-Token": serverToken },
     signal: AbortSignal.timeout(15_000),
