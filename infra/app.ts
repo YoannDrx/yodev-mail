@@ -48,5 +48,5 @@ for (const environment of ["dev", "prod"] as const) {
       standby: !activeEnvironments.has(environment),
     },
   );
-  stack.addDependency(foundation);
+  stack.addStackDependency(foundation);
 }
