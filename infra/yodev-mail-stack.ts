@@ -154,6 +154,7 @@ export class YodevMailStack extends Stack {
       DEPLOYMENT_ENVIRONMENT: props.environment,
       NODE_OPTIONS: "--enable-source-maps",
       POSTMARK_ENABLED: "true",
+      POSTMARK_WEBHOOK_BASE_URL: prod ? "https://mail.yodev.fr" : "",
       PROVIDER_CREDENTIALS_KMS_KEY_ARN: providerCredentialsKey.keyArn,
       RUNTIME_PARAMETER_PREFIX: `/${prefix}/runtime`,
       SES_ENABLED: prod ? "false" : "true",
