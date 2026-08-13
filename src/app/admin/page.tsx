@@ -17,6 +17,7 @@ import {
   disableDomainBindingAction,
   disableTemplateAction,
   disableTransactionalProfileAction,
+  inviteWorkspaceMemberAction,
   provisionDomainAction,
   reviewTemplateAction,
   reviewTransactionalProfileAction,
@@ -67,6 +68,10 @@ export default async function Page() {
             {subscription?.pilotAccessExpiresAt && <form action={setPilotAccessAction.bind(null, workspace.id, null)}><Button size="sm" type="submit" variant="destructive">Révoquer pilote</Button></form>}
           </div>
         </div>
+        {workspace.status === "approved" && <form action={inviteWorkspaceMemberAction.bind(null, workspace.id)} className="mt-4 flex max-w-xl gap-2">
+          <input aria-label={`Inviter dans ${workspace.name}`} className="h-9 flex-1 rounded-md border px-3 text-sm" name="email" placeholder="membre@example.com" required type="email" />
+          <Button size="sm" type="submit" variant="outline">Inviter un membre</Button>
+        </form>}
         {workspace.status === "pending_review" && <p className="mt-4 rounded-xl bg-amber-50 p-3 text-sm text-amber-900"><AlertTriangle className="mr-2 inline size-4" />Vérifier identité, site, application, déclencheurs et relation destinataire avant approbation.</p>}
       </article>;})}
     </Section>

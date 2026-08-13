@@ -2,6 +2,7 @@
 
 import { and, eq } from "drizzle-orm";
 import { revalidatePath } from "next/cache";
+import { headers } from "next/headers";
 import { z } from "zod";
 import { requireDb } from "@/db";
 import {
@@ -16,11 +17,43 @@ import {
   workspaces,
 } from "@/db/schema";
 import { enqueueProviderProvisioning } from "@/lib/aws";
+import { getAuth } from "@/lib/auth";
 import { requireAdmin } from "@/lib/page-auth";
 import { provisionBinding } from "@/workers/provider-provisioning";
 
 const idSchema = z.string().uuid();
 const pilotDaysSchema = z.union([z.literal(30), z.literal(60), z.literal(90), z.null()]);
+
+export async function inviteWorkspaceMemberAction(workspaceId: string, formData: FormData) {
+  const id = idSchema.parse(workspaceId);
+  const email = z.string().trim().email().parse(formData.get("email")).toLowerCase();
+  const { userId } = await requireAdmin();
+  const db = requireDb();
+  const [workspace] = await db.select({
+    authOrganizationId: workspaces.authOrganizationId,
+    status: workspaces.status,
+  }).from(workspaces).where(eq(workspaces.id, id)).limit(1);
+  if (!workspace || workspace.status !== "approved" || !workspace.authOrganizationId) {
+    throw new Error("An approved workspace linked to Better Auth is required");
+  }
+  const invitation = await getAuth().api.createInvitation({
+    headers: await headers(),
+    body: {
+      email,
+      organizationId: workspace.authOrganizationId,
+      role: "member",
+    },
+  });
+  await db.insert(auditEvents).values({
+    workspaceId: id,
+    actorUserId: userId,
+    action: "workspace.member_invited",
+    entityType: "auth_invitation",
+    entityId: invitation.id,
+    metadata: { role: "member" },
+  });
+  revalidatePath("/admin");
+}
 
 export async function setPilotAccessAction(workspaceId: string, days: 30 | 60 | 90 | null) {
   const id = idSchema.parse(workspaceId);
