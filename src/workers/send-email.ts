@@ -21,6 +21,7 @@ import { evaluateStoredMessage, utcDay } from "@/features/sending/eligibility";
 import { queuePublicEmailEvent } from "@/features/webhooks/public-email-event";
 import { awsClients } from "@/lib/aws";
 import { emitOperationalMetric } from "@/lib/operational-metric";
+import { logWorkerResult } from "@/lib/worker-log";
 import { loadRuntimeSecrets } from "@/workers/runtime-secrets";
 
 export async function handler(event: SQSEvent): Promise<SQSBatchResponse> {
@@ -29,7 +30,9 @@ export async function handler(event: SQSEvent): Promise<SQSBatchResponse> {
   for (const record of event.Records) {
     try {
       await sendOne(JSON.parse(record.body).messageId);
+      logWorkerResult({ worker: "send-email", correlationId: record.messageId, outcome: "completed" });
     } catch {
+      logWorkerResult({ worker: "send-email", correlationId: record.messageId, outcome: "failed", code: "technical_failure" });
       failures.push({ itemIdentifier: record.messageId });
     }
   }
@@ -119,13 +122,13 @@ export async function sendOne(messageId: string) {
     .returning();
   if (!claimed) return;
   if (!claimed.provider || !claimed.transactionalProfileId) {
-    await db.update(messages).set({ status: "failed", lastError: "Provider assignment is missing.", updatedAt: new Date() }).where(and(eq(messages.id, claimed.id), eq(messages.workspaceId, claimed.workspaceId)));
+    await db.update(messages).set({ status: "failed", failedAt: new Date(), lastError: "Provider assignment is missing.", updatedAt: new Date() }).where(and(eq(messages.id, claimed.id), eq(messages.workspaceId, claimed.workspaceId)));
     await releaseReservation(claimed.workspaceId, claimed.queuedAt);
     await publishTerminalEvent({ workspaceId: claimed.workspaceId, messageId: claimed.id, provider: claimed.provider, status: "failed", errorCode: "provider_assignment_missing" });
     return;
   }
   if (claimed.sendDeadlineAt && claimed.sendDeadlineAt <= new Date()) {
-    await db.update(messages).set({ status: "failed", lastError: "send_deadline_exceeded", updatedAt: new Date() }).where(and(eq(messages.id, claimed.id), eq(messages.workspaceId, claimed.workspaceId)));
+    await db.update(messages).set({ status: "failed", failedAt: new Date(), lastError: "send_deadline_exceeded", updatedAt: new Date() }).where(and(eq(messages.id, claimed.id), eq(messages.workspaceId, claimed.workspaceId)));
     await releaseReservation(claimed.workspaceId, claimed.queuedAt);
     await publishTerminalEvent({ workspaceId: claimed.workspaceId, messageId: claimed.id, provider: claimed.provider, status: "failed", errorCode: "send_deadline_exceeded" });
     return;
@@ -141,7 +144,7 @@ export async function sendOne(messageId: string) {
   });
   if (!eligibility.allowed) {
     const status = eligibility.code === "recipient_suppressed" ? "suppressed" : "failed";
-    await db.update(messages).set({ status, lastError: eligibility.reason, updatedAt: new Date() }).where(and(eq(messages.id, claimed.id), eq(messages.workspaceId, claimed.workspaceId)));
+    await db.update(messages).set({ status, failedAt: status === "failed" ? new Date() : null, lastError: eligibility.reason, updatedAt: new Date() }).where(and(eq(messages.id, claimed.id), eq(messages.workspaceId, claimed.workspaceId)));
     await releaseReservation(claimed.workspaceId, claimed.queuedAt);
     await publishTerminalEvent({ workspaceId: claimed.workspaceId, messageId: claimed.id, provider: claimed.provider, status, errorCode: eligibility.code });
     return;
@@ -153,7 +156,7 @@ export async function sendOne(messageId: string) {
     eq(workspaceProviderAccounts.status, "ready"),
   )).limit(1);
   if (!account?.externalAccountId) {
-    await db.update(messages).set({ status: "failed", lastError: "Provider account is unavailable.", updatedAt: new Date() }).where(and(eq(messages.id, claimed.id), eq(messages.workspaceId, claimed.workspaceId)));
+    await db.update(messages).set({ status: "failed", failedAt: new Date(), lastError: "Provider account is unavailable.", updatedAt: new Date() }).where(and(eq(messages.id, claimed.id), eq(messages.workspaceId, claimed.workspaceId)));
     await releaseReservation(claimed.workspaceId, claimed.queuedAt);
     await publishTerminalEvent({ workspaceId: claimed.workspaceId, messageId: claimed.id, provider: claimed.provider, status: "failed", errorCode: "provider_account_unavailable" });
     return;
@@ -233,7 +236,8 @@ export async function sendOne(messageId: string) {
     const ambiguous = providerError.kind === "ambiguous";
     if (ambiguous) emitOperationalMetric("ProviderOutcomeUnknown");
     await db.transaction(async (tx) => {
-      await tx.update(messages).set({ status: ambiguous ? "unknown" : "failed", ambiguousAt: ambiguous ? new Date() : null, lastError: providerError.code, updatedAt: new Date() }).where(and(eq(messages.id, claimed.id), eq(messages.workspaceId, claimed.workspaceId)));
+      const terminalAt = new Date();
+      await tx.update(messages).set({ status: ambiguous ? "unknown" : "failed", ambiguousAt: ambiguous ? terminalAt : null, failedAt: ambiguous ? null : terminalAt, lastError: providerError.code, updatedAt: terminalAt }).where(and(eq(messages.id, claimed.id), eq(messages.workspaceId, claimed.workspaceId)));
     });
     await recordAttempt({ workspaceId: claimed.workspaceId, messageId: claimed.id, provider: claimed.provider, status: ambiguous ? "unknown" : "failed", outcome: ambiguous ? "ambiguous" : "definitive_failure", errorCode: providerError.code });
     await releaseReservation(claimed.workspaceId, claimed.queuedAt);

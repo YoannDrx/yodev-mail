@@ -1,14 +1,29 @@
 import "server-only";
-import { auth } from "@clerk/nextjs/server";
+
+import { headers } from "next/headers";
 import { notFound, redirect } from "next/navigation";
-import { env, isClerkConfigured } from "@/lib/env";
+import { getAuth } from "@/lib/auth";
 import { currentWorkspace } from "@/lib/current-workspace";
-export async function requirePageUser(){if(!isClerkConfigured())return {userId:"demo_user"};const session=await auth();if(!session.userId)redirect("/connexion");return {userId:session.userId}}
-export async function requirePageWorkspace(){
-  if(!isClerkConfigured())return null;
-  const session=await auth();
-  if(!session.userId)redirect("/connexion");
-  if(!session.orgId)redirect("/onboarding");
-  return currentWorkspace();
+import { isBetterAuthConfigured } from "@/lib/env";
+
+export async function requirePageUser() {
+  if (!isBetterAuthConfigured()) redirect("/connexion?configuration=requise");
+  const session = await getAuth().api.getSession({ headers: await headers() });
+  if (!session?.user.id) redirect("/connexion");
+  return { userId: session.user.id, user: session.user };
 }
-export async function requireAdmin(){const {userId}=await requirePageUser();if(userId==="demo_user")return {userId};const admins=new Set((env.ADMIN_USER_IDS??"").split(",").filter(Boolean));if(!admins.has(userId))notFound();return {userId}}
+
+export async function requirePageWorkspace() {
+  await requirePageUser();
+  try {
+    return await currentWorkspace();
+  } catch {
+    redirect("/onboarding");
+  }
+}
+
+export async function requireAdmin() {
+  const { user } = await requirePageUser();
+  if ((user as { role?: string }).role !== "admin") notFound();
+  return { userId: user.id };
+}

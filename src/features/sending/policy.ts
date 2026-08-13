@@ -8,6 +8,7 @@ export type SendingEligibilityInput = {
   dailyLimit: number;
   now?: Date;
   graceEndsAt?: Date | null;
+  pilotAccessExpiresAt?: Date | null;
 };
 
 export type EligibilityResult = { allowed: true } | { allowed: false; code: string; reason: string };
@@ -31,6 +32,7 @@ export function evaluateSendingEligibility(input: SendingEligibilityInput): Elig
     return { allowed: false, code: "daily_limit_reached", reason: "Le quota quotidien progressif est atteint." };
   }
   if (mode === "test") return { allowed: true };
+  if (input.pilotAccessExpiresAt && input.pilotAccessExpiresAt > now) return { allowed: true };
   if (input.billingStatus === "active" || input.billingStatus === "trialing") return { allowed: true };
   if (
     input.billingStatus === "past_due" &&

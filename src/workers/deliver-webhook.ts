@@ -1,13 +1,12 @@
 import type { SQSEvent, SQSBatchResponse } from "aws-lambda";
-import { and, eq } from "drizzle-orm";
+import { and, eq, isNull, lt, lte, or } from "drizzle-orm";
 import { requireDb } from "@/db/runtime";
-import {
-  emailEvents,
-  webhookDeliveries,
-  webhookEndpoints,
-} from "@/db/schema";
-import { decryptSecret, hmac } from "@/lib/crypto";
+import { emailEvents, outboxJobs, webhookDeliveries, webhookEndpoints } from "@/db/schema";
+import { nextWebhookAttemptAt } from "@/features/webhooks/retry-policy";
 import { validateWebhookUrl } from "@/features/webhooks/validate-url";
+import { decryptSecret, hmac } from "@/lib/crypto";
+import { emitOperationalMetric } from "@/lib/operational-metric";
+import { logWorkerResult } from "@/lib/worker-log";
 import { loadRuntimeSecrets } from "@/workers/runtime-secrets";
 
 export async function handler(event: SQSEvent): Promise<SQSBatchResponse> {
@@ -15,37 +14,75 @@ export async function handler(event: SQSEvent): Promise<SQSBatchResponse> {
   const failed: Array<{ itemIdentifier: string }> = [];
   for (const record of event.Records) {
     try {
-      await deliver(JSON.parse(record.body).deliveryId);
+      await deliverWebhook(JSON.parse(record.body).deliveryId);
+      logWorkerResult({ worker: "deliver-webhook", correlationId: record.messageId, outcome: "completed" });
     } catch {
+      logWorkerResult({ worker: "deliver-webhook", correlationId: record.messageId, outcome: "failed", code: "technical_failure" });
       failed.push({ itemIdentifier: record.messageId });
     }
   }
   return { batchItemFailures: failed };
 }
 
-async function deliver(deliveryId: string) {
+async function recordExpectedFailure(input: {
+  deliveryId: string;
+  workspaceId: string;
+  attempt: number;
+  errorCode: string;
+  statusCode?: number;
+  now: Date;
+}) {
   const db = requireDb();
-  const [row] = await db
-    .select({
-      delivery: webhookDeliveries,
-      endpoint: webhookEndpoints,
-      event: emailEvents,
-    })
+  const nextAttemptAt = nextWebhookAttemptAt(input.attempt, input.now);
+  await db.transaction(async (tx) => {
+    await tx.update(webhookDeliveries).set({
+      attempt: input.attempt,
+      claimedAt: null,
+      lastError: input.errorCode,
+      nextAttemptAt,
+      statusCode: input.statusCode,
+      terminalAt: nextAttemptAt ? null : input.now,
+      updatedAt: input.now,
+    }).where(and(eq(webhookDeliveries.id, input.deliveryId), eq(webhookDeliveries.workspaceId, input.workspaceId)));
+    if (nextAttemptAt) {
+      await tx.insert(outboxJobs).values({
+        workspaceId: input.workspaceId,
+        aggregateId: input.deliveryId,
+        availableAt: nextAttemptAt,
+        kind: "webhook",
+      });
+    }
+  });
+  if (!nextAttemptAt) emitOperationalMetric("CustomerWebhookTerminalFailure");
+}
+
+export async function deliverWebhook(deliveryId: string, now = new Date()) {
+  const db = requireDb();
+  const [row] = await db.select({ delivery: webhookDeliveries, endpoint: webhookEndpoints, event: emailEvents })
     .from(webhookDeliveries)
-    .innerJoin(
-      webhookEndpoints,
-      eq(webhookDeliveries.endpointId, webhookEndpoints.id),
-    )
+    .innerJoin(webhookEndpoints, eq(webhookDeliveries.endpointId, webhookEndpoints.id))
     .innerJoin(emailEvents, eq(webhookDeliveries.eventId, emailEvents.id))
-    .where(
-      and(
-        eq(webhookDeliveries.id, deliveryId),
-        eq(webhookDeliveries.workspaceId, webhookEndpoints.workspaceId),
-        eq(webhookDeliveries.workspaceId, emailEvents.workspaceId),
-      ),
-    )
-    .limit(1);
-  if (!row || row.delivery.deliveredAt || !row.endpoint.enabled) return;
+    .where(and(
+      eq(webhookDeliveries.id, deliveryId),
+      eq(webhookDeliveries.workspaceId, webhookEndpoints.workspaceId),
+      eq(webhookDeliveries.workspaceId, emailEvents.workspaceId),
+    )).limit(1);
+  if (!row || row.delivery.deliveredAt || row.delivery.terminalAt || !row.endpoint.enabled) return;
+  if (row.delivery.nextAttemptAt && row.delivery.nextAttemptAt > now) return;
+
+  const encryptionKey = process.env.WEBHOOK_SIGNING_SECRET;
+  if (!encryptionKey) throw new Error("WEBHOOK_SIGNING_SECRET is missing");
+  const signingSecret = decryptSecret(row.endpoint.signingSecretEncrypted, encryptionKey);
+  const staleClaim = new Date(now.getTime() - 2 * 60_000);
+  const [claimed] = await db.update(webhookDeliveries).set({ claimedAt: now, updatedAt: now }).where(and(
+    eq(webhookDeliveries.id, deliveryId),
+    eq(webhookDeliveries.workspaceId, row.delivery.workspaceId),
+    isNull(webhookDeliveries.deliveredAt),
+    isNull(webhookDeliveries.terminalAt),
+    or(isNull(webhookDeliveries.nextAttemptAt), lte(webhookDeliveries.nextAttemptAt, now)),
+    or(isNull(webhookDeliveries.claimedAt), lt(webhookDeliveries.claimedAt, staleClaim)),
+  )).returning({ id: webhookDeliveries.id });
+  if (!claimed) throw new Error("Webhook delivery is already claimed");
 
   const body = JSON.stringify({
     created_at: row.event.occurredAt,
@@ -53,14 +90,16 @@ async function deliver(deliveryId: string) {
     id: row.event.id,
     type: row.event.type,
   });
-  const timestamp = Math.floor(Date.now() / 1000);
-  const encryptionKey = process.env.WEBHOOK_SIGNING_SECRET;
-  if (!encryptionKey) throw new Error("WEBHOOK_SIGNING_SECRET is missing");
-  const signingSecret = decryptSecret(
-    row.endpoint.signingSecretEncrypted,
-    encryptionKey,
-  );
-  const safeUrl = await validateWebhookUrl(row.endpoint.url);
+  const timestamp = Math.floor(now.getTime() / 1000);
+  const attempt = row.delivery.attempt + 1;
+
+  let safeUrl: string;
+  try {
+    safeUrl = await validateWebhookUrl(row.endpoint.url);
+  } catch {
+    await recordExpectedFailure({ deliveryId, workspaceId: row.delivery.workspaceId, attempt, errorCode: "webhook_url_rejected", now });
+    return;
+  }
 
   try {
     const response = await fetch(safeUrl, {
@@ -68,38 +107,27 @@ async function deliver(deliveryId: string) {
       headers: {
         "content-type": "application/json",
         "user-agent": "Yodev-Mail-Webhooks/1.0",
-        "x-yodev-mail-signature": hmac(
-          `${timestamp}.${body}`,
-          signingSecret,
-        ),
+        "x-yodev-mail-signature": hmac(`${timestamp}.${body}`, signingSecret),
         "x-yodev-mail-timestamp": String(timestamp),
       },
       method: "POST",
       redirect: "error",
       signal: AbortSignal.timeout(10_000),
     });
-    if (!response.ok) throw new Error(`Webhook returned ${response.status}`);
-    await db
-      .update(webhookDeliveries)
-      .set({
-        attempt: row.delivery.attempt + 1,
-        deliveredAt: new Date(),
-        lastError: null,
-        statusCode: response.status,
-        updatedAt: new Date(),
-      })
-      .where(and(eq(webhookDeliveries.id, deliveryId), eq(webhookDeliveries.workspaceId, row.delivery.workspaceId)));
-  } catch (error) {
-    const attempt = row.delivery.attempt + 1;
-    await db
-      .update(webhookDeliveries)
-      .set({
-        attempt,
-        lastError: error instanceof Error ? error.message : "Webhook delivery failed",
-        nextAttemptAt: new Date(Date.now() + Math.min(3600, 2 ** attempt) * 1000),
-        updatedAt: new Date(),
-      })
-      .where(and(eq(webhookDeliveries.id, deliveryId), eq(webhookDeliveries.workspaceId, row.delivery.workspaceId)));
-    throw error;
+    if (!response.ok) {
+      await recordExpectedFailure({ deliveryId, workspaceId: row.delivery.workspaceId, attempt, errorCode: `http_${response.status}`, statusCode: response.status, now });
+      return;
+    }
+    await db.update(webhookDeliveries).set({
+      attempt,
+      claimedAt: null,
+      deliveredAt: now,
+      lastError: null,
+      nextAttemptAt: null,
+      statusCode: response.status,
+      updatedAt: now,
+    }).where(and(eq(webhookDeliveries.id, deliveryId), eq(webhookDeliveries.workspaceId, row.delivery.workspaceId)));
+  } catch {
+    await recordExpectedFailure({ deliveryId, workspaceId: row.delivery.workspaceId, attempt, errorCode: "network_error", now });
   }
 }

@@ -20,6 +20,31 @@ import { requireAdmin } from "@/lib/page-auth";
 import { provisionBinding } from "@/workers/provider-provisioning";
 
 const idSchema = z.string().uuid();
+const pilotDaysSchema = z.union([z.literal(30), z.literal(60), z.literal(90), z.null()]);
+
+export async function setPilotAccessAction(workspaceId: string, days: 30 | 60 | 90 | null) {
+  const id = idSchema.parse(workspaceId);
+  const durationDays = pilotDaysSchema.parse(days);
+  const { userId } = await requireAdmin();
+  const db = requireDb();
+  const [workspace] = await db.select({ id: workspaces.id, status: workspaces.status }).from(workspaces).where(eq(workspaces.id, id)).limit(1);
+  if (!workspace || workspace.status !== "approved") throw new Error("Workspace must be approved before granting pilot access");
+  const expiresAt = durationDays === null ? null : new Date(Date.now() + durationDays * 86_400_000);
+  await db.transaction(async (tx) => {
+    const updated = await tx.update(subscriptions).set({ pilotAccessExpiresAt: expiresAt, updatedAt: new Date() }).where(eq(subscriptions.workspaceId, id)).returning({ id: subscriptions.id });
+    if (!updated.length) throw new Error("Workspace subscription record is missing");
+    await tx.insert(auditEvents).values({
+      workspaceId: id,
+      actorUserId: userId,
+      action: durationDays === null ? "billing.pilot_access_revoked" : "billing.pilot_access_granted",
+      entityType: "subscription",
+      entityId: updated[0].id,
+      metadata: { reason: "internal_canary", expiresAt: expiresAt?.toISOString() ?? null },
+    });
+  });
+  revalidatePath("/admin");
+  revalidatePath("/dashboard/facturation");
+}
 
 export async function reviewWorkspaceAction(workspaceId: string, decision: "approved" | "rejected" | "limited") {
   const id = idSchema.parse(workspaceId);

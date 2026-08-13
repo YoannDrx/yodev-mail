@@ -20,6 +20,169 @@ const timestamps = {
   updatedAt: timestamp("updated_at", { withTimezone: true }).defaultNow().notNull(),
 };
 
+export const authUsers = pgTable(
+  "auth_users",
+  {
+    id: text("id").primaryKey(),
+    name: text("name").notNull(),
+    email: varchar("email", { length: 320 }).notNull(),
+    emailVerified: boolean("email_verified").default(false).notNull(),
+    image: text("image"),
+    role: varchar("role", { length: 32 }).default("user").notNull(),
+    banned: boolean("banned").default(false).notNull(),
+    banReason: text("ban_reason"),
+    banExpires: timestamp("ban_expires", { withTimezone: true }),
+    ...timestamps,
+  },
+  (table) => [uniqueIndex("auth_users_email_idx").on(table.email)],
+);
+
+export const authOrganizations = pgTable(
+  "auth_organizations",
+  {
+    id: text("id").primaryKey(),
+    name: varchar("name", { length: 140 }).notNull(),
+    slug: varchar("slug", { length: 120 }).notNull(),
+    logo: text("logo"),
+    metadata: text("metadata"),
+    createdAt: timestamp("created_at", { withTimezone: true }).defaultNow().notNull(),
+    updatedAt: timestamp("updated_at", { withTimezone: true }).defaultNow(),
+  },
+  (table) => [uniqueIndex("auth_organizations_slug_idx").on(table.slug)],
+);
+
+export const authSessions = pgTable(
+  "auth_sessions",
+  {
+    id: text("id").primaryKey(),
+    expiresAt: timestamp("expires_at", { withTimezone: true }).notNull(),
+    token: text("token").notNull(),
+    ipAddress: text("ip_address"),
+    userAgent: text("user_agent"),
+    userId: text("user_id")
+      .references(() => authUsers.id, { onDelete: "cascade" })
+      .notNull(),
+    activeOrganizationId: text("active_organization_id").references(
+      () => authOrganizations.id,
+      { onDelete: "set null" },
+    ),
+    impersonatedBy: text("impersonated_by"),
+    ...timestamps,
+  },
+  (table) => [
+    uniqueIndex("auth_sessions_token_idx").on(table.token),
+    index("auth_sessions_user_idx").on(table.userId),
+    index("auth_sessions_expiration_idx").on(table.expiresAt),
+  ],
+);
+
+export const authAccounts = pgTable(
+  "auth_accounts",
+  {
+    id: text("id").primaryKey(),
+    accountId: text("account_id").notNull(),
+    providerId: varchar("provider_id", { length: 64 }).notNull(),
+    userId: text("user_id")
+      .references(() => authUsers.id, { onDelete: "cascade" })
+      .notNull(),
+    accessToken: text("access_token"),
+    refreshToken: text("refresh_token"),
+    idToken: text("id_token"),
+    accessTokenExpiresAt: timestamp("access_token_expires_at", { withTimezone: true }),
+    refreshTokenExpiresAt: timestamp("refresh_token_expires_at", { withTimezone: true }),
+    scope: text("scope"),
+    password: text("password"),
+    ...timestamps,
+  },
+  (table) => [
+    uniqueIndex("auth_accounts_provider_account_idx").on(table.providerId, table.accountId),
+    index("auth_accounts_user_idx").on(table.userId),
+  ],
+);
+
+export const authVerifications = pgTable(
+  "auth_verifications",
+  {
+    id: text("id").primaryKey(),
+    identifier: text("identifier").notNull(),
+    value: text("value").notNull(),
+    expiresAt: timestamp("expires_at", { withTimezone: true }).notNull(),
+    ...timestamps,
+  },
+  (table) => [index("auth_verifications_identifier_idx").on(table.identifier)],
+);
+
+export const authMembers = pgTable(
+  "auth_members",
+  {
+    id: text("id").primaryKey(),
+    organizationId: text("organization_id")
+      .references(() => authOrganizations.id, { onDelete: "cascade" })
+      .notNull(),
+    userId: text("user_id")
+      .references(() => authUsers.id, { onDelete: "cascade" })
+      .notNull(),
+    role: varchar("role", { length: 32 }).default("member").notNull(),
+    createdAt: timestamp("created_at", { withTimezone: true }).defaultNow().notNull(),
+  },
+  (table) => [
+    uniqueIndex("auth_members_organization_user_idx").on(table.organizationId, table.userId),
+    index("auth_members_user_idx").on(table.userId),
+  ],
+);
+
+export const authInvitations = pgTable(
+  "auth_invitations",
+  {
+    id: text("id").primaryKey(),
+    organizationId: text("organization_id")
+      .references(() => authOrganizations.id, { onDelete: "cascade" })
+      .notNull(),
+    email: varchar("email", { length: 320 }).notNull(),
+    role: varchar("role", { length: 32 }).default("member").notNull(),
+    status: varchar("status", { length: 32 }).default("pending").notNull(),
+    expiresAt: timestamp("expires_at", { withTimezone: true }).notNull(),
+    inviterId: text("inviter_id")
+      .references(() => authUsers.id, { onDelete: "cascade" })
+      .notNull(),
+    createdAt: timestamp("created_at", { withTimezone: true }).defaultNow().notNull(),
+  },
+  (table) => [
+    index("auth_invitations_organization_idx").on(table.organizationId),
+    index("auth_invitations_email_status_idx").on(table.email, table.status),
+  ],
+);
+
+export const authPasskeys = pgTable(
+  "auth_passkeys",
+  {
+    id: text("id").primaryKey(),
+    name: text("name"),
+    publicKey: text("public_key").notNull(),
+    userId: text("user_id")
+      .references(() => authUsers.id, { onDelete: "cascade" })
+      .notNull(),
+    credentialID: text("credential_id").notNull(),
+    counter: integer("counter").default(0).notNull(),
+    deviceType: varchar("device_type", { length: 32 }).notNull(),
+    backedUp: boolean("backed_up").default(false).notNull(),
+    transports: text("transports"),
+    createdAt: timestamp("created_at", { withTimezone: true }).defaultNow(),
+    aaguid: text("aaguid"),
+  },
+  (table) => [
+    uniqueIndex("auth_passkeys_credential_idx").on(table.credentialID),
+    index("auth_passkeys_user_idx").on(table.userId),
+  ],
+);
+
+export const authRateLimits = pgTable("auth_rate_limits", {
+  id: text("id").primaryKey(),
+  key: text("key").notNull().unique(),
+  count: integer("count").default(0).notNull(),
+  lastRequest: bigint("last_request", { mode: "number" }).notNull(),
+});
+
 export const workspaceStatusEnum = pgEnum("workspace_status", [
   "sandbox",
   "pending_review",
@@ -142,6 +305,8 @@ export const workspaces = pgTable(
     id: uuid("id").defaultRandom().primaryKey(),
     clerkOrganizationId: varchar("clerk_organization_id", { length: 64 }).notNull(),
     ownerUserId: varchar("owner_user_id", { length: 64 }).notNull(),
+    authOrganizationId: text("auth_organization_id"),
+    authOwnerUserId: text("auth_owner_user_id"),
     name: varchar("name", { length: 140 }).notNull(),
     slug: varchar("slug", { length: 120 }).notNull(),
     status: workspaceStatusEnum("status").default("sandbox").notNull(),
@@ -163,6 +328,7 @@ export const workspaces = pgTable(
   },
   (table) => [
     uniqueIndex("workspaces_clerk_org_idx").on(table.clerkOrganizationId),
+    uniqueIndex("workspaces_auth_org_idx").on(table.authOrganizationId),
     uniqueIndex("workspaces_slug_idx").on(table.slug),
     index("workspaces_owner_idx").on(table.ownerUserId),
     index("workspaces_status_idx").on(table.status),
@@ -198,6 +364,7 @@ export const subscriptions = pgTable(
     currentPeriodStartsAt: timestamp("current_period_starts_at", { withTimezone: true }),
     currentPeriodEndsAt: timestamp("current_period_ends_at", { withTimezone: true }),
     graceEndsAt: timestamp("grace_ends_at", { withTimezone: true }),
+    pilotAccessExpiresAt: timestamp("pilot_access_expires_at", { withTimezone: true }),
     ...timestamps,
   },
   (table) => [
@@ -622,6 +789,7 @@ export const messages = pgTable(
     providerAcceptedAt: timestamp("provider_accepted_at", { withTimezone: true }),
     sendDeadlineAt: timestamp("send_deadline_at", { withTimezone: true }),
     ambiguousAt: timestamp("ambiguous_at", { withTimezone: true }),
+    failedAt: timestamp("failed_at", { withTimezone: true }),
     lastEventAt: timestamp("last_event_at", { withTimezone: true }),
     sentAt: timestamp("sent_at", { withTimezone: true }),
     deliveredAt: timestamp("delivered_at", { withTimezone: true }),
@@ -822,6 +990,8 @@ export const webhookDeliveries = pgTable(
     statusCode: integer("status_code"),
     deliveredAt: timestamp("delivered_at", { withTimezone: true }),
     nextAttemptAt: timestamp("next_attempt_at", { withTimezone: true }),
+    claimedAt: timestamp("claimed_at", { withTimezone: true }),
+    terminalAt: timestamp("terminal_at", { withTimezone: true }),
     lastError: text("last_error"),
     ...timestamps,
   },

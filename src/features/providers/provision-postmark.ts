@@ -3,7 +3,7 @@ import { PutParameterCommand } from "@aws-sdk/client-ssm";
 import { awsClients } from "@/lib/aws";
 import { getSecureParameter } from "@/workers/runtime-secrets";
 
-type PostmarkServer = { ID: number; Name?: string; ApiTokens?: string[] };
+export type PostmarkServer = { ID: number; Name?: string; ApiTokens?: string[]; DeliveryType?: "Live" | "Sandbox" };
 type PostmarkDomain = {
   ID: number;
   Name?: string;
@@ -32,6 +32,13 @@ async function postmark<T>(path: string, accountToken: string, init: RequestInit
   return payload as T;
 }
 
+export function assertPostmarkServerDeliveryType(server: PostmarkServer, environment: "dev" | "prod") {
+  const expected = environment === "prod" ? "Live" : "Sandbox";
+  if (server.DeliveryType !== expected) {
+    throw new Error(`Postmark Server ${server.ID} is ${server.DeliveryType ?? "unknown"}; ${expected} is required and DeliveryType is immutable.`);
+  }
+}
+
 export async function provisionPostmarkDomain(input: {
   environment: "dev" | "prod";
   workspaceId: string;
@@ -46,7 +53,7 @@ export async function provisionPostmarkDomain(input: {
   const listedServers = input.existingAccount ? [] : (await postmark<PostmarkList<PostmarkServer>>("/servers?count=500&offset=0", accountToken)).Servers ?? [];
   const priorServer = listedServers.find((item) => item.Name === serverName);
   const server = input.existingAccount
-    ? { ID: Number(input.existingAccount.externalAccountId), ApiTokens: [await getSecureParameter(input.existingAccount.credentialParameterName)] }
+    ? { ...await postmark<PostmarkServer>(`/servers/${Number(input.existingAccount.externalAccountId)}`, accountToken), ApiTokens: [await getSecureParameter(input.existingAccount.credentialParameterName)] }
     : priorServer
       ? await postmark<PostmarkServer>(`/servers/${priorServer.ID}`, accountToken)
     : await postmark<PostmarkServer>("/servers", accountToken, {
@@ -61,6 +68,7 @@ export async function provisionPostmarkDomain(input: {
           TrackLinks: "None",
         }),
       });
+  assertPostmarkServerDeliveryType(server, input.environment);
   const serverToken = server.ApiTokens?.[0];
   if (!serverToken || !Number.isFinite(server.ID)) throw new Error("Postmark did not return a valid Server Token.");
   const listedDomains = (await postmark<PostmarkList<PostmarkDomain>>("/domains?count=500&offset=0", accountToken)).Domains ?? [];
@@ -120,7 +128,7 @@ export async function provisionPostmarkDomain(input: {
     records: [
       ...(dkimName && dkimValue ? [{ type: "TXT", name: dkimName, value: dkimValue }] : []),
       ...(domain.ReturnPathDomain && domain.ReturnPathDomainCNAMEValue ? [{ type: "CNAME", name: domain.ReturnPathDomain, value: domain.ReturnPathDomainCNAMEValue }] : []),
-      { type: "TXT", name: `_dmarc.${input.domain}`, value: "v=DMARC1; p=none; rua=mailto:abuse@mail.yodev.fr" },
+      { type: "TXT", name: `_dmarc.${input.domain}`, value: "v=DMARC1; p=none; rua=mailto:dmarc@yodev.fr; adkim=r; aspf=r; pct=100" },
     ],
   };
 }

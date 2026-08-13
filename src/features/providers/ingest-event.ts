@@ -27,8 +27,9 @@ export async function ingestProviderEvent(event: NormalizedProviderEvent) {
       eq(messages.provider, event.provider),
     )).limit(1);
   }
-  if (!message) {
+  if (!message && event.workspaceId) {
     [message] = await db.select().from(messages).where(and(
+      eq(messages.workspaceId, event.workspaceId),
       eq(messages.provider, event.provider),
       eq(messages.providerMessageId, event.providerMessageId),
     )).limit(1);
@@ -50,6 +51,7 @@ export async function ingestProviderEvent(event: NormalizedProviderEvent) {
     await tx.update(messages).set({
       status,
       deliveredAt: event.type === "delivered" ? message.deliveredAt ?? event.occurredAt : message.deliveredAt,
+      failedAt: event.type === "failed" ? message.failedAt ?? event.occurredAt : message.failedAt,
       lastEventAt: event.occurredAt,
       providerMessageId: message.providerMessageId ?? event.providerMessageId,
       updatedAt: new Date(),

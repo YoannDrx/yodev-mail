@@ -27,6 +27,11 @@ describe("transactional sending policy", () => {
     })).toEqual({ allowed: true });
   });
 
+  it("allows only a non-expired internal pilot entitlement", () => {
+    expect(evaluateSendingEligibility({ ...base, billingStatus: "inactive", pilotAccessExpiresAt: new Date(Date.now() + 60_000) })).toEqual({ allowed: true });
+    expect(evaluateSendingEligibility({ ...base, billingStatus: "inactive", pilotAccessExpiresAt: new Date(Date.now() - 60_000) })).toMatchObject({ allowed: false, code: "billing_inactive" });
+  });
+
   it("pauses on the first complaint, three bounces, or two percent after fifty sends", () => {
     expect(shouldAutoPause({ sent: 1, hardBounces: 0, complaints: 1 })).toBe(true);
     expect(shouldAutoPause({ sent: 20, hardBounces: 3, complaints: 0 })).toBe(true);

@@ -1,6 +1,6 @@
 import { defineConfig, devices } from "@playwright/test";
 
-const e2ePort = 3017;
+const e2ePort = 3917;
 const e2eBaseUrl = `http://127.0.0.1:${e2ePort}`;
 
 export default defineConfig({
@@ -13,7 +13,7 @@ export default defineConfig({
     trace: "on-first-retry",
   },
   webServer: {
-    command: `env DATABASE_URL= DATABASE_URL_UNPOOLED= NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY= CLERK_SECRET_KEY= npm run dev -- --port ${e2ePort}`,
+    command: `env DATABASE_URL= DATABASE_URL_UNPOOLED= BETTER_AUTH_SECRET= BETTER_AUTH_GOOGLE_CLIENT_ID= BETTER_AUTH_GOOGLE_CLIENT_SECRET= npm run dev -- --port ${e2ePort}`,
     url: e2eBaseUrl,
     reuseExistingServer: !process.env.CI,
   },

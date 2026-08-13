@@ -1,14 +1,11 @@
-import { CreateOrganization } from "@clerk/nextjs";
-import { auth } from "@clerk/nextjs/server";
 import { Check } from "lucide-react";
-import { redirect } from "next/navigation";
 import { BrandMark } from "@/components/brand-mark";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
 import { completeOnboardingAction } from "@/features/onboarding/actions";
-import { isClerkConfigured } from "@/lib/env";
+import { currentWorkspace } from "@/lib/current-workspace";
 
 export const dynamic = "force-dynamic";
 
@@ -22,11 +19,7 @@ const attestations = [
 ] as const;
 
 export default async function Page() {
-  if (isClerkConfigured()) {
-    const session = await auth();
-    if (!session.userId) redirect("/connexion");
-    if (!session.orgId) return <main className="mx-auto grid min-h-screen max-w-3xl place-items-center p-6"><div className="grid w-full place-items-center gap-8"><BrandMark /><CreateOrganization afterCreateOrganizationUrl="/onboarding" /></div></main>;
-  }
+  await currentWorkspace();
   return (
     <main className="mx-auto min-h-screen max-w-3xl p-6 py-12">
       <BrandMark />

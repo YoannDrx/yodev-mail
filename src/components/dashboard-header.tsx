@@ -1,8 +1,7 @@
-import { OrganizationSwitcher, UserButton } from "@clerk/nextjs";
 import { Bell, Search } from "lucide-react";
+import { AccountMenu } from "@/components/auth/account-menu";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
-import { isClerkConfigured } from "@/lib/env";
 
 export function DashboardHeader() {
   return (
@@ -12,21 +11,8 @@ export function DashboardHeader() {
         <Input className="h-9 pl-9" placeholder="Rechercher…" />
       </div>
       <div className="ml-auto flex items-center gap-3">
-        <Button aria-label="Notifications" size="icon" variant="ghost">
-          <Bell />
-        </Button>
-        {isClerkConfigured() ? (
-          <>
-            <OrganizationSwitcher
-              afterCreateOrganizationUrl="/onboarding"
-              afterSelectOrganizationUrl="/dashboard"
-              hidePersonal
-            />
-            <UserButton />
-          </>
-        ) : (
-          <span className="text-sm text-muted-foreground">Mode démonstration</span>
-        )}
+        <Button aria-label="Notifications" size="icon" variant="ghost"><Bell /></Button>
+        <AccountMenu />
       </div>
     </header>
   );

@@ -1,14 +1,10 @@
-import { clerkMiddleware } from "@clerk/nextjs/server";
-import { NextResponse, type NextFetchEvent, type NextRequest } from "next/server";
-import { isClerkConfigured } from "@/lib/env";
+import { NextResponse, type NextRequest } from "next/server";
 import { canonicalUrlForHost } from "@/lib/host-routing";
 
-const withClerk = clerkMiddleware();
-
-export default function proxy(request: NextRequest, event: NextFetchEvent) {
+export default function proxy(request: NextRequest) {
   const canonical = canonicalUrlForHost(request.headers.get("host"), request.nextUrl);
   if (canonical) return NextResponse.redirect(canonical, 308);
-  return isClerkConfigured() ? withClerk(request, event) : NextResponse.next();
+  return NextResponse.next();
 }
 
 export const config = {

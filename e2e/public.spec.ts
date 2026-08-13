@@ -9,15 +9,10 @@ test("landing page exposes the transactional private-beta promise", async ({ pag
   await expect(page.getByText("Désactivé", { exact: true })).toBeVisible();
 });
 
-test("sandbox dashboard exposes transaction-only navigation", async ({ page }) => {
+test("private dashboard redirects anonymous visitors to Better Auth", async ({ page }) => {
   await page.goto("/dashboard");
-  await expect(page.getByRole("heading", { name: "Cockpit Mail by Yodev" })).toBeVisible();
-  await page.goto("/dashboard/domaines");
-  await expect(page.getByRole("heading", { name: "Domaines" })).toBeVisible();
-  await page.goto("/dashboard/profils");
-  await expect(page.getByRole("heading", { name: "Cas d’usage transactionnels" })).toBeVisible();
-  await page.goto("/dashboard/emails");
-  await expect(page.getByRole("heading", { name: "Emails" })).toBeVisible();
+  await expect(page).toHaveURL(/\/connexion\?configuration=requise/);
+  await expect(page.getByRole("heading", { name: "Console en cours de configuration" })).toBeVisible();
   const retiredContacts = await page.goto("/dashboard/contacts");
   expect(retiredContacts?.status()).toBe(404);
 });

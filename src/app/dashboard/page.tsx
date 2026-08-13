@@ -12,7 +12,6 @@ const rate = (value: number) => `${value.toFixed(2).replace(".", ",")} %`;
 
 export default async function Dashboard() {
   const context = await requirePageWorkspace();
-  if (!context) return <section className="rounded-3xl border bg-white p-10 text-center"><h1 className="text-3xl font-semibold">Cockpit Mail by Yodev</h1><p className="mt-3 text-muted-foreground">Configurez Clerk pour créer un workspace.</p></section>;
   const data = await getDashboardData(context.workspace.id);
   const deliveredRate = percent(data.totals.delivered, data.totals.accepted);
   const complaintRate = percent(data.totals.complaints, data.totals.accepted);
