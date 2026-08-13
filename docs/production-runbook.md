@@ -44,6 +44,8 @@
 
 Without printing account or Server tokens, record account approval/billing/retention, Servers and their `DeliveryType`, domains, streams, webhooks and suppressions. Production requires a Live Server; a Sandbox Server must be rejected because its type is immutable. Confirm `outbound`, open tracking off, link tracking `None`, Delivery/Bounce/SpamComplaint enabled and `IncludeContent=false`.
 
+The Developer plan limited to 100 emails per month is a development/testing plan, not the production billing gate. Obtain explicit budget approval before selecting a paid plan, then record the plan, renewal date, payment status and retention. As observed on 13 August 2026, the first displayed paid tier is 10,000 emails for 15 USD per month.
+
 Before activation, verify `yodev.fr` DKIM, `pm-bounces.yodev.fr`, DMARC, the stored Server ID and the SSM parameter names. Exercise a simulated timeout, 429, 5xx and definitive 4xx against the development Server. Never output parameter values.
 
 ## `yodev-ads` canary

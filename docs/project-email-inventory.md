@@ -33,9 +33,9 @@ Cet inventaire est en lecture seule. Aucun projet consommateur ne doit être mig
 ## Ordre de migration
 
 1. Flux système interne de Mail by Yodev.
-2. Un canari Yodev à faible volume (`yodev` ou `routine-kids` selon disponibilité du domaine).
-3. Observation pendant 72 heures : acceptation, livraison, bounce, plainte, webhooks et facturation.
-4. `yodev-ads` comme client interne isolé.
+2. `yodev-ads` comme premier client interne isolé, uniquement pour `job_dead_letter`, `stripe_webhook_failed` et `mutation_ambiguous`.
+3. Observation pendant 72 heures : acceptation, livraison, bounce, plainte, webhooks, files et facturation.
+4. Un second canari Yodev à faible volume (`yodev` ou `routine-kids` selon disponibilité du domaine).
 5. Projets clients un par un, après validation écrite du domaine, des profils et des templates.
 6. Révocation d’une clé Resend uniquement lorsque tous les flux qui la consomment ont été identifiés et validés sur Mail by Yodev.
 
