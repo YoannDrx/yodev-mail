@@ -17,10 +17,7 @@ const schema = z.object({
   WEBHOOK_SIGNING_SECRET: z.string().min(16).optional(),
   AWS_REGION: z.string().default("eu-west-3"),
   AWS_ACCOUNT_ID: z.string().optional(),
-  AWS_OIDC_AUDIENCE: z
-    .string()
-    .url()
-    .default("https://vercel.com/yoanndrxs-projects"),
+  AWS_OIDC_AUDIENCE: optionalUrl,
   AWS_ROLE_ARN: z.string().optional(),
   AWS_EMAIL_QUEUE_URL: optionalUrl,
   AWS_PROVIDER_EVENTS_QUEUE_URL: optionalUrl,

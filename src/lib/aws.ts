@@ -10,7 +10,7 @@ function credentials() {
   if (!env.AWS_ROLE_ARN) return undefined;
   return awsCredentialsProvider({
     roleArn: env.AWS_ROLE_ARN,
-    audience: env.AWS_OIDC_AUDIENCE,
+    ...(env.AWS_OIDC_AUDIENCE ? { audience: env.AWS_OIDC_AUDIENCE } : {}),
     roleSessionName: "yodev-mail-vercel",
   });
 }
