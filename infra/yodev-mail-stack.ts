@@ -214,7 +214,7 @@ export class YodevMailStack extends Stack {
     attachmentBucket.grantDelete(send);
     attachmentKey.grantDecrypt(send);
     send.addToRolePolicy(new PolicyStatement({ actions: ["ses:SendEmail"], resources: ["*"] }));
-    send.addToRolePolicy(new PolicyStatement({ actions: ["ssm:GetParameter"], resources: [`arn:aws:ssm:${this.region}:${this.account}:parameter/${prefix}/providers/*`] }));
+    send.addToRolePolicy(new PolicyStatement({ actions: ["ssm:GetParameter", "ssm:GetParameters"], resources: [`arn:aws:ssm:${this.region}:${this.account}:parameter/${prefix}/providers/*`] }));
     providerCredentialsKey.grantDecrypt(send);
 
     const ingest = worker("ProviderEvents", "src/workers/ses-events.ts");
@@ -224,7 +224,7 @@ export class YodevMailStack extends Stack {
     const provision = worker("ProviderProvisioning", "src/workers/provider-provisioning.ts", {},);
     if (!props.standby) provision.addEventSource(new SqsEventSource(providerProvisioning.main, { batchSize: 1, maxConcurrency: 2, reportBatchItemFailures: true }));
     providerProvisioning.main.grantConsumeMessages(provision);
-    provision.addToRolePolicy(new PolicyStatement({ actions: ["ssm:GetParameter", "ssm:PutParameter"], resources: [`arn:aws:ssm:${this.region}:${this.account}:parameter/${prefix}/providers/*`] }));
+    provision.addToRolePolicy(new PolicyStatement({ actions: ["ssm:GetParameter", "ssm:GetParameters", "ssm:PutParameter"], resources: [`arn:aws:ssm:${this.region}:${this.account}:parameter/${prefix}/providers/*`] }));
     providerCredentialsKey.grantEncryptDecrypt(provision);
     provision.addToRolePolicy(new PolicyStatement({ actions: ["ses:CreateConfigurationSet", "ses:CreateConfigurationSetEventDestination", "ses:CreateEmailIdentity", "ses:CreateTenant", "ses:CreateTenantResourceAssociation", "ses:GetEmailIdentity", "ses:GetTenant", "ses:PutEmailIdentityMailFromAttributes", "ses:UpdateReputationEntityPolicy"], resources: ["*"] }));
 
@@ -245,7 +245,7 @@ export class YodevMailStack extends Stack {
 
     const domainHealth = worker("DomainHealth", "src/workers/domain-health.ts");
     domainHealth.addToRolePolicy(new PolicyStatement({ actions: ["ses:GetEmailIdentity"], resources: ["*"] }));
-    domainHealth.addToRolePolicy(new PolicyStatement({ actions: ["ssm:GetParameter"], resources: [`arn:aws:ssm:${this.region}:${this.account}:parameter/${prefix}/providers/*`] }));
+    domainHealth.addToRolePolicy(new PolicyStatement({ actions: ["ssm:GetParameter", "ssm:GetParameters"], resources: [`arn:aws:ssm:${this.region}:${this.account}:parameter/${prefix}/providers/*`] }));
     providerCredentialsKey.grantDecrypt(domainHealth);
     scheduledWorkerRule("DomainHealthSchedule", Schedule.rate(Duration.minutes(15)), domainHealth);
 
@@ -304,7 +304,7 @@ export class YodevMailStack extends Stack {
     providerProvisioning.main.grantSendMessages(vercelRole);
     attachmentBucket.grantPut(vercelRole);
     attachmentKey.grantEncrypt(vercelRole);
-    vercelRole.addToPolicy(new PolicyStatement({ actions: ["ssm:GetParameter"], resources: [`arn:aws:ssm:${this.region}:${this.account}:parameter/${prefix}/providers/*`] }));
+    vercelRole.addToPolicy(new PolicyStatement({ actions: ["ssm:GetParameter", "ssm:GetParameters"], resources: [`arn:aws:ssm:${this.region}:${this.account}:parameter/${prefix}/providers/*`] }));
     providerCredentialsKey.grantDecrypt(vercelRole);
 
     for (const pair of queues) {
