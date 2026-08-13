@@ -1,11 +1,11 @@
 "use server";
 
 import { randomBytes } from "node:crypto";
-import { and, eq } from "drizzle-orm";
+import { and, eq, isNull } from "drizzle-orm";
 import { revalidatePath } from "next/cache";
 import { z } from "zod";
 import { requireDb } from "@/db";
-import { auditEvents, webhookEndpoints } from "@/db/schema";
+import { auditEvents, webhookDeliveries, webhookEndpoints } from "@/db/schema";
 import { encryptSecret, hmac } from "@/lib/crypto";
 import { currentWorkspace } from "@/lib/current-workspace";
 import { env } from "@/lib/env";
@@ -34,7 +34,6 @@ export async function createWebhookFormAction(_: WebhookFormState, formData: For
       workspaceId: workspace.id,
     }).returning({ id: webhookEndpoints.id });
     await requireDb().insert(auditEvents).values({ action: "webhook.created", actorUserId: userId, entityId: endpoint.id, entityType: "webhook", workspaceId: workspace.id });
-    revalidatePath("/dashboard/webhooks");
     return { secret, error: "" };
   } catch (error) {
     return { secret: "", error: error instanceof Error ? error.message : "Création impossible" };
@@ -48,7 +47,22 @@ export async function toggleWebhookAction(id: string) {
   const [endpoint] = await db.select().from(webhookEndpoints).where(and(eq(webhookEndpoints.id, endpointId), eq(webhookEndpoints.workspaceId, workspace.id))).limit(1);
   if (!endpoint) throw new Error("Webhook not found");
   await db.transaction(async (tx) => {
-    await tx.update(webhookEndpoints).set({ enabled: !endpoint.enabled, updatedAt: new Date() }).where(and(eq(webhookEndpoints.id, endpointId), eq(webhookEndpoints.workspaceId, workspace.id)));
+    const now = new Date();
+    await tx.update(webhookEndpoints).set({ enabled: !endpoint.enabled, updatedAt: now }).where(and(eq(webhookEndpoints.id, endpointId), eq(webhookEndpoints.workspaceId, workspace.id)));
+    if (endpoint.enabled) {
+      await tx.update(webhookDeliveries).set({
+        claimedAt: null,
+        lastError: "endpoint_disabled",
+        nextAttemptAt: null,
+        terminalAt: now,
+        updatedAt: now,
+      }).where(and(
+        eq(webhookDeliveries.endpointId, endpointId),
+        eq(webhookDeliveries.workspaceId, workspace.id),
+        isNull(webhookDeliveries.deliveredAt),
+        isNull(webhookDeliveries.terminalAt),
+      ));
+    }
     await tx.insert(auditEvents).values({ action: endpoint.enabled ? "webhook.disabled" : "webhook.enabled", actorUserId: userId, entityId: endpointId, entityType: "webhook", workspaceId: workspace.id });
   });
   revalidatePath("/dashboard/webhooks");
