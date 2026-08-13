@@ -60,14 +60,23 @@ export class PostmarkDeliveryProvider implements DeliveryProvider {
         "provider_outcome_unknown",
       );
     }
-    const payload = (await response.json().catch(() => ({}))) as PostmarkResponse;
-    if (!response.ok || payload.ErrorCode !== 0 || !payload.MessageID) {
+    const payload = (await response.json().catch(() => null)) as PostmarkResponse | null;
+    if (!response.ok) {
       const kind = response.status >= 500 || response.status === 429 ? "transient" : "definitive";
       throw new ProviderSendError(
-        payload.Message ?? `Postmark rejected the request (${response.status}).`,
+        payload?.Message ?? `Postmark rejected the request (${response.status}).`,
         kind,
-        `postmark_${payload.ErrorCode ?? response.status}`,
+        `postmark_${payload?.ErrorCode ?? response.status}`,
       );
+    }
+    if (!payload || typeof payload.ErrorCode !== "number") {
+      throw new ProviderSendError("Postmark response did not prove acceptance.", "ambiguous", "provider_outcome_unknown");
+    }
+    if (payload.ErrorCode !== 0) {
+      throw new ProviderSendError(payload.Message ?? "Postmark rejected the request.", "definitive", `postmark_${payload.ErrorCode}`);
+    }
+    if (!payload.MessageID) {
+      throw new ProviderSendError("Postmark response did not prove acceptance.", "ambiguous", "provider_outcome_unknown");
     }
     return {
       providerMessageId: payload.MessageID,

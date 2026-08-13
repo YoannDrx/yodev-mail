@@ -116,14 +116,24 @@ describe("Mail by Yodev AWS infrastructure", () => {
     )) {
       expect(fn.Properties.ReservedConcurrentExecutions).toBeUndefined();
     }
+    for (const mapping of Object.values(activeProductionWorkload.findResources("AWS::Lambda::EventSourceMapping"))) {
+      expect(mapping.Properties.ScalingConfig.MaximumConcurrency).toBe(2);
+    }
   });
 
   test("adds explicit attachment and ambiguous-outcome alarms in production", () => {
-    activeProductionWorkload.resourceCountIs("AWS::CloudWatch::Alarm", 14);
+    expect(Object.keys(activeProductionWorkload.findResources("AWS::CloudWatch::Alarm")).length).toBeGreaterThanOrEqual(50);
     activeProductionWorkload.resourceCountIs(
       "AWS::Lambda::EventSourceMapping",
       4,
     );
+  });
+
+  test("keeps every SQS visibility timeout at least six times the Lambda timeout", () => {
+    const queues = Object.values(activeProductionWorkload.findResources("AWS::SQS::Queue"));
+    const workloadQueues = queues.filter((queue) => !String(queue.Properties.QueueName).endsWith("-dlq"));
+    expect(workloadQueues).toHaveLength(4);
+    for (const queue of workloadQueues) expect(queue.Properties.VisibilityTimeout).toBeGreaterThanOrEqual(360);
   });
 
   test("protects 24-hour attachment storage with KMS and GuardDuty", () => {

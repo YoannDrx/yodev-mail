@@ -67,10 +67,10 @@ export class YodevMailStack extends Stack {
       return { dlq, main };
     };
 
-    const email = queue("email-send", 180);
-    const providerEvents = queue("provider-events", 120);
-    const providerProvisioning = queue("provider-provisioning", 300);
-    const webhooks = queue("customer-webhooks", 120);
+    const email = queue("email-send", 420);
+    const providerEvents = queue("provider-events", 360);
+    const providerProvisioning = queue("provider-provisioning", 420);
+    const webhooks = queue("customer-webhooks", 360);
     const queues = [email, providerEvents, providerProvisioning, webhooks];
 
     const attachmentKey = new Key(this, "AttachmentKey", {
@@ -183,6 +183,25 @@ export class YodevMailStack extends Stack {
       workerFunctions.push(fn);
       return fn;
     };
+    const scheduledWorkerRule = (id: string, schedule: Schedule, fn: NodejsFunction) => {
+      const rule = new Rule(this, id, { enabled: !props.standby, schedule, targets: [new LambdaFunction(fn)] });
+      if (monitoringEnabled) {
+        const failedInvocations = new Metric({
+          namespace: "AWS/Events",
+          metricName: "FailedInvocations",
+          dimensionsMap: { RuleName: rule.ruleName },
+          period: Duration.minutes(5),
+          statistic: "Sum",
+        });
+        const alarm = failedInvocations.createAlarm(this, `${id}FailedInvocationAlarm`, {
+          evaluationPeriods: 1,
+          threshold: 1,
+          treatMissingData: TreatMissingData.NOT_BREACHING,
+        });
+        alarm.addAlarmAction(new SnsAction(props.alertTopic));
+      }
+      return rule;
+    };
 
     const send = worker("SendEmail", "src/workers/send-email.ts");
     if (!props.standby) send.addEventSource(new SqsEventSource(email.main, { batchSize: 1, maxConcurrency: 2, reportBatchItemFailures: true }));
@@ -199,18 +218,18 @@ export class YodevMailStack extends Stack {
     providerCredentialsKey.grantDecrypt(send);
 
     const ingest = worker("ProviderEvents", "src/workers/ses-events.ts");
-    if (!props.standby) ingest.addEventSource(new SqsEventSource(providerEvents.main, { batchSize: 10, reportBatchItemFailures: true }));
+    if (!props.standby) ingest.addEventSource(new SqsEventSource(providerEvents.main, { batchSize: 10, maxConcurrency: 2, reportBatchItemFailures: true }));
     providerEvents.main.grantConsumeMessages(ingest);
 
     const provision = worker("ProviderProvisioning", "src/workers/provider-provisioning.ts", {},);
-    if (!props.standby) provision.addEventSource(new SqsEventSource(providerProvisioning.main, { batchSize: 1, reportBatchItemFailures: true }));
+    if (!props.standby) provision.addEventSource(new SqsEventSource(providerProvisioning.main, { batchSize: 1, maxConcurrency: 2, reportBatchItemFailures: true }));
     providerProvisioning.main.grantConsumeMessages(provision);
     provision.addToRolePolicy(new PolicyStatement({ actions: ["ssm:GetParameter", "ssm:PutParameter"], resources: [`arn:aws:ssm:${this.region}:${this.account}:parameter/${prefix}/providers/*`] }));
     providerCredentialsKey.grantEncryptDecrypt(provision);
     provision.addToRolePolicy(new PolicyStatement({ actions: ["ses:CreateConfigurationSet", "ses:CreateConfigurationSetEventDestination", "ses:CreateEmailIdentity", "ses:CreateTenant", "ses:CreateTenantResourceAssociation", "ses:GetEmailIdentity", "ses:GetTenant", "ses:PutEmailIdentityMailFromAttributes", "ses:UpdateReputationEntityPolicy"], resources: ["*"] }));
 
     const deliver = worker("CustomerWebhooks", "src/workers/deliver-webhook.ts");
-    if (!props.standby) deliver.addEventSource(new SqsEventSource(webhooks.main, { batchSize: 10, reportBatchItemFailures: true }));
+    if (!props.standby) deliver.addEventSource(new SqsEventSource(webhooks.main, { batchSize: 10, maxConcurrency: 2, reportBatchItemFailures: true }));
     webhooks.main.grantConsumeMessages(deliver);
 
     const outbox = worker("OutboxDispatch", "src/workers/outbox-dispatch.ts", {
@@ -219,18 +238,21 @@ export class YodevMailStack extends Stack {
     });
     email.main.grantSendMessages(outbox);
     webhooks.main.grantSendMessages(outbox);
-    new Rule(this, "OutboxSchedule", { enabled: !props.standby, schedule: Schedule.rate(Duration.minutes(1)), targets: [new LambdaFunction(outbox)] });
+    scheduledWorkerRule("OutboxSchedule", Schedule.rate(Duration.minutes(1)), outbox);
+
+    const staleSending = worker("RecoverStaleSending", "src/workers/recover-stale-sending.ts");
+    scheduledWorkerRule("RecoverStaleSendingSchedule", Schedule.rate(Duration.minutes(5)), staleSending);
 
     const domainHealth = worker("DomainHealth", "src/workers/domain-health.ts");
     domainHealth.addToRolePolicy(new PolicyStatement({ actions: ["ses:GetEmailIdentity"], resources: ["*"] }));
     domainHealth.addToRolePolicy(new PolicyStatement({ actions: ["ssm:GetParameter"], resources: [`arn:aws:ssm:${this.region}:${this.account}:parameter/${prefix}/providers/*`] }));
     providerCredentialsKey.grantDecrypt(domainHealth);
-    new Rule(this, "DomainHealthSchedule", { enabled: !props.standby, schedule: Schedule.rate(Duration.minutes(15)), targets: [new LambdaFunction(domainHealth)] });
+    scheduledWorkerRule("DomainHealthSchedule", Schedule.rate(Duration.minutes(15)), domainHealth);
 
     const stripeUsage = worker("StripeUsage", "src/workers/report-stripe-usage.ts", { STRIPE_METER_EVENT_NAME: "yodev_mail_emails_sent" });
-    new Rule(this, "StripeUsageSchedule", { enabled: !props.standby, schedule: Schedule.rate(Duration.hours(1)), targets: [new LambdaFunction(stripeUsage)] });
+    scheduledWorkerRule("StripeUsageSchedule", Schedule.rate(Duration.hours(1)), stripeUsage);
     const warmup = worker("WarmupProgress", "src/workers/warmup-progress.ts");
-    new Rule(this, "WarmupProgressSchedule", { enabled: !props.standby, schedule: Schedule.cron({ hour: "1", minute: "15" }), targets: [new LambdaFunction(warmup)] });
+    scheduledWorkerRule("WarmupProgressSchedule", Schedule.cron({ hour: "1", minute: "15" }), warmup);
 
     const scan = worker("AttachmentScan", "src/workers/attachment-scan.ts");
     attachmentBucket.grantRead(scan);
@@ -242,9 +264,9 @@ export class YodevMailStack extends Stack {
     });
     const purge = worker("AttachmentPurge", "src/workers/purge-attachments.ts");
     attachmentBucket.grantDelete(purge);
-    new Rule(this, "AttachmentPurgeSchedule", { enabled: !props.standby, schedule: Schedule.rate(Duration.hours(1)), targets: [new LambdaFunction(purge)] });
+    scheduledWorkerRule("AttachmentPurgeSchedule", Schedule.rate(Duration.hours(1)), purge);
     const retention = worker("RetentionPurge", "src/workers/purge-retention.ts");
-    new Rule(this, "RetentionPurgeSchedule", { enabled: !props.standby, schedule: Schedule.cron({ hour: "2", minute: "30" }), targets: [new LambdaFunction(retention)] });
+    scheduledWorkerRule("RetentionPurgeSchedule", Schedule.cron({ hour: "2", minute: "30" }), retention);
 
     new Rule(this, "SesEventRule", {
       enabled: !props.standby,
@@ -299,6 +321,7 @@ export class YodevMailStack extends Stack {
     const complaintRate = new Metric({ metricName: "Reputation.ComplaintRate", namespace: "AWS/SES", period: Duration.minutes(5), statistic: "Average" });
     const attachmentRejections = new Metric({ metricName: "AttachmentScanRejected", namespace: "Yodev/Mail", dimensionsMap: { Environment: props.environment }, period: Duration.minutes(5), statistic: "Sum" });
     const unknownOutcomes = new Metric({ metricName: "ProviderOutcomeUnknown", namespace: "Yodev/Mail", dimensionsMap: { Environment: props.environment }, period: Duration.minutes(5), statistic: "Sum" });
+    const webhookTerminalFailures = new Metric({ metricName: "CustomerWebhookTerminalFailure", namespace: "Yodev/Mail", dimensionsMap: { Environment: props.environment }, period: Duration.minutes(5), statistic: "Sum" });
     const purgeFailures = new Metric({ metricName: "AttachmentPurgeFailure", namespace: "Yodev/Mail", dimensionsMap: { Environment: props.environment }, period: Duration.minutes(5), statistic: "Sum" });
     if (monitoringEnabled) {
       const bounce = bounceRate.createAlarm(this, "SesBounceRateAlarm", { evaluationPeriods: 1, threshold: 0.02, treatMissingData: TreatMissingData.IGNORE });
@@ -308,18 +331,28 @@ export class YodevMailStack extends Stack {
       const malware = attachmentRejections.createAlarm(this, "AttachmentScanRejectedAlarm", { evaluationPeriods: 1, threshold: 1, treatMissingData: TreatMissingData.NOT_BREACHING });
       const unknown = unknownOutcomes.createAlarm(this, "ProviderOutcomeUnknownAlarm", { evaluationPeriods: 1, threshold: 1, treatMissingData: TreatMissingData.NOT_BREACHING });
       const purgeFailure = purgeFailures.createAlarm(this, "AttachmentPurgeFailureAlarm", { evaluationPeriods: 1, threshold: 1, treatMissingData: TreatMissingData.NOT_BREACHING });
+      const webhookTerminal = webhookTerminalFailures.createAlarm(this, "CustomerWebhookTerminalFailureAlarm", { evaluationPeriods: 1, threshold: 1, treatMissingData: TreatMissingData.NOT_BREACHING });
       const billingFailure = stripeUsage.metricErrors().createAlarm(this, "StripeUsageFailureAlarm", { evaluationPeriods: 1, threshold: 1, treatMissingData: TreatMissingData.NOT_BREACHING });
       malware.addAlarmAction(new SnsAction(props.alertTopic));
       unknown.addAlarmAction(new SnsAction(props.alertTopic));
       purgeFailure.addAlarmAction(new SnsAction(props.alertTopic));
+      webhookTerminal.addAlarmAction(new SnsAction(props.alertTopic));
       billingFailure.addAlarmAction(new SnsAction(props.alertTopic));
+      for (const fn of workerFunctions) {
+        const errorAlarm = fn.metricErrors().createAlarm(this, `${fn.node.id}ErrorAlarm`, { evaluationPeriods: 1, threshold: 1, treatMissingData: TreatMissingData.NOT_BREACHING });
+        const throttleAlarm = fn.metricThrottles().createAlarm(this, `${fn.node.id}ThrottleAlarm`, { evaluationPeriods: 1, threshold: 1, treatMissingData: TreatMissingData.NOT_BREACHING });
+        const durationAlarm = fn.metricDuration({ statistic: "p99" }).createAlarm(this, `${fn.node.id}DurationP99Alarm`, { evaluationPeriods: 2, threshold: 48_000, treatMissingData: TreatMissingData.NOT_BREACHING });
+        errorAlarm.addAlarmAction(new SnsAction(props.alertTopic));
+        throttleAlarm.addAlarmAction(new SnsAction(props.alertTopic));
+        durationAlarm.addAlarmAction(new SnsAction(props.alertTopic));
+      }
     }
     const dashboard = new Dashboard(this, "OperationsDashboard", { dashboardName: `${prefix}-operations` });
     dashboard.addWidgets(
       new GraphWidget({ left: queues.map((pair) => pair.main.metricApproximateAgeOfOldestMessage()), title: "Provider-neutral queue age", width: 12 }),
       new GraphWidget({ left: workerFunctions.map((fn) => fn.metricErrors()), title: "Lambda errors", width: 12 }),
       new GraphWidget({ left: [bounceRate, complaintRate], title: "SES account reputation", width: 12 }),
-      new GraphWidget({ left: [attachmentRejections, unknownOutcomes, purgeFailures], title: "Security and ambiguous outcomes", width: 12 }),
+      new GraphWidget({ left: [attachmentRejections, unknownOutcomes, purgeFailures, webhookTerminalFailures], title: "Security and ambiguous outcomes", width: 12 }),
     );
 
     Tags.of(this).add("Application", "yodev-mail");

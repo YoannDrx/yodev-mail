@@ -158,6 +158,7 @@ export async function evaluateStoredMessage(
     dailySent: (usage?.acceptedEmails ?? 0) + (input.dailyOffset ?? 0),
     domainVerified: domain.status === "verified" && binding.dkimStatus === "verified",
     graceEndsAt: subscription?.graceEndsAt,
+    pilotAccessExpiresAt: subscription?.pilotAccessExpiresAt,
     mode: input.mode,
     now,
     suppressed: Boolean(suppression),

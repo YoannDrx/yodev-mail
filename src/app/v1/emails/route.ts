@@ -20,11 +20,8 @@ import { authenticateApiKey } from "@/features/api/authenticate-api-key";
 import { consumeWorkspaceRateLimit } from "@/features/api/rate-limit";
 import { combinedContentSize, estimatedMimeSize, isRawContent, sendEmailSchema } from "@/features/emails/schema";
 import { evaluateStoredMessage, utcDay } from "@/features/sending/eligibility";
-import { sha256 } from "@/lib/crypto";
-
-function replaceVariables(value: string, variables: Record<string, string | number | boolean | null>) {
-  return value.replace(/{{\s*([\w.]+)\s*}}/g, (_, name: string) => String(variables[name] ?? ""));
-}
+import { renderApprovedTemplate, TemplateVariablesMissingError } from "@/features/templates/render";
+import { canonicalJson, sha256 } from "@/lib/crypto";
 
 export async function POST(request: Request) {
   const key = await authenticateApiKey(request, "emails:send");
@@ -49,7 +46,7 @@ export async function POST(request: Request) {
   }
 
   const db = requireDb();
-  const requestHash = sha256(JSON.stringify(parsed.data));
+  const requestHash = sha256(canonicalJson(parsed.data));
   const [existing] = await db
     .select()
     .from(idempotencyKeys)
@@ -124,11 +121,23 @@ export async function POST(request: Request) {
       .orderBy(desc(templateVersions.version))
       .limit(1);
     if (!version) return NextResponse.json({ error: { code: "template_not_approved" } }, { status: 404 });
-    subject = replaceVariables(version.subject, parsed.data.content.variables);
-    html = replaceVariables(version.html, parsed.data.content.variables);
-    plainText = replaceVariables(version.plainText, parsed.data.content.variables);
+    try {
+      ({ subject, html, plainText } = renderApprovedTemplate({
+        subject: version.subject,
+        html: version.html,
+        plainText: version.plainText,
+        variables: parsed.data.content.variables,
+      }));
+    } catch (error) {
+      if (error instanceof TemplateVariablesMissingError) {
+        return NextResponse.json({ error: { code: "template_variables_missing", details: { missing: error.missingVariables } } }, { status: 422 });
+      }
+      throw error;
+    }
     contentKind = "template";
   }
+
+  subject = subject.replace(/[\r\n]+/g, " ").trim();
 
   const attachmentIds = parsed.data.attachments.map((attachment) => attachment.id);
   const contentBytes = combinedContentSize(html, plainText);

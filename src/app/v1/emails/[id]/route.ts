@@ -17,7 +17,8 @@ export async function GET(request: Request, { params }: { params: Promise<{ id: 
     queuedAt: messages.queuedAt,
     acceptedAt: messages.providerAcceptedAt,
     deliveredAt: messages.deliveredAt,
-    failedAt: messages.ambiguousAt,
+    failedAt: messages.failedAt,
+    ambiguousAt: messages.ambiguousAt,
     errorCode: messages.lastError,
     createdAt: messages.createdAt,
   }).from(messages).innerJoin(transactionalProfiles, and(

@@ -11,6 +11,21 @@ export function sha256(value: string) {
   return createHash("sha256").update(value).digest("hex");
 }
 
+export function canonicalJson(value: unknown): string {
+  if (value === null || typeof value !== "object") {
+    return JSON.stringify(value) ?? "null";
+  }
+  if (Array.isArray(value)) {
+    return `[${value.map((item) => item === undefined ? "null" : canonicalJson(item)).join(",")}]`;
+  }
+  const object = value as Record<string, unknown>;
+  return `{${Object.keys(object)
+    .filter((key) => object[key] !== undefined)
+    .sort()
+    .map((key) => `${JSON.stringify(key)}:${canonicalJson(object[key])}`)
+    .join(",")}}`;
+}
+
 export function hmac(value: string, secret: string) {
   return createHmac("sha256", secret).update(value).digest("hex");
 }

@@ -3,6 +3,7 @@ import type { SQSBatchResponse, SQSEvent } from "aws-lambda";
 import { ingestProviderEvent } from "@/features/providers/ingest-event";
 import type { NormalizedProviderEvent } from "@/features/providers/normalize-event";
 import { loadRuntimeSecrets } from "@/workers/runtime-secrets";
+import { logWorkerResult } from "@/lib/worker-log";
 
 type SanitizedSesEvent = {
   provider?: "ses" | "postmark";
@@ -75,7 +76,9 @@ export async function handler(event: SQSEvent): Promise<SQSBatchResponse> {
     try {
       const normalized = normalizeQueuedProviderEvent(JSON.parse(record.body));
       if (normalized) await ingestProviderEvent(normalized);
+      logWorkerResult({ worker: "provider-events", correlationId: record.messageId, outcome: normalized ? "completed" : "skipped" });
     } catch {
+      logWorkerResult({ worker: "provider-events", correlationId: record.messageId, outcome: "failed", code: "technical_failure" });
       batchItemFailures.push({ itemIdentifier: record.messageId });
     }
   }

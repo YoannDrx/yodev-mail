@@ -1,4 +1,4 @@
-export function emitOperationalMetric(name: "AttachmentPurgeFailure" | "AttachmentScanRejected" | "ProviderOutcomeUnknown", value = 1) {
+export function emitOperationalMetric(name: "AttachmentPurgeFailure" | "AttachmentScanRejected" | "CustomerWebhookTerminalFailure" | "ProviderOutcomeUnknown", value = 1) {
   console.log(JSON.stringify({
     _aws: {
       Timestamp: Date.now(),

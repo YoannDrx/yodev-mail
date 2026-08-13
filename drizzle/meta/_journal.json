@@ -57,6 +57,13 @@
       "when": 1786546857696,
       "tag": "0007_better-auth-expansion",
       "breakpoints": true
+    },
+    {
+      "idx": 8,
+      "version": "7",
+      "when": 1786619594995,
+      "tag": "0008_empty_ben_grimm",
+      "breakpoints": true
     }
   ]
 }

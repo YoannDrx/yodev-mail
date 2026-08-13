@@ -46,11 +46,12 @@ export async function POST(request: Request, { params }: { params: Promise<{ bin
   if (String(payload.ServerID ?? "") !== account.externalAccountId) return new NextResponse(null, { status: 403 });
   const event = normalizePostmarkEvent(payload);
   if (event) {
+    const scopedEvent = { ...event, workspaceId: event.workspaceId ?? binding.workspaceId };
     const queued = await enqueueProviderEvent({
-      ...event,
+      ...scopedEvent,
       occurredAt: event.occurredAt.toISOString(),
     });
-    if (queued.local) await ingestProviderEvent(event);
+    if (queued.local) await ingestProviderEvent(scopedEvent);
   }
   return NextResponse.json({ ok: true });
 }

@@ -5,6 +5,7 @@ import { domainProviderBindings, domains, workspaceProviderAccounts, workspaces 
 import { provisionSesDomain } from "@/features/domains/provision-ses-domain";
 import { provisionPostmarkDomain } from "@/features/providers/provision-postmark";
 import { loadRuntimeSecrets } from "@/workers/runtime-secrets";
+import { logWorkerResult } from "@/lib/worker-log";
 
 export async function provisionBinding(bindingId: string) {
   const db = requireDb();
@@ -63,8 +64,13 @@ export async function handler(event: SQSEvent): Promise<SQSBatchResponse> {
   await loadRuntimeSecrets();
   const batchItemFailures: Array<{ itemIdentifier: string }> = [];
   for (const record of event.Records) {
-    try { await provisionBinding(JSON.parse(record.body).bindingId); }
-    catch { batchItemFailures.push({ itemIdentifier: record.messageId }); }
+    try {
+      await provisionBinding(JSON.parse(record.body).bindingId);
+      logWorkerResult({ worker: "provider-provisioning", correlationId: record.messageId, outcome: "completed" });
+    } catch {
+      logWorkerResult({ worker: "provider-provisioning", correlationId: record.messageId, outcome: "failed", code: "technical_failure" });
+      batchItemFailures.push({ itemIdentifier: record.messageId });
+    }
   }
   return { batchItemFailures };
 }

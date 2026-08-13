@@ -4,6 +4,7 @@ import { requireDb } from "@/db";
 import {
   domainProviderBindings,
   domains,
+  subscriptions,
   templates,
   transactionalProfiles,
   workspaceProviderAccounts,
@@ -21,6 +22,7 @@ import {
   reviewTransactionalProfileAction,
   reviewWorkspaceAction,
   setProviderAccountStatusAction,
+  setPilotAccessAction,
   setWorkspaceContentPolicyAction,
 } from "@/features/admin/actions";
 import { requireAdmin } from "@/lib/page-auth";
@@ -30,13 +32,14 @@ export const dynamic = "force-dynamic";
 export default async function Page() {
   await requireAdmin();
   const db = requireDb();
-  const [workspaceRows, profileRows, templateRows, domainRows, bindings, providerAccounts] = await Promise.all([
+  const [workspaceRows, profileRows, templateRows, domainRows, bindings, providerAccounts, subscriptionRows] = await Promise.all([
     db.select().from(workspaces).orderBy(desc(workspaces.createdAt)),
     db.select().from(transactionalProfiles).orderBy(desc(transactionalProfiles.createdAt)),
     db.select().from(templates).orderBy(desc(templates.createdAt)),
     db.select().from(domains).orderBy(desc(domains.createdAt)),
     db.select().from(domainProviderBindings).orderBy(desc(domainProviderBindings.createdAt)),
     db.select().from(workspaceProviderAccounts).orderBy(desc(workspaceProviderAccounts.createdAt)),
+    db.select().from(subscriptions).orderBy(desc(subscriptions.createdAt)),
   ]);
 
   return <main className="mx-auto min-h-screen max-w-7xl p-8">
@@ -45,22 +48,27 @@ export default async function Page() {
     <p className="mt-2 text-muted-foreground">Le fournisseur reste invisible côté client. Toute activation est auditée et débute à 50 emails par jour.</p>
 
     <Section title="Workspaces">
-      {workspaceRows.map((workspace) => <article className="rounded-2xl border bg-white p-6" key={workspace.id}>
+      {workspaceRows.map((workspace) => {
+        const subscription = subscriptionRows.find((row) => row.workspaceId === workspace.id);
+        return <article className="rounded-2xl border bg-white p-6" key={workspace.id}>
         <div className="flex flex-col justify-between gap-4 lg:flex-row">
           <div>
             <div className="flex gap-3"><h2 className="font-semibold">{workspace.name}</h2><Badge variant={workspace.status === "rejected" ? "destructive" : "secondary"}>{workspace.status}</Badge><Badge variant="outline">{workspace.contentPolicy}</Badge></div>
             <p className="mt-2 text-sm text-muted-foreground">{workspace.websiteUrl ?? "Site non renseigné"} · {workspace.expectedMonthlyVolume.toLocaleString("fr-FR")} emails/mois · limite {workspace.dailyLimit}/jour</p>
             <p className="mt-3 max-w-3xl whitespace-pre-wrap text-sm">{workspace.useCase ?? "Cas d’usage non renseigné"}</p>
+            <p className="mt-2 text-sm text-muted-foreground">Droit pilote : {subscription?.pilotAccessExpiresAt ? `jusqu’au ${subscription.pilotAccessExpiresAt.toLocaleString("fr-FR")}` : "inactif"}</p>
           </div>
           <div className="flex flex-wrap gap-2">
             <form action={reviewWorkspaceAction.bind(null, workspace.id, "approved")}><Button size="sm" type="submit"><Check />Approuver</Button></form>
             <form action={reviewWorkspaceAction.bind(null, workspace.id, "limited")}><Button size="sm" type="submit" variant="outline"><Pause />Suspendre</Button></form>
             <form action={reviewWorkspaceAction.bind(null, workspace.id, "rejected")}><Button size="sm" type="submit" variant="destructive"><X />Refuser</Button></form>
             <form action={setWorkspaceContentPolicyAction.bind(null, workspace.id, workspace.contentPolicy === "hybrid" ? "template_only" : "hybrid")}><Button size="sm" type="submit" variant="outline">{workspace.contentPolicy === "hybrid" ? "Templates seuls" : "Autoriser raw"}</Button></form>
+            {workspace.status === "approved" && <form action={setPilotAccessAction.bind(null, workspace.id, 30)}><Button size="sm" type="submit" variant="outline">Pilote 30 jours</Button></form>}
+            {subscription?.pilotAccessExpiresAt && <form action={setPilotAccessAction.bind(null, workspace.id, null)}><Button size="sm" type="submit" variant="destructive">Révoquer pilote</Button></form>}
           </div>
         </div>
         {workspace.status === "pending_review" && <p className="mt-4 rounded-xl bg-amber-50 p-3 text-sm text-amber-900"><AlertTriangle className="mr-2 inline size-4" />Vérifier identité, site, application, déclencheurs et relation destinataire avant approbation.</p>}
-      </article>)}
+      </article>;})}
     </Section>
 
     <Section title="Cas d’usage">
