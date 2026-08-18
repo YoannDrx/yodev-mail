@@ -189,7 +189,11 @@ La CI exécute désormais :
 
 Le compte Stripe exposé au connecteur est `RoutineKids`, pas un compte YoDevMail.
 Aucune mutation Stripe n'a donc été réalisée. Un compte dédié et sa fiscalité
-restent un bloqueur commercial explicite.
+restent un bloqueur commercial explicite. Les clés, secrets webhook et prix de
+ce compte ont été retirés des environnements Vercel YoDevMail. Les deux anciens
+paramètres SSM `/yodev-mail-{dev,prod}/runtime/stripe-secret-key` ont été supprimés
+sans lire leur valeur; `STRIPE_USAGE_REPORTING_ENABLED=false` est confirmé. Une
+clé restreinte dédiée devra être créée à neuf lors de la certification Stripe.
 
 La session root utilisée pour l'audit initial ne sera pas utilisée pour les
 déploiements. Une organisation AWS et une instance IAM Identity Center

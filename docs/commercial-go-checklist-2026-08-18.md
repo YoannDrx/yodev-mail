@@ -17,7 +17,7 @@ doit jamais être interprété comme une fonctionnalité certifiée.
 | Événements fournisseur, suppressions et auto-pause | Concurrence et désordre verts | delivery Postmark réelle | active | bounce et complaint réels requis |
 | Webhooks clients signés et retries | SSRF, signature, claim périmé et huit retries verts | aucun endpoint contrôlé réel | fermée | canari succès, échec et terminal requis |
 | Pièces jointes | Scan, course malware, checksum, MIME, envoi et purge verts | GuardDuty/S3 actifs, aucun upload réel | fermée | canari upload, scan, Gmail et purge requis |
-| Stripe Checkout et portail | Catalogue et état webhook partiellement couverts | compte connecté `RoutineKids`, pas YoDevMail | fermée | compte dédié et cycle complet requis |
+| Stripe Checkout et portail | Catalogue et état webhook partiellement couverts | credentials RoutineKids retirés de Vercel et SSM | fermée | compte YoDevMail dédié et cycle complet requis |
 | Facturation à l'usage | Claim et ambiguïté PostgreSQL verts | aucun meter event YoDevMail réel | fermée | meter, facture et réconciliation requis |
 | Onboarding commercial | Réconciliation propriétaire verte | deux organisations en Preview | fermée | garder fermé jusqu'au GO commercial |
 | AWS SQS/Lambda/EventBridge/KMS/CloudTrail | CDK et tests verts | stacks saines, files et DLQ vides | production active | prête, sous surveillance |
