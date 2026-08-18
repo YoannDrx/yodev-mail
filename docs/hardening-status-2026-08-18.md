@@ -85,11 +85,17 @@ La CI exécute désormais :
 
 - GitHub : la branche `codex/yodev-mail-hardening` est publiée dans la draft PR
   `#19`. Les checks qualité, intégration PostgreSQL, E2E, GitGuardian et Vercel
-  sont verts. Le commit applicatif certifié est `8e0d203`.
+  sont verts sur la tête de branche publiée.
 - Neon : une branche de répétition a été créée depuis une branche de sauvegarde,
   `0009` a été appliquée en transaction, puis le schéma et les données ont été
   comparés. La restauration depuis le parent a réussi en 864 ms, sans écart de
-  données sur les agrégats contrôlés. La base principale n'a pas été modifiée.
+  données sur les agrégats contrôlés. Juste avant l'application en production,
+  la branche `backup-pre-0009-prod-20260818-1816` a été créée. Le préflight a
+  détecté deux revues `pending` dupliquées sur un workspace synthétique : elles
+  ont été supprimées sous verrou, la revue approuvée a été conservée et un
+  événement d'audit technique a été ajouté. `0009` est désormais appliquée sur
+  `main` : 10 migrations, aucun doublon, trois nouvelles tables et index
+  critiques valides.
 - AWS : les trois stacks sont `UPDATE_COMPLETE`; la détection de drift n'a
   trouvé aucun drift sur les ressources prises en charge. Les huit files de
   production, dont quatre DLQ, sont vides. Les deux plans GuardDuty Malware
@@ -100,6 +106,11 @@ La CI exécute désormais :
   rétention vaut un an, l'alarme d'usage root est `OK`, l'abonnement SNS est
   confirmé et les budgets YoDevMail valent 10 USD pour le compte et 5 USD pour
   GuardDuty. Aucun détecteur GuardDuty général n'est actif en `eu-west-3`.
+- Le workload AWS Production durci est déployé sans remplacement stateful. Les
+  workers existants et leurs permissions minimales sont à jour; le worker de
+  réconciliation propriétaire est actif toutes les cinq minutes avec ses
+  alarmes. Les huit files et DLQ Production sont vides. Dev reste explicitement
+  en standby et n'a pas été activé.
 - SES est toujours en sandbox (200 messages/jour, 1/s). L'identité
   `mail.yodev.fr` et son MAIL FROM sont vérifiés, mais SES reste volontairement
   désactivé comme transport de production.
@@ -121,7 +132,7 @@ La CI exécute désormais :
   commandes CDK chargent désormais ce même fichier et les entrées locales
   reflètent exactement les stacks actives, GuardDuty, Postmark, le profil SSO et
   le fournisseur OIDC existant.
-- Preview : le commit `8e0d203` est déployé sur une Preview Vercel reliée à une
+- Preview : la tête de branche est déployée sur une Preview Vercel reliée à une
   branche Neon dédiée où `0009` est appliquée. Les deux health checks répondent
   HTTP 200 avec `database=ok` et la bonne version. Les variables de base, URL et
   origine Better Auth sont limitées à la branche Git du durcissement.
@@ -140,7 +151,7 @@ La CI exécute désormais :
   domaine `yodev.fr` et aucun template Yodev ; Mail by Yodev affiche son quota de
   200/jour et ses événements `operations_alert`. Le gate commercial a ensuite
   été remis à `false` sur la branche Preview et redéployé. Le health check de
-  l'alias sert le commit `8e0d203` avec `database=ok`.
+  l'alias sert la tête de branche avec `database=ok`.
 - API Preview : une clé live synthétique est refusée en 503 par le gate fermé.
   Une clé test synthétique produit exactement un message `simulated`; son replay
   renvoie le même ID, tandis qu'un corps différent avec la même idempotency key
@@ -150,7 +161,7 @@ La CI exécute désormais :
 
 ## Validations externes restant à exécuter
 
-- Aucun déploiement du workload applicatif de production n'a été déclenché.
+- L'application Vercel Production sert encore l'ancien commit `c0d4a80`.
 - Aucun gate live n'a été activé.
 - Aucun bounce/complaint officiel Postmark n'a été provoqué sur cette version.
 - Aucun checkout, paiement, webhook, facture, annulation, portail ou meter event
@@ -175,10 +186,10 @@ la disponibilité de l'ancienne version déployée, pas celle de la branche loca
 
 ## Prochaine barrière de décision
 
-Avant un GO interne, il reste à appliquer la migration `0009` à la production,
-déployer le workload et l'application avec tous les gates fermés, puis exécuter
-les trois canaris et observer 72 heures. La fondation passive et l'identité SSO
-non-root sont désormais vérifiées. Stripe n'est pas requis pour ce GO et doit
+Avant un GO interne, il reste à fusionner et déployer l'application avec tous
+les gates fermés, puis exécuter les trois canaris et observer 72 heures. La
+migration Production, le workload AWS, la fondation passive et l'identité SSO
+non-root sont désormais vérifiés. Stripe n'est pas requis pour ce GO et doit
 rester fermé jusqu'à sa certification séparée.
 
 Le GO commercial exige en plus le compte Stripe YoDevMail dédié, la certification
