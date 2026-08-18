@@ -2,7 +2,7 @@ import { z } from "zod";
 
 const mailbox = z.object({
   email: z.string().email(),
-  name: z.string().trim().min(1).max(140).optional(),
+  name: z.string().trim().min(1).max(140).regex(/^[^\u0000-\u001f\u007f]+$/).optional(),
 }).strict();
 
 const variables = z.record(
@@ -33,6 +33,7 @@ export const sendEmailSchema = z.object({
   attachments: z.array(z.object({ id: z.string().uuid() }).strict()).max(5).default([]),
   metadata: z.object({
     referenceId: z.string().trim().min(1).max(128).regex(/^[A-Za-z0-9._:-]+$/).optional(),
+    workspaceId: z.string().uuid().optional(),
   }).strict().default({}),
 }).strict();
 

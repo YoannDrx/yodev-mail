@@ -3,6 +3,7 @@ import { and, eq, isNull, lt, lte, or } from "drizzle-orm";
 import { requireDb } from "@/db/runtime";
 import { emailEvents, outboxJobs, webhookDeliveries, webhookEndpoints } from "@/db/schema";
 import { nextWebhookAttemptAt } from "@/features/webhooks/retry-policy";
+import { postWebhookSafely } from "@/features/webhooks/safe-http";
 import { validateWebhookUrl } from "@/features/webhooks/validate-url";
 import { decryptSecret, hmac } from "@/lib/crypto";
 import { emitOperationalMetric } from "@/lib/operational-metric";
@@ -10,7 +11,7 @@ import { logWorkerResult } from "@/lib/worker-log";
 import { loadRuntimeSecrets } from "@/workers/runtime-secrets";
 
 export async function handler(event: SQSEvent): Promise<SQSBatchResponse> {
-  await loadRuntimeSecrets();
+  await loadRuntimeSecrets(["DATABASE_URL", "WEBHOOK_SIGNING_SECRET"]);
   const failed: Array<{ itemIdentifier: string }> = [];
   for (const record of event.Records) {
     try {
@@ -102,20 +103,20 @@ export async function deliverWebhook(deliveryId: string, now = new Date()) {
   }
 
   try {
-    const response = await fetch(safeUrl, {
+    const statusCode = await postWebhookSafely({
+      url: safeUrl,
       body,
       headers: {
         "content-type": "application/json",
+        "content-length": String(Buffer.byteLength(body)),
         "user-agent": "Yodev-Mail-Webhooks/1.0",
         "x-yodev-mail-signature": hmac(`${timestamp}.${body}`, signingSecret),
         "x-yodev-mail-timestamp": String(timestamp),
       },
-      method: "POST",
-      redirect: "error",
-      signal: AbortSignal.timeout(10_000),
+      timeoutMs: 10_000,
     });
-    if (!response.ok) {
-      await recordExpectedFailure({ deliveryId, workspaceId: row.delivery.workspaceId, attempt, errorCode: `http_${response.status}`, statusCode: response.status, now });
+    if (statusCode < 200 || statusCode >= 300) {
+      await recordExpectedFailure({ deliveryId, workspaceId: row.delivery.workspaceId, attempt, errorCode: `http_${statusCode}`, statusCode, now });
       return;
     }
     await db.update(webhookDeliveries).set({
@@ -124,7 +125,7 @@ export async function deliverWebhook(deliveryId: string, now = new Date()) {
       deliveredAt: now,
       lastError: null,
       nextAttemptAt: null,
-      statusCode: response.status,
+      statusCode,
       updatedAt: now,
     }).where(and(eq(webhookDeliveries.id, deliveryId), eq(webhookDeliveries.workspaceId, row.delivery.workspaceId)));
   } catch {

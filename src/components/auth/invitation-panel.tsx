@@ -27,7 +27,8 @@ export function InvitationPanel({ invitationId }: { invitationId: string }) {
       setError("Cette invitation est invalide, expirée ou destinée à une autre adresse.");
       return;
     }
-    router.push("/dashboard");
+    const role = result.data?.invitation.role ?? "member";
+    router.push(role.split(",").includes("owner") ? "/onboarding" : "/dashboard");
     router.refresh();
   }
 

@@ -13,6 +13,8 @@
 9. The delivery worker claims the message and calls exactly one configured provider.
 10. An explicit acceptance creates the usage ledger and `email.sent`; an ambiguous outcome becomes `unknown` without retry.
 
+Live acceptance remains closed unless `LIVE_EMAIL_ACCEPTANCE_ENABLED=true`. Attachments and raw content have independent fail-closed gates; a scope or workspace policy can never bypass a closed deployment gate.
+
 ## Provider isolation
 
 One provider account exists per workspace and provider. One binding exists per domain and provider, but only one binding can be active. The active provider is copied onto the message at acceptance and is never accepted from the client.
@@ -20,6 +22,24 @@ One provider account exists per workspace and provider. One binding exists per d
 Postmark uses one Live Server per client workspace and a separate Server Token stored in SSM. SES uses one tenant, a Strict reputation policy, a transaction-only configuration set and tenant-level bounce/complaint suppressions.
 
 Provider events are reduced to provider name, external event ID, provider message ID, opaque Yodev message/workspace IDs, normalized type, timestamp and reason code. The raw provider payload is neither queued nor persisted.
+
+## Tenant provisioning
+
+Public organization creation is disabled. A global administrator starts one idempotent provisioning run, which atomically creates the Better Auth organization, sandbox workspace, settings, inactive subscription, pending review and owner invitation. The administrator is not added to the client organization. Invitation acceptance binds the owner, then onboarding moves the workspace to `pending_review`; only a separate administrator decision can approve it. Commercial provisioning is unavailable unless `COMMERCIAL_ONBOARDING_ENABLED=true`.
+
+Every tenant mutation is constrained by `workspaceId`. Domain ownership additionally uses a global uniqueness constraint and a transaction-scoped advisory lock so a parent domain and one of its subdomains cannot be claimed concurrently by distinct workspaces.
+
+## Billing and usage
+
+The Stripe catalog is verified against an immutable manifest before checkout: EUR 29/month, EUR 0.0025 per accepted email, exclusive tax behavior, one product and the configured meter. Checkout freezes the catalog identifiers and idempotency key in a single pending attempt per workspace. Subscription webhooks retrieve the current Stripe object, reject the wrong mode/catalog/workspace, lock the local subscription and ignore stale events. Invoice events never grant access independently.
+
+Each provider-accepted message creates at most one frozen usage-report job. Reporting uses the original acceptance timestamp and quantity one. An ambiguous Stripe response becomes `unknown` and is never resubmitted automatically; jobs older than Stripe's accepted timestamp window become `unreportable` and require reconciliation. Checkout and usage reporting have independent production gates.
+
+## Retention and observability
+
+Bodies are erased after 30 days. After 90 days, stored sender/recipient names and addresses are replaced, suppression cleartext is removed while the non-reversible lookup hash remains, technical events are deleted and delivered outbox/idempotency records are purged. Billing and audit records follow applicable contractual/legal retention.
+
+Operational logs contain only opaque correlation IDs, worker outcome codes and embedded CloudWatch metrics. The AWS foundation records encrypted multi-region management events for one year and alarms on root-account activity; email object data events are intentionally excluded.
 
 ## Attachments
 

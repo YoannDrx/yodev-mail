@@ -31,6 +31,13 @@ const schema = z.object({
   STRIPE_PRICE_PLATFORM: z.string().optional(),
   STRIPE_PRICE_USAGE: z.string().optional(),
   STRIPE_METER_EVENT_NAME: z.string().default("yodev_mail_emails_sent"),
+  COMMERCIAL_ONBOARDING_ENABLED: z.enum(["true", "false"]).default("false"),
+  LIVE_CHECKOUT_ENABLED: z.enum(["true", "false"]).default("false"),
+  STRIPE_USAGE_REPORTING_ENABLED: z.enum(["true", "false"]).default("false"),
+  ATTACHMENTS_ENABLED: z.enum(["true", "false"]).default("false"),
+  RAW_EMAIL_ENABLED: z.enum(["true", "false"]).default("false"),
+  LIVE_EMAIL_ACCEPTANCE_ENABLED: z.enum(["true", "false"]).default("false"),
+  CUSTOMER_WEBHOOKS_ENABLED: z.enum(["true", "false"]).default("false"),
 });
 
 export const env = schema.parse(process.env);
@@ -54,4 +61,17 @@ export function isAwsConfigured() {
 
 export function isStripeConfigured() {
   return Boolean(env.STRIPE_SECRET_KEY);
+}
+
+export function isFeatureEnabled(
+  feature:
+    | "COMMERCIAL_ONBOARDING_ENABLED"
+    | "LIVE_CHECKOUT_ENABLED"
+    | "STRIPE_USAGE_REPORTING_ENABLED"
+    | "ATTACHMENTS_ENABLED"
+    | "RAW_EMAIL_ENABLED"
+    | "LIVE_EMAIL_ACCEPTANCE_ENABLED"
+    | "CUSTOMER_WEBHOOKS_ENABLED",
+) {
+  return env[feature] === "true";
 }

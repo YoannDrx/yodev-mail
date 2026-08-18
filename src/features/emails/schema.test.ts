@@ -19,7 +19,24 @@ describe("transactional email schema", () => {
     expect(sendEmailSchema.safeParse({
       ...base,
       content: { subject: "Votre reçu", html: "<p>Bonjour</p>", text: "Bonjour" },
+      metadata: {
+        referenceId: "payment:invoice:INV-1",
+        workspaceId: "00000000-0000-4000-8000-000000000001",
+      },
     }).success).toBe(true);
+  });
+
+  it("rejects malformed source workspace metadata and unknown metadata fields", () => {
+    expect(sendEmailSchema.safeParse({
+      ...base,
+      content: { subject: "Test", html: "<p>Test</p>", text: "Test" },
+      metadata: { workspaceId: "not-a-uuid" },
+    }).success).toBe(false);
+    expect(sendEmailSchema.safeParse({
+      ...base,
+      content: { subject: "Test", html: "<p>Test</p>", text: "Test" },
+      metadata: { source: "unapproved" },
+    }).success).toBe(false);
   });
 
   it("rejects provider, tracking and multi-recipient fields", () => {
@@ -32,6 +49,14 @@ describe("transactional email schema", () => {
     expect(sendEmailSchema.safeParse({
       ...base,
       to: [{ email: "one@example.net" }, { email: "two@example.net" }],
+      content: { subject: "Test", html: "<p>Test</p>", text: "Test" },
+    }).success).toBe(false);
+  });
+
+  it("rejects control characters in display names", () => {
+    expect(sendEmailSchema.safeParse({
+      ...base,
+      from: { email: "sender@example.com", name: "Yodev\r\nBcc: hidden@example.net" },
       content: { subject: "Test", html: "<p>Test</p>", text: "Test" },
     }).success).toBe(false);
   });

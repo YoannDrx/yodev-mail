@@ -6,19 +6,22 @@ import { validateWebhookUrl } from "./validate-url";
 
 describe("customer webhook URL validation", () => {
   beforeEach(() => {
-    dns.resolve4.mockResolvedValue(["203.0.113.10"]);
-    dns.resolve6.mockResolvedValue(["2001:db8::10"]);
+    dns.resolve4.mockResolvedValue(["8.8.8.8"]);
+    dns.resolve6.mockResolvedValue(["2606:4700:4700::1111"]);
   });
 
   it("accepts HTTPS hosts only when every current DNS answer is public", async () => {
     await expect(validateWebhookUrl("https://hooks.example.test/events")).resolves.toBe("https://hooks.example.test/events");
-    dns.resolve4.mockResolvedValueOnce(["203.0.113.10", "10.0.0.2"]);
+    dns.resolve4.mockResolvedValueOnce(["8.8.8.8", "10.0.0.2"]);
     await expect(validateWebhookUrl("https://hooks.example.test/events")).rejects.toThrow(/publiques/);
   });
 
   it("rejects private IPv4 and IPv6 literals, credentials, ports and non-HTTPS URLs", async () => {
     await expect(validateWebhookUrl("https://127.0.0.1/hook")).rejects.toThrow(/privée/);
+    await expect(validateWebhookUrl("https://240.0.0.1/hook")).rejects.toThrow(/privée/);
     await expect(validateWebhookUrl("https://[::1]/hook")).rejects.toThrow(/privée/);
+    await expect(validateWebhookUrl("https://[64:ff9b::a9fe:a9fe]/hook")).rejects.toThrow(/privée/);
+    await expect(validateWebhookUrl("https://[2002:7f00:1::]/hook")).rejects.toThrow(/privée/);
     await expect(validateWebhookUrl("https://user:pass@example.test/hook")).rejects.toThrow(/interdits/);
     await expect(validateWebhookUrl("https://example.test:8443/hook")).rejects.toThrow(/interdits/);
     await expect(validateWebhookUrl("http://example.test/hook")).rejects.toThrow(/HTTPS/);

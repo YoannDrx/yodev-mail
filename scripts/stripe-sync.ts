@@ -1,4 +1,5 @@
 import Stripe from "stripe";
+import { stripeCatalogManifest } from "../src/features/billing/stripe-catalog";
 
 async function main() {
   const secret = process.env.STRIPE_SECRET_KEY;
@@ -19,23 +20,25 @@ async function main() {
     value_settings: { event_payload_key: "value" },
   });
   const existing = await stripe.prices.list({ product: product.id, active: true, limit: 100 });
-  const platform = existing.data.find((price) => price.lookup_key === "yodev_mail_platform_monthly_v1") ?? await stripe.prices.create({
+  const platform = existing.data.find((price) => price.lookup_key === stripeCatalogManifest.platform.lookupKey) ?? await stripe.prices.create({
     product: product.id,
     currency: "eur",
     unit_amount: 2900,
     recurring: { interval: "month" },
     tax_behavior: "exclusive",
-    lookup_key: "yodev_mail_platform_monthly_v1",
+    lookup_key: stripeCatalogManifest.platform.lookupKey,
     nickname: "Accès plateforme — bêta privée",
     metadata: { yodev_product: "mail", component: "platform", domains: "2", members: "3" },
   });
-  const usage = existing.data.find((price) => price.lookup_key === "yodev_mail_usage_v1") ?? await stripe.prices.create({
+  const usage = existing.data.find((price) => price.lookup_key === stripeCatalogManifest.usage.lookupKey) ?? await stripe.prices.create({
     product: product.id,
     currency: "eur",
-    unit_amount_decimal: Stripe.Decimal.from("0.0025"),
+    // Stripe decimal amounts are expressed in the currency's minor unit.
+    // 0.25 euro cent is €0.0025.
+    unit_amount_decimal: Stripe.Decimal.from(stripeCatalogManifest.usage.amountMinorDecimal),
     recurring: { interval: "month", usage_type: "metered", meter: meter.id },
     tax_behavior: "exclusive",
-    lookup_key: "yodev_mail_usage_v1",
+    lookup_key: stripeCatalogManifest.usage.lookupKey,
     nickname: "Email accepté",
     metadata: { yodev_product: "mail", component: "usage" },
   });

@@ -1,5 +1,7 @@
 # Audit de préparation à la production
 
+> Ce document conserve les preuves observées lors de l’audit initial. Au 17 août 2026, les remédiations post-audit et la migration `0009_concerned_miracleman.sql` existent uniquement dans le worktree local : elles ne sont ni déployées ni prouvées en production. Les gates de production restent fermés jusqu’aux validations du runbook.
+
 Version du 13 août 2026. Ce document est le registre de décision du lancement interne. Il distingue volontairement le code, les tests, la configuration, le déploiement et la preuve réelle.
 
 ## Légende

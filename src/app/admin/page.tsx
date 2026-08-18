@@ -4,6 +4,7 @@ import { requireDb } from "@/db";
 import {
   domainProviderBindings,
   domains,
+  clientProvisioningRuns,
   subscriptions,
   templates,
   transactionalProfiles,
@@ -14,26 +15,30 @@ import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import {
   activateDomainBindingAction,
+  provisionClientWorkspaceAction,
   disableDomainBindingAction,
   disableTemplateAction,
   disableTransactionalProfileAction,
   inviteWorkspaceMemberAction,
   provisionDomainAction,
+  reconcileClientOwnerAction,
   reviewTemplateAction,
   reviewTransactionalProfileAction,
   reviewWorkspaceAction,
+  retryClientOwnerInvitationAction,
   setProviderAccountStatusAction,
   setPilotAccessAction,
   setWorkspaceContentPolicyAction,
 } from "@/features/admin/actions";
 import { requireAdmin } from "@/lib/page-auth";
+import { isFeatureEnabled } from "@/lib/env";
 
 export const dynamic = "force-dynamic";
 
 export default async function Page() {
   await requireAdmin();
   const db = requireDb();
-  const [workspaceRows, profileRows, templateRows, domainRows, bindings, providerAccounts, subscriptionRows] = await Promise.all([
+  const [workspaceRows, profileRows, templateRows, domainRows, bindings, providerAccounts, subscriptionRows, provisioningRuns] = await Promise.all([
     db.select().from(workspaces).orderBy(desc(workspaces.createdAt)),
     db.select().from(transactionalProfiles).orderBy(desc(transactionalProfiles.createdAt)),
     db.select().from(templates).orderBy(desc(templates.createdAt)),
@@ -41,12 +46,37 @@ export default async function Page() {
     db.select().from(domainProviderBindings).orderBy(desc(domainProviderBindings.createdAt)),
     db.select().from(workspaceProviderAccounts).orderBy(desc(workspaceProviderAccounts.createdAt)),
     db.select().from(subscriptions).orderBy(desc(subscriptions.createdAt)),
+    db.select().from(clientProvisioningRuns).orderBy(desc(clientProvisioningRuns.createdAt)),
   ]);
+  const commercialOnboardingEnabled = isFeatureEnabled("COMMERCIAL_ONBOARDING_ENABLED");
 
   return <main className="mx-auto min-h-screen max-w-7xl p-8">
     <p className="text-sm font-semibold text-primary">CONSOLE INTERNE YODEV</p>
     <h1 className="mt-2 text-3xl font-semibold">Validation transactionnelle et fournisseurs</h1>
     <p className="mt-2 text-muted-foreground">Le fournisseur reste invisible côté client. Toute activation est auditée et débute à 50 emails par jour.</p>
+
+    <Section title="Nouveau client">
+      <form action={provisionClientWorkspaceAction} className="grid gap-4 rounded-2xl border bg-white p-6 lg:grid-cols-2">
+        <label className="grid gap-1 text-sm">Entreprise<input className="h-10 rounded-md border px-3" disabled={!commercialOnboardingEnabled} maxLength={140} minLength={2} name="name" required /></label>
+        <label className="grid gap-1 text-sm">Slug<input className="h-10 rounded-md border px-3" disabled={!commercialOnboardingEnabled} maxLength={120} name="slug" pattern="[a-z0-9]+(?:-[a-z0-9]+)*" placeholder="acme" required /></label>
+        <label className="grid gap-1 text-sm">Email du propriétaire<input className="h-10 rounded-md border px-3" disabled={!commercialOnboardingEnabled} name="ownerEmail" required type="email" /></label>
+        <label className="grid gap-1 text-sm">Site web<input className="h-10 rounded-md border px-3" disabled={!commercialOnboardingEnabled} name="websiteUrl" required type="url" /></label>
+        <label className="grid gap-1 text-sm">Volume mensuel attendu<input className="h-10 rounded-md border px-3" disabled={!commercialOnboardingEnabled} max={10_000_000} min={1} name="expectedMonthlyVolume" required type="number" /></label>
+        <label className="grid gap-1 text-sm lg:col-span-2">Cas d’usage transactionnel<textarea className="min-h-28 rounded-md border p-3" disabled={!commercialOnboardingEnabled} maxLength={4_000} minLength={20} name="useCase" required /></label>
+        <div className="lg:col-span-2"><Button disabled={!commercialOnboardingEnabled} type="submit">Créer et inviter le propriétaire</Button></div>
+        {!commercialOnboardingEnabled && <p className="text-sm text-amber-800 lg:col-span-2">Le gate COMMERCIAL_ONBOARDING_ENABLED est fermé. Activez-le uniquement après migration et validation du parcours A/B en environnement isolé.</p>}
+      </form>
+      {provisioningRuns.map((run) => {
+        const workspace = workspaceRows.find((row) => row.id === run.workspaceId);
+        return <article className="flex flex-wrap items-center justify-between gap-4 rounded-2xl border bg-white p-5" key={run.id}>
+          <div><p className="font-semibold">{workspace?.name ?? "Workspace supprimé"}</p><p className="text-sm text-muted-foreground">Provisioning : {run.status} · tentative(s) {run.attemptCount}</p>{run.lastErrorCode && <p className="text-sm text-destructive">{run.lastErrorCode}</p>}</div>
+          <div className="flex gap-2">
+            {(run.status === "email_failed" || run.status === "invitation_sent") && <form action={retryClientOwnerInvitationAction.bind(null, run.id)}><Button disabled={!commercialOnboardingEnabled} size="sm" type="submit" variant="outline">Renvoyer l’invitation</Button></form>}
+            {run.status === "invitation_sent" && <form action={reconcileClientOwnerAction.bind(null, run.id)}><Button size="sm" type="submit" variant="outline">Réconcilier le propriétaire</Button></form>}
+          </div>
+        </article>;
+      })}
+    </Section>
 
     <Section title="Workspaces">
       {workspaceRows.map((workspace) => {

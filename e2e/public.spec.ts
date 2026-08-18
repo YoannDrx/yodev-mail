@@ -1,7 +1,9 @@
 import { expect, test } from "@playwright/test";
 
 test("landing page exposes the transactional private-beta promise", async ({ page }) => {
-  await page.goto("/");
+  const response = await page.goto("/");
+  expect(response?.headers()["content-security-policy"]).toContain("frame-ancestors 'none'");
+  expect(response?.headers()["content-security-policy"]).toContain("object-src 'none'");
   await expect(page.getByRole("heading", { name: /Vos emails transactionnels/ })).toBeVisible();
   await expect(page.getByRole("link", { name: /Candidater à la bêta/ }).first()).toBeVisible();
   await expect(page.getByText("1 / requête")).toBeVisible();

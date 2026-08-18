@@ -1,6 +1,7 @@
 import {
   bigint,
   boolean,
+  check,
   index,
   integer,
   jsonb,
@@ -303,8 +304,8 @@ export const workspaces = pgTable(
   "workspaces",
   {
     id: uuid("id").defaultRandom().primaryKey(),
-    clerkOrganizationId: varchar("clerk_organization_id", { length: 64 }).notNull(),
-    ownerUserId: varchar("owner_user_id", { length: 64 }).notNull(),
+    clerkOrganizationId: varchar("clerk_organization_id", { length: 64 }),
+    ownerUserId: varchar("owner_user_id", { length: 64 }),
     authOrganizationId: text("auth_organization_id"),
     authOwnerUserId: text("auth_owner_user_id"),
     name: varchar("name", { length: 140 }).notNull(),
@@ -365,6 +366,10 @@ export const subscriptions = pgTable(
     currentPeriodEndsAt: timestamp("current_period_ends_at", { withTimezone: true }),
     graceEndsAt: timestamp("grace_ends_at", { withTimezone: true }),
     pilotAccessExpiresAt: timestamp("pilot_access_expires_at", { withTimezone: true }),
+    lastStripeEventCreatedAt: timestamp("last_stripe_event_created_at", { withTimezone: true }),
+    lastStripeEventId: varchar("last_stripe_event_id", { length: 64 }),
+    lastReconciledAt: timestamp("last_reconciled_at", { withTimezone: true }),
+    canceledAt: timestamp("canceled_at", { withTimezone: true }),
     ...timestamps,
   },
   (table) => [
@@ -387,6 +392,71 @@ export const usageMonths = pgTable(
     ...timestamps,
   },
   (table) => [uniqueIndex("usage_workspace_month_idx").on(table.workspaceId, table.month)],
+);
+
+export const stripeUsageReportJobs = pgTable(
+  "stripe_usage_report_jobs",
+  {
+    id: uuid("id").defaultRandom().primaryKey(),
+    workspaceId: uuid("workspace_id")
+      .references(() => workspaces.id, { onDelete: "cascade" })
+      .notNull(),
+    messageId: uuid("message_id").notNull(),
+    acceptedAt: timestamp("accepted_at", { withTimezone: true }).notNull(),
+    stripeIdentifier: varchar("stripe_identifier", { length: 100 }).notNull(),
+    stripeCustomerId: varchar("stripe_customer_id", { length: 64 }).notNull(),
+    stripeSubscriptionId: varchar("stripe_subscription_id", { length: 64 }).notNull(),
+    status: varchar("status", { length: 24 }).default("pending").notNull(),
+    claimedAt: timestamp("claimed_at", { withTimezone: true }),
+    reportedAt: timestamp("reported_at", { withTimezone: true }),
+    attemptCount: integer("attempt_count").default(0).notNull(),
+    lastErrorCode: varchar("last_error_code", { length: 120 }),
+    ...timestamps,
+  },
+  (table) => [
+    uniqueIndex("stripe_usage_report_identifier_idx").on(table.stripeIdentifier),
+    uniqueIndex("stripe_usage_report_message_idx").on(table.messageId),
+    index("stripe_usage_report_pending_idx").on(table.status, table.createdAt),
+    index("stripe_usage_report_workspace_idx").on(table.workspaceId, table.createdAt),
+    check(
+      "stripe_usage_report_status_valid",
+      sql`${table.status} in ('pending', 'processing', 'reported', 'failed', 'unknown', 'unreportable')`,
+    ),
+  ],
+);
+
+export const stripeCheckoutAttempts = pgTable(
+  "stripe_checkout_attempts",
+  {
+    id: uuid("id").defaultRandom().primaryKey(),
+    workspaceId: uuid("workspace_id")
+      .references(() => workspaces.id, { onDelete: "cascade" })
+      .notNull(),
+    subscriptionId: uuid("subscription_id")
+      .references(() => subscriptions.id, { onDelete: "cascade" })
+      .notNull(),
+    stripeCustomerId: varchar("stripe_customer_id", { length: 64 }),
+    platformPriceId: varchar("platform_price_id", { length: 64 }).notNull(),
+    usagePriceId: varchar("usage_price_id", { length: 64 }).notNull(),
+    idempotencyKey: varchar("idempotency_key", { length: 120 }).notNull(),
+    stripeSessionId: varchar("stripe_session_id", { length: 180 }),
+    status: varchar("status", { length: 24 }).default("pending").notNull(),
+    expiresAt: timestamp("expires_at", { withTimezone: true }),
+    completedAt: timestamp("completed_at", { withTimezone: true }),
+    ...timestamps,
+  },
+  (table) => [
+    uniqueIndex("stripe_checkout_idempotency_idx").on(table.idempotencyKey),
+    uniqueIndex("stripe_checkout_session_idx").on(table.stripeSessionId),
+    uniqueIndex("stripe_checkout_pending_workspace_idx")
+      .on(table.workspaceId)
+      .where(sql`${table.status} = 'pending'`),
+    index("stripe_checkout_workspace_idx").on(table.workspaceId, table.createdAt),
+    check(
+      "stripe_checkout_status_valid",
+      sql`${table.status} in ('pending', 'completed', 'expired')`,
+    ),
+  ],
 );
 
 export const usageDays = pgTable(
@@ -435,6 +505,7 @@ export const domains = pgTable(
     ...timestamps,
   },
   (table) => [
+    uniqueIndex("domains_name_idx").on(table.name),
     uniqueIndex("domains_workspace_name_idx").on(table.workspaceId, table.name),
     index("domains_workspace_status_idx").on(table.workspaceId, table.status),
   ],
@@ -1023,7 +1094,16 @@ export const importJobs = pgTable(
 export const stripeEvents = pgTable("stripe_events", {
   eventId: varchar("event_id", { length: 64 }).primaryKey(),
   type: varchar("type", { length: 100 }).notNull(),
-  processedAt: timestamp("processed_at", { withTimezone: true }).defaultNow().notNull(),
+  stripeCreatedAt: timestamp("stripe_created_at", { withTimezone: true }),
+  livemode: boolean("livemode"),
+  objectType: varchar("object_type", { length: 64 }),
+  objectId: varchar("object_id", { length: 180 }),
+  customerId: varchar("customer_id", { length: 64 }),
+  subscriptionId: varchar("subscription_id", { length: 64 }),
+  status: varchar("status", { length: 24 }).default("received").notNull(),
+  processedAt: timestamp("processed_at", { withTimezone: true }),
+  lastErrorCode: varchar("last_error_code", { length: 120 }),
+  ...timestamps,
 });
 
 export const auditEvents = pgTable(
@@ -1055,5 +1135,35 @@ export const adminReviews = pgTable(
     reviewedAt: timestamp("reviewed_at", { withTimezone: true }),
     ...timestamps,
   },
-  (table) => [index("admin_reviews_decision_idx").on(table.decision, table.createdAt)],
+  (table) => [
+    uniqueIndex("admin_reviews_workspace_idx").on(table.workspaceId),
+    index("admin_reviews_decision_idx").on(table.decision, table.createdAt),
+  ],
+);
+
+export const clientProvisioningRuns = pgTable(
+  "client_provisioning_runs",
+  {
+    id: uuid("id").defaultRandom().primaryKey(),
+    workspaceId: uuid("workspace_id")
+      .references(() => workspaces.id, { onDelete: "cascade" })
+      .notNull(),
+    invitationId: text("invitation_id")
+      .references(() => authInvitations.id, { onDelete: "cascade" })
+      .notNull(),
+    status: varchar("status", { length: 32 }).default("pending_email").notNull(),
+    attemptCount: integer("attempt_count").default(0).notNull(),
+    emailSentAt: timestamp("email_sent_at", { withTimezone: true }),
+    lastErrorCode: varchar("last_error_code", { length: 120 }),
+    ...timestamps,
+  },
+  (table) => [
+    uniqueIndex("client_provisioning_workspace_idx").on(table.workspaceId),
+    uniqueIndex("client_provisioning_invitation_idx").on(table.invitationId),
+    index("client_provisioning_status_idx").on(table.status, table.createdAt),
+    check(
+      "client_provisioning_status_valid",
+      sql`${table.status} in ('pending_email', 'sending_email', 'invitation_sent', 'email_failed', 'accepted')`,
+    ),
+  ],
 );
