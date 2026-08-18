@@ -31,16 +31,33 @@ Run `npm run env:normalize` to create or reorganize the single local runtime
 file, `.env.local`, from the documented `.env.example` template. The command
 preserves existing values for supported keys, removes obsolete keys and never
 prints secrets. Keep `.env.local` ignored by Git; do not create a competing
-`.env`, `.env.development` or `.env.production` file. After pulling Development
-variables from Vercel, run the normalizer again:
+`.env`, `.env.development` or `.env.production` file. Vercel Development is
+intentionally empty; local commands never pull remote secrets into another
+file. Re-run the normalizer after editing `.env.local`:
 
 ```bash
-npx vercel env pull .env.local --environment=development --yes
 npm run env:normalize
 ```
 
 Never use `drizzle-kit push` against production. Create and verify a Neon
 restore branch before every production migration.
+
+Run the expurgated production baseline without displaying addresses, content or
+secrets:
+
+```bash
+npm run internal-go:audit -- --baseline --expected-version=abc1234
+```
+
+After the controlled Gmail, Microsoft and Apple canaries, start the final
+72-hour verification from their ISO-8601 start timestamp:
+
+```bash
+npm run internal-go:audit -- --canary-since=2026-08-18T18:00:00+02:00 --expected-version=abc1234
+```
+
+Replace the example timestamp and short SHA with the controlled canary start and
+the version returned by both production health endpoints.
 
 ## Delivery contract
 
