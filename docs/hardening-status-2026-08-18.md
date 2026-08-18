@@ -106,9 +106,17 @@ La CI exécute désormais :
   écoute delivery/bounce/complaint, exclut le contenu et désactive open/click.
   La base contient deux messages live déjà arrivés à l'état `delivered`.
 - Vercel : la production est saine mais sert encore le commit `c0d4a80`, pas ce
-  durcissement. Les environnements contiennent encore des variables historiques
-  de campagnes/newsletters à retirer lors d'une rotation contrôlée.
-- Preview : le commit `7e796e5` est déployé sur une Preview Vercel reliée à une
+  durcissement. Les variables historiques de campagnes/newsletters, anciens
+  tarifs Stripe, files d'import/campagne, désinscription et alias Neon non lus
+  ont été retirées de Production, Preview et Development. Les deux seules
+  connexions Neon conservées sont `DATABASE_URL` et `DATABASE_URL_UNPOOLED`.
+  GitHub ne contient aucune variable ni aucun secret de dépôt ou d'environnement.
+- Configuration locale : `.env.local` est l'unique fichier de valeurs, ignoré
+  par Git et protégé en mode `0600`. Le modèle versionné `.env.example` contient
+  42 clés documentées par responsabilité. `npm run env:normalize` conserve les
+  valeurs reconnues sans les afficher et retire les clés obsolètes ; le premier
+  passage en a retiré 15 et le second a confirmé son idempotence.
+- Preview : le commit `9c93ce8` est déployé sur une Preview Vercel reliée à une
   branche Neon dédiée où `0009` est appliquée. Les deux health checks répondent
   HTTP 200 avec `database=ok` et la bonne version. Les variables de base, URL et
   origine Better Auth sont limitées à la branche Git du durcissement.
@@ -127,7 +135,7 @@ La CI exécute désormais :
   domaine `yodev.fr` et aucun template Yodev ; Mail by Yodev affiche son quota de
   200/jour et ses événements `operations_alert`. Le gate commercial a ensuite
   été remis à `false` sur la branche Preview et redéployé. Le health check de
-  l'alias sert le commit `7e796e5` avec `database=ok`.
+  l'alias sert le commit `9c93ce8` avec `database=ok`.
 - API Preview : une clé live synthétique est refusée en 503 par le gate fermé.
   Une clé test synthétique produit exactement un message `simulated`; son replay
   renvoie le même ID, tandis qu'un corps différent avec la même idempotency key
@@ -149,20 +157,21 @@ Le compte Stripe exposé au connecteur est `RoutineKids`, pas un compte YoDevMai
 Aucune mutation Stripe n'a donc été réalisée. Un compte dédié et sa fiscalité
 restent un bloqueur commercial explicite.
 
-La session AWS réauthentifiée utilise actuellement l'identité root du compte.
-Elle a été limitée à l'audit en lecture seule et au `cdk diff`. Une organisation
-AWS et une instance IAM Identity Center d'organisation ont désormais été créées
-en `eu-west-3`. Le permission set `YoDevMailAdministrator` est affecté au compte
-pour l'utilisateur opérateur non-root ; l'activation de son invitation et sa
-première session SSO restent requises avant tout déploiement.
+La session root utilisée pour l'audit initial ne sera pas utilisée pour les
+déploiements. Une organisation AWS et une instance IAM Identity Center
+d'organisation ont été créées en `eu-west-3`. Le permission set
+`YoDevMailAdministrator` est affecté à l'utilisateur opérateur, son invitation
+est activée et sa première session SSO est réussie. `sts get-caller-identity`
+confirme une session `AWSReservedSSO_YoDevMailAdministrator`, non-root, dans le
+compte attendu.
 
 Les health checks publics servent toujours la version `c0d4a80`; ils prouvent
 la disponibilité de l'ancienne version déployée, pas celle de la branche locale.
 
 ## Prochaine barrière de décision
 
-Avant un GO interne, il reste à activer la session AWS non-root, déployer la
-fondation avec cette identité, puis exécuter les trois canaris et observer
+Avant un GO interne, il reste à déployer la fondation avec l'identité SSO
+non-root désormais vérifiée, puis exécuter les trois canaris et observer
 72 heures. La migration `0009` devra être
 appliquée à la production juste avant le déploiement applicatif selon le runbook.
 Stripe n'est pas requis pour ce GO et doit rester fermé jusqu'à sa certification
