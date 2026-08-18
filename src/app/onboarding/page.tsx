@@ -1,4 +1,5 @@
 import { Check } from "lucide-react";
+import { redirect } from "next/navigation";
 import { BrandMark } from "@/components/brand-mark";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -19,7 +20,8 @@ const attestations = [
 ] as const;
 
 export default async function Page() {
-  await currentWorkspace();
+  const { workspace } = await currentWorkspace();
+  if (workspace.status !== "sandbox") redirect("/dashboard");
   return (
     <main className="mx-auto min-h-screen max-w-3xl p-6 py-12">
       <BrandMark />

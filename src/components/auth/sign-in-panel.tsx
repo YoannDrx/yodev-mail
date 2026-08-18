@@ -9,7 +9,7 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 
 export function SignInPanel({
-  callbackURL = "/onboarding",
+  callbackURL = "/dashboard",
   emailPasswordEnabled,
 }: {
   callbackURL?: string;
