@@ -85,7 +85,7 @@ La CI exécute désormais :
 
 - GitHub : la branche `codex/yodev-mail-hardening` est publiée dans la draft PR
   `#19`. Les checks qualité, intégration PostgreSQL, E2E, GitGuardian et Vercel
-  sont verts. Le commit applicatif certifié est `3287919`.
+  sont verts. Le commit applicatif certifié est `8e0d203`.
 - Neon : une branche de répétition a été créée depuis une branche de sauvegarde,
   `0009` a été appliquée en transaction, puis le schéma et les données ont été
   comparés. La restauration depuis le parent a réussi en 864 ms, sans écart de
@@ -121,7 +121,7 @@ La CI exécute désormais :
   commandes CDK chargent désormais ce même fichier et les entrées locales
   reflètent exactement les stacks actives, GuardDuty, Postmark, le profil SSO et
   le fournisseur OIDC existant.
-- Preview : le commit `87ccdad` est déployé sur une Preview Vercel reliée à une
+- Preview : le commit `8e0d203` est déployé sur une Preview Vercel reliée à une
   branche Neon dédiée où `0009` est appliquée. Les deux health checks répondent
   HTTP 200 avec `database=ok` et la bonne version. Les variables de base, URL et
   origine Better Auth sont limitées à la branche Git du durcissement.
@@ -140,7 +140,7 @@ La CI exécute désormais :
   domaine `yodev.fr` et aucun template Yodev ; Mail by Yodev affiche son quota de
   200/jour et ses événements `operations_alert`. Le gate commercial a ensuite
   été remis à `false` sur la branche Preview et redéployé. Le health check de
-  l'alias sert le commit `9c93ce8` avec `database=ok`.
+  l'alias sert le commit `8e0d203` avec `database=ok`.
 - API Preview : une clé live synthétique est refusée en 503 par le gate fermé.
   Une clé test synthétique produit exactement un message `simulated`; son replay
   renvoie le même ID, tandis qu'un corps différent avec la même idempotency key
@@ -175,12 +175,11 @@ la disponibilité de l'ancienne version déployée, pas celle de la branche loca
 
 ## Prochaine barrière de décision
 
-Avant un GO interne, il reste à déployer la fondation avec l'identité SSO
-non-root désormais vérifiée, puis exécuter les trois canaris et observer
-72 heures. La migration `0009` devra être
-appliquée à la production juste avant le déploiement applicatif selon le runbook.
-Stripe n'est pas requis pour ce GO et doit rester fermé jusqu'à sa certification
-séparée.
+Avant un GO interne, il reste à appliquer la migration `0009` à la production,
+déployer le workload et l'application avec tous les gates fermés, puis exécuter
+les trois canaris et observer 72 heures. La fondation passive et l'identité SSO
+non-root sont désormais vérifiées. Stripe n'est pas requis pour ce GO et doit
+rester fermé jusqu'à sa certification séparée.
 
 Le GO commercial exige en plus le compte Stripe YoDevMail dédié, la certification
 checkout/webhook/facture/portail/annulation/usage, la validation fiscale et
