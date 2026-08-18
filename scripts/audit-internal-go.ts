@@ -206,6 +206,31 @@ async function main() {
     detail: `alarms=${alarms.length}, active=${alarmCount}, unexpected_insufficient=${unexpectedInsufficient}`,
   });
 
+  if (!baseline) {
+    const history = awsJson<{
+      AlarmHistoryItems?: Array<{ AlarmName?: string; HistoryData?: string }>;
+    }>([
+      "cloudwatch",
+      "describe-alarm-history",
+      "--region",
+      region,
+      "--history-item-type",
+      "StateUpdate",
+      "--start-date",
+      canarySince.toISOString(),
+    ]).AlarmHistoryItems ?? [];
+    const alarmTransitions = history.filter((item) => {
+      if (!item.AlarmName?.includes("YodevMail") || !item.HistoryData) return false;
+      const data = JSON.parse(item.HistoryData) as { newState?: { stateValue?: string } };
+      return data.newState?.stateValue === "ALARM";
+    }).length;
+    checks.push({
+      name: "alarm_history",
+      passed: alarmTransitions === 0,
+      detail: `alarm_transitions_since_canary=${alarmTransitions}`,
+    });
+  }
+
   for (const check of checks) {
     console.log(`${check.passed ? "PASS" : "FAIL"} ${check.name}: ${check.detail}`);
   }
