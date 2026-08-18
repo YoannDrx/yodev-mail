@@ -108,10 +108,26 @@ La CI exécute désormais :
 - Vercel : la production est saine mais sert encore le commit `c0d4a80`, pas ce
   durcissement. Les environnements contiennent encore des variables historiques
   de campagnes/newsletters à retirer lors d'une rotation contrôlée.
-- Preview : le commit `3287919` est déployé sur une Preview Vercel reliée à une
+- Preview : le commit `7e796e5` est déployé sur une Preview Vercel reliée à une
   branche Neon dédiée où `0009` est appliquée. Les deux health checks répondent
   HTTP 200 avec `database=ok` et la bonne version. Les variables de base, URL et
   origine Better Auth sont limitées à la branche Git du durcissement.
+- Better Auth Preview : un client OAuth Google dédié au projet Mail by Yodev a
+  été configuré avec des origines et callbacks bornés à la production et à la
+  branche Preview. Deux comptes Google contrôlés ont authentifié deux
+  propriétaires réels. Un second workspace synthétique a été provisionné avec
+  `COMMERCIAL_ONBOARDING_ENABLED=true` uniquement sur Preview, puis son
+  invitation propriétaire a été acceptée après un échec d'email volontairement
+  conservé. La réconciliation a fait passer le run de `email_failed` à
+  `accepted`, lié le propriétaire une seule fois et soumis le workspace en
+  `pending_review`.
+- Isolation Preview : le second utilisateur reçoit une 404 sur `/admin`. Après
+  acceptation d'une invitation membre contrôlée, le sélecteur propose exactement
+  les deux workspaces. Tenant B affiche son quota de 50/jour, zéro message, aucun
+  domaine `yodev.fr` et aucun template Yodev ; Mail by Yodev affiche son quota de
+  200/jour et ses événements `operations_alert`. Le gate commercial a ensuite
+  été remis à `false` sur la branche Preview et redéployé. Le health check de
+  l'alias sert le commit `7e796e5` avec `database=ok`.
 - API Preview : une clé live synthétique est refusée en 503 par le gate fermé.
   Une clé test synthétique produit exactement un message `simulated`; son replay
   renvoie le même ID, tandis qu'un corps différent avec la même idempotency key
@@ -123,8 +139,6 @@ La CI exécute désormais :
 
 - Aucun déploiement production n'a été déclenché.
 - Aucun gate live n'a été activé.
-- Aucun parcours authentifié à deux organisations ni tentative d'accès croisé
-  n'a été exécuté sur une Preview de cette version.
 - Aucun bounce/complaint officiel Postmark n'a été provoqué sur cette version.
 - Aucun checkout, paiement, webhook, facture, annulation, portail ou meter event
   Stripe réel n'a été exécuté.
@@ -136,18 +150,20 @@ Aucune mutation Stripe n'a donc été réalisée. Un compte dédié et sa fiscal
 restent un bloqueur commercial explicite.
 
 La session AWS réauthentifiée utilise actuellement l'identité root du compte.
-Elle a été limitée à l'audit en lecture seule et au `cdk diff`. Aucun déploiement
-de production ne doit être effectué avec cette identité : un rôle administrateur
-non-root avec MFA et permissions bornées est requis.
+Elle a été limitée à l'audit en lecture seule et au `cdk diff`. Une organisation
+AWS et une instance IAM Identity Center d'organisation ont désormais été créées
+en `eu-west-3`. Le permission set `YoDevMailAdministrator` est affecté au compte
+pour l'utilisateur opérateur non-root ; l'activation de son invitation et sa
+première session SSO restent requises avant tout déploiement.
 
 Les health checks publics servent toujours la version `c0d4a80`; ils prouvent
 la disponibilité de l'ancienne version déployée, pas celle de la branche locale.
 
 ## Prochaine barrière de décision
 
-Avant un GO interne, il reste à déployer la fondation avec une identité AWS
-non-root, prouver l'isolation Better Auth A/B sur la Preview déjà isolée, puis
-exécuter les trois canaris et observer 72 heures. La migration `0009` devra être
+Avant un GO interne, il reste à activer la session AWS non-root, déployer la
+fondation avec cette identité, puis exécuter les trois canaris et observer
+72 heures. La migration `0009` devra être
 appliquée à la production juste avant le déploiement applicatif selon le runbook.
 Stripe n'est pas requis pour ce GO et doit rester fermé jusqu'à sa certification
 séparée.
