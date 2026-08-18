@@ -83,6 +83,9 @@ La CI exécute désormais :
 
 ## Preuves externes obtenues le 18 août 2026
 
+- GitHub : la branche `codex/yodev-mail-hardening` est publiée dans la draft PR
+  `#19`. Les checks qualité, intégration PostgreSQL, E2E, GitGuardian et Vercel
+  sont verts. Le commit applicatif certifié est `3287919`.
 - Neon : une branche de répétition a été créée depuis une branche de sauvegarde,
   `0009` a été appliquée en transaction, puis le schéma et les données ont été
   comparés. La restauration depuis le parent a réussi en 864 ms, sans écart de
@@ -105,10 +108,20 @@ La CI exécute désormais :
 - Vercel : la production est saine mais sert encore le commit `c0d4a80`, pas ce
   durcissement. Les environnements contiennent encore des variables historiques
   de campagnes/newsletters à retirer lors d'une rotation contrôlée.
+- Preview : le commit `3287919` est déployé sur une Preview Vercel reliée à une
+  branche Neon dédiée où `0009` est appliquée. Les deux health checks répondent
+  HTTP 200 avec `database=ok` et la bonne version. Les variables de base, URL et
+  origine Better Auth sont limitées à la branche Git du durcissement.
+- API Preview : une clé live synthétique est refusée en 503 par le gate fermé.
+  Une clé test synthétique produit exactement un message `simulated`; son replay
+  renvoie le même ID, tandis qu'un corps différent avec la même idempotency key
+  renvoie 409. La base confirme un message et une ligne d'idempotence, sans
+  ledger, outbox ni réservation. Les deux clés ont ensuite été révoquées et le
+  pepper temporaire supprimé; une nouvelle requête renvoie 401.
 
 ## Validations externes restant à exécuter
 
-- Aucun déploiement Preview ou production n'a été déclenché.
+- Aucun déploiement production n'a été déclenché.
 - Aucun gate live n'a été activé.
 - Aucun parcours authentifié à deux organisations ni tentative d'accès croisé
   n'a été exécuté sur une Preview de cette version.
@@ -132,11 +145,12 @@ la disponibilité de l'ancienne version déployée, pas celle de la branche loca
 
 ## Prochaine barrière de décision
 
-Avant un GO interne, il reste à publier la branche, obtenir la CI distante verte,
-déployer la fondation puis une Preview avec une identité AWS non-root, prouver
-l'isolation Better Auth A/B, appliquer `0009` selon le runbook, puis exécuter les
-trois canaris et observer 72 heures. Stripe n'est pas requis pour ce GO et doit
-rester fermé jusqu'à sa certification séparée.
+Avant un GO interne, il reste à déployer la fondation avec une identité AWS
+non-root, prouver l'isolation Better Auth A/B sur la Preview déjà isolée, puis
+exécuter les trois canaris et observer 72 heures. La migration `0009` devra être
+appliquée à la production juste avant le déploiement applicatif selon le runbook.
+Stripe n'est pas requis pour ce GO et doit rester fermé jusqu'à sa certification
+séparée.
 
 Le GO commercial exige en plus le compte Stripe YoDevMail dédié, la certification
 checkout/webhook/facture/portail/annulation/usage, la validation fiscale et
