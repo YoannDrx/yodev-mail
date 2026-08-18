@@ -19,7 +19,7 @@ export async function handler() {
   for (const attachment of expired) {
     try {
       await s3.send(new DeleteObjectCommand({ Bucket: bucket, Key: attachment.storageKey }));
-      await db.update(attachments).set({ status: "expired", deletedAt: new Date(), updatedAt: new Date() }).where(and(
+      await db.update(attachments).set({ fileName: "[expired]", status: "expired", deletedAt: new Date(), updatedAt: new Date() }).where(and(
         eq(attachments.id, attachment.id),
         eq(attachments.workspaceId, attachment.workspaceId),
         lte(attachments.expiresAt, new Date()),

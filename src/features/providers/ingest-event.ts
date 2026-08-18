@@ -15,28 +15,41 @@ import { normalizeEmail, suppressionHash } from "@/features/email-address/normal
 import type { NormalizedProviderEvent } from "@/features/providers/normalize-event";
 import { shouldAutoPause } from "@/features/sending/policy";
 import { utcDay } from "@/features/sending/eligibility";
+import { isFeatureEnabled } from "@/lib/env";
 import { monotonicMessageStatus } from "@/workers/ses-event-utils";
 
 export async function ingestProviderEvent(event: NormalizedProviderEvent) {
   const db = requireDb();
-  let message: typeof messages.$inferSelect | undefined;
+  let locatedMessage: typeof messages.$inferSelect | undefined;
   if (event.messageId && event.workspaceId) {
-    [message] = await db.select().from(messages).where(and(
+    [locatedMessage] = await db.select().from(messages).where(and(
       eq(messages.id, event.messageId),
       eq(messages.workspaceId, event.workspaceId),
       eq(messages.provider, event.provider),
     )).limit(1);
   }
-  if (!message && event.workspaceId) {
-    [message] = await db.select().from(messages).where(and(
+  if (!locatedMessage && event.workspaceId) {
+    [locatedMessage] = await db.select().from(messages).where(and(
       eq(messages.workspaceId, event.workspaceId),
       eq(messages.provider, event.provider),
       eq(messages.providerMessageId, event.providerMessageId),
     )).limit(1);
   }
-  if (!message) return { skipped: true };
+  if (!locatedMessage) return { skipped: true };
 
-  await db.transaction(async (tx) => {
+  const ingested = await db.transaction(async (tx) => {
+    await tx.execute(sql`
+      select ${messages.id}
+      from ${messages}
+      where ${messages.id} = ${locatedMessage.id}
+        and ${messages.workspaceId} = ${locatedMessage.workspaceId}
+      for update
+    `);
+    const [message] = await tx.select().from(messages).where(and(
+      eq(messages.id, locatedMessage.id),
+      eq(messages.workspaceId, locatedMessage.workspaceId),
+    )).limit(1);
+    if (!message) return null;
     const [inserted] = await tx.insert(emailEvents).values({
       workspaceId: message.workspaceId,
       messageId: message.id,
@@ -46,13 +59,19 @@ export async function ingestProviderEvent(event: NormalizedProviderEvent) {
       occurredAt: event.occurredAt,
       payload: event.reasonCode ? { reasonCode: event.reasonCode } : {},
     }).onConflictDoNothing().returning();
-    if (!inserted) return;
-    const status = monotonicMessageStatus(message.status, event.type);
+    if (!inserted) return { inserted: false, message };
+    const safetyEvent = event.type === "hard_bounced" || event.type === "complained";
+    const stale = Boolean(message.lastEventAt && event.occurredAt < message.lastEventAt);
+    const status = stale && !safetyEvent
+      ? message.status
+      : monotonicMessageStatus(message.status, event.type);
     await tx.update(messages).set({
       status,
       deliveredAt: event.type === "delivered" ? message.deliveredAt ?? event.occurredAt : message.deliveredAt,
       failedAt: event.type === "failed" ? message.failedAt ?? event.occurredAt : message.failedAt,
-      lastEventAt: event.occurredAt,
+      lastEventAt: message.lastEventAt && message.lastEventAt > event.occurredAt
+        ? message.lastEventAt
+        : event.occurredAt,
       providerMessageId: message.providerMessageId ?? event.providerMessageId,
       updatedAt: new Date(),
     }).where(and(eq(messages.id, message.id), eq(messages.workspaceId, message.workspaceId)));
@@ -87,10 +106,12 @@ export async function ingestProviderEvent(event: NormalizedProviderEvent) {
         },
       });
     }
-    const endpoints = await tx.select().from(webhookEndpoints).where(and(
-      eq(webhookEndpoints.workspaceId, message.workspaceId),
-      eq(webhookEndpoints.enabled, true),
-    ));
+    const endpoints = isFeatureEnabled("CUSTOMER_WEBHOOKS_ENABLED")
+      ? await tx.select().from(webhookEndpoints).where(and(
+          eq(webhookEndpoints.workspaceId, message.workspaceId),
+          eq(webhookEndpoints.enabled, true),
+        ))
+      : [];
     for (const endpoint of endpoints) {
       if (!endpoint.eventTypes.includes(`email.${event.type}`)) continue;
       const [delivery] = await tx.insert(webhookDeliveries).values({
@@ -101,9 +122,12 @@ export async function ingestProviderEvent(event: NormalizedProviderEvent) {
       }).onConflictDoNothing().returning();
       if (delivery) await tx.insert(outboxJobs).values({ workspaceId: message.workspaceId, aggregateId: delivery.id, kind: "webhook" });
     }
+    return { inserted: true, message };
   });
 
-  if (event.type === "hard_bounced" || event.type === "complained") {
+  if (!ingested) return { skipped: true };
+  const { message } = ingested;
+  if (ingested.inserted && (event.type === "hard_bounced" || event.type === "complained")) {
     const since = utcDay(new Date(Date.now() - 7 * 864e5));
     const [reputation] = await db.select({
       complaints: sql<number>`coalesce(sum(${usageDays.complaints}), 0)::int`,
@@ -135,5 +159,5 @@ export async function ingestProviderEvent(event: NormalizedProviderEvent) {
       });
     }
   }
-  return { skipped: false };
+  return { skipped: false, duplicate: !ingested.inserted };
 }

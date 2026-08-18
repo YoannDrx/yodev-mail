@@ -10,8 +10,10 @@ import { admin, organization } from "better-auth/plugins";
 import { requireDb } from "@/db";
 import * as schema from "@/db/schema";
 import { authInvitations } from "@/db/schema";
+import { reconcileAcceptedOwnerInvitation } from "@/features/onboarding/reconcile-owner";
 import { sendAuthEmail } from "@/lib/auth-emails";
 import { env } from "@/lib/env";
+import { emitOperationalMetric } from "@/lib/operational-metric";
 
 type MailAuth = ReturnType<typeof createAuth>;
 
@@ -175,6 +177,23 @@ function createAuth() {
           member: { modelName: "authMembers" },
           invitation: { modelName: "authInvitations" },
           session: { fields: { activeOrganizationId: "activeOrganizationId" } },
+        },
+        organizationHooks: {
+          afterAcceptInvitation: async ({ invitation, user }) => {
+            if (!invitation.role.split(",").map((role) => role.trim()).includes("owner")) {
+              return;
+            }
+            try {
+              await reconcileAcceptedOwnerInvitation({
+                invitationId: invitation.id,
+                organizationId: invitation.organizationId,
+                userId: user.id,
+                actorUserId: user.id,
+              });
+            } catch {
+              emitOperationalMetric("ClientProvisioningReconciliationFailed");
+            }
+          },
         },
         sendInvitationEmail: async ({ email, id, organization: invitedOrganization }) => {
           await sendAuthEmail({

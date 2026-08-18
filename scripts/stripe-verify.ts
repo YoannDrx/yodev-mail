@@ -1,15 +1,31 @@
 import Stripe from "stripe";
+import { stripeSecretLivemode, validateStripeCatalog } from "../src/features/billing/stripe-catalog";
 
 async function main() {
   const secret = process.env.STRIPE_SECRET_KEY;
+  const platformPriceId = process.env.STRIPE_PRICE_PLATFORM;
+  const usagePriceId = process.env.STRIPE_PRICE_USAGE;
   if (!secret) throw new Error("STRIPE_SECRET_KEY is missing");
+  if (!platformPriceId || !usagePriceId) throw new Error("Configured Stripe price IDs are missing");
+
   const stripe = new Stripe(secret);
-  const prices = await stripe.prices.list({ active: true, limit: 100 });
-  const platform = prices.data.find((price) => price.lookup_key === "yodev_mail_platform_monthly_v1");
-  const usage = prices.data.find((price) => price.lookup_key === "yodev_mail_usage_v1");
-  if (platform?.unit_amount !== 2900 || platform.recurring?.interval !== "month") throw new Error("Invalid platform price");
-  if (String(usage?.unit_amount_decimal) !== "0.0025" || usage?.recurring?.usage_type !== "metered") throw new Error("Invalid usage price");
-  console.log("Stripe beta catalog valid: €29/month + €0.0025 per accepted email");
+  const [platform, usage, registrations] = await Promise.all([
+    stripe.prices.retrieve(platformPriceId),
+    stripe.prices.retrieve(usagePriceId),
+    stripe.tax.registrations.list({ limit: 1, status: "active" }),
+  ]);
+  const errors = validateStripeCatalog({
+    platform,
+    usage,
+    expectedLivemode: stripeSecretLivemode(secret),
+  });
+  if (usage.recurring?.meter) {
+    const meter = await stripe.billing.meters.retrieve(usage.recurring.meter);
+    if (meter.event_name !== "yodev_mail_emails_sent") errors.push("usage_meter_event_invalid");
+  }
+  if (!registrations.data.length) errors.push("active_tax_registration_missing");
+  if (errors.length) throw new Error(`Invalid Stripe beta catalog: ${errors.join(",")}`);
+  console.log(`Stripe beta catalog valid (${platform.livemode ? "live" : "test"}): EUR 29/month + EUR 0.0025 per accepted email`);
 }
 
 void main();

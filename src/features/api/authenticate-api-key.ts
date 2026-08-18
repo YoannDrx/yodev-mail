@@ -15,6 +15,6 @@ export async function authenticateApiKey(request: Request, scope: string) {
   await db
     .update(apiKeys)
     .set({ lastUsedAt: new Date(), updatedAt: new Date() })
-    .where(eq(apiKeys.id, key.id));
+    .where(and(eq(apiKeys.id, key.id), eq(apiKeys.workspaceId, key.workspaceId)));
   return key;
 }

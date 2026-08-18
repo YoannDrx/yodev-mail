@@ -7,15 +7,14 @@ const parameterSuffixes = {
   WEBHOOK_SIGNING_SECRET: "webhook-signing-secret",
 } as const;
 
-type RuntimeSecretName = keyof typeof parameterSuffixes;
+export type RuntimeSecretName = keyof typeof parameterSuffixes;
 type RuntimeParameter = { Name?: string; Value?: string };
-
-let loading: Promise<void> | undefined;
 
 export function mapRuntimeParameters(
   prefix: string,
   parameters: RuntimeParameter[],
-): Record<RuntimeSecretName, string> {
+  required: RuntimeSecretName[] = Object.keys(parameterSuffixes) as RuntimeSecretName[],
+): Partial<Record<RuntimeSecretName, string>> {
   const byName = new Map(
     parameters.flatMap((parameter) =>
       parameter.Name && parameter.Value
@@ -24,47 +23,50 @@ export function mapRuntimeParameters(
     ),
   );
   return Object.fromEntries(
-    Object.entries(parameterSuffixes).map(([environmentName, suffix]) => {
+    required.map((environmentName) => {
+      const suffix = parameterSuffixes[environmentName];
       const name = `${prefix}/${suffix}`;
       const value = byName.get(name);
       if (!value) throw new Error(`Required runtime parameter is missing: ${name}`);
       return [environmentName, value];
     }),
-  ) as Record<RuntimeSecretName, string>;
+  ) as Partial<Record<RuntimeSecretName, string>>;
 }
 
-export async function loadRuntimeSecrets() {
+const loadingByName = new Map<RuntimeSecretName, Promise<void>>();
+
+export async function loadRuntimeSecrets(
+  required: RuntimeSecretName[] = ["DATABASE_URL"],
+) {
   const prefix = process.env.RUNTIME_PARAMETER_PREFIX;
   if (!prefix) return;
-  if (
-    process.env.DATABASE_URL &&
-    process.env.STRIPE_SECRET_KEY &&
-    process.env.WEBHOOK_SIGNING_SECRET
-  ) {
-    return;
-  }
+  const missing = required.filter((name) => !process.env[name]);
+  if (!missing.length) return;
 
-  loading ??= (async () => {
-    const names = Object.values(parameterSuffixes).map(
-      (suffix) => `${prefix}/${suffix}`,
-    );
-    const { ssm: client } = await awsClients();
-    const response = await client.send(
-      new GetParametersCommand({ Names: names, WithDecryption: true }),
-    );
-    if (response.InvalidParameters?.length) {
-      throw new Error("One or more required runtime parameters are invalid.");
-    }
-    Object.assign(
-      process.env,
-      mapRuntimeParameters(prefix, response.Parameters ?? []),
-    );
-  })().catch((error) => {
-    loading = undefined;
-    throw error;
+  const pending = missing.map((name) => {
+    const current = loadingByName.get(name);
+    if (current) return current;
+    const loading = (async () => {
+      const parameterName = `${prefix}/${parameterSuffixes[name]}`;
+      const { ssm: client } = await awsClients();
+      const response = await client.send(
+        new GetParametersCommand({ Names: [parameterName], WithDecryption: true }),
+      );
+      if (response.InvalidParameters?.length) {
+        throw new Error("One or more required runtime parameters are invalid.");
+      }
+      Object.assign(
+        process.env,
+        mapRuntimeParameters(prefix, response.Parameters ?? [], [name]),
+      );
+    })().catch((error) => {
+      loadingByName.delete(name);
+      throw error;
+    });
+    loadingByName.set(name, loading);
+    return loading;
   });
-
-  await loading;
+  await Promise.all(pending);
 }
 
 const secureParameterCache = new Map<string, string>();

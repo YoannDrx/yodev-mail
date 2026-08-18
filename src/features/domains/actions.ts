@@ -1,6 +1,6 @@
 "use server";
 
-import { and, count, desc, eq } from "drizzle-orm";
+import { and, count, desc, eq, sql } from "drizzle-orm";
 import { revalidatePath } from "next/cache";
 import { z } from "zod";
 import { requireDb } from "@/db";
@@ -19,16 +19,17 @@ export async function addDomainAction(value: string | FormData) {
   const name = domainSchema.parse(raw);
   const { workspace, userId } = await currentWorkspace({ admin: true });
   const db = requireDb();
-  const [{ total }, allDomains] = await Promise.all([
-    db.select({ total: count() }).from(domains).where(eq(domains.workspaceId, workspace.id)).then((rows) => rows[0]),
-    db.select({ workspaceId: domains.workspaceId, name: domains.name }).from(domains),
-  ]);
-  const limit = workspace.status === "approved" ? 2 : 1;
-  if (total >= limit) throw new Error("Domain limit reached for this beta workspace");
-  if (allDomains.some((domain) => domain.workspaceId !== workspace.id && overlaps(domain.name, name))) {
-    throw new Error("Ce domaine ou l’un de ses parents est déjà attribué à un autre workspace.");
-  }
   await db.transaction(async (tx) => {
+    await tx.execute(sql`select pg_advisory_xact_lock(hashtext('yodev_mail_domain_ownership'))`);
+    const [{ total }, allDomains] = await Promise.all([
+      tx.select({ total: count() }).from(domains).where(eq(domains.workspaceId, workspace.id)).then((rows) => rows[0]),
+      tx.select({ workspaceId: domains.workspaceId, name: domains.name }).from(domains),
+    ]);
+    const limit = workspace.status === "approved" ? 2 : 1;
+    if (total >= limit) throw new Error("Domain limit reached for this beta workspace");
+    if (allDomains.some((domain) => domain.workspaceId !== workspace.id && overlaps(domain.name, name))) {
+      throw new Error("Ce domaine ou l’un de ses parents est déjà attribué à un autre workspace.");
+    }
     const [domain] = await tx.insert(domains).values({ workspaceId: workspace.id, name, status: "pending" }).returning();
     await tx.insert(auditEvents).values({
       workspaceId: workspace.id,

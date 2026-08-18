@@ -38,6 +38,9 @@ const onboardingSchema = z.object({
 export async function completeOnboardingAction(formData: FormData) {
   const data = onboardingSchema.parse(Object.fromEntries(formData));
   const { workspace, userId } = await currentWorkspace({ admin: true });
+  if (!["sandbox", "pending_review"].includes(workspace.status)) {
+    throw new Error("Ce workspace ne peut plus soumettre un dossier d’onboarding.");
+  }
   const db = requireDb();
   await db.transaction(async (tx) => {
     await tx

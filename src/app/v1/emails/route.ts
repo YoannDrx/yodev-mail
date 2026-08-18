@@ -17,16 +17,33 @@ import {
   workspaces,
 } from "@/db/schema";
 import { authenticateApiKey } from "@/features/api/authenticate-api-key";
+import { readJsonBody, RequestBodyTooLargeError, UnsupportedMediaTypeError } from "@/features/api/read-json-body";
 import { consumeWorkspaceRateLimit } from "@/features/api/rate-limit";
+import { normalizeEmail } from "@/features/email-address/normalization";
 import { combinedContentSize, estimatedMimeSize, isRawContent, sendEmailSchema } from "@/features/emails/schema";
 import { evaluateStoredMessage, utcDay } from "@/features/sending/eligibility";
 import { renderApprovedTemplate, TemplateVariablesMissingError } from "@/features/templates/render";
 import { canonicalJson, sha256 } from "@/lib/crypto";
+import { isFeatureEnabled } from "@/lib/env";
+
+function databaseErrorCode(error: unknown) {
+  let current = error;
+  for (let depth = 0; depth < 5; depth += 1) {
+    if (!current || typeof current !== "object") return undefined;
+    const candidate = current as { cause?: unknown; code?: unknown };
+    if (typeof candidate.code === "string") return candidate.code;
+    current = candidate.cause;
+  }
+  return undefined;
+}
 
 export async function POST(request: Request) {
   const key = await authenticateApiKey(request, "emails:send");
   if (!key) {
     return NextResponse.json({ error: { code: "unauthorized", message: "Clé API invalide ou scope manquant." } }, { status: 401 });
+  }
+  if (key.mode === "live" && !isFeatureEnabled("LIVE_EMAIL_ACCEPTANCE_ENABLED")) {
+    return NextResponse.json({ error: { code: "live_email_acceptance_disabled", message: "Les envois live sont temporairement suspendus." } }, { status: 503 });
   }
   const rate = await consumeWorkspaceRateLimit(key.workspaceId, key.mode);
   if (!rate.allowed) {
@@ -39,14 +56,36 @@ export async function POST(request: Request) {
   if (!idempotencyKey || idempotencyKey.length > 128) {
     return NextResponse.json({ error: { code: "idempotency_key_required", message: "L’en-tête Idempotency-Key est requis." } }, { status: 400 });
   }
-  const raw = await request.json().catch(() => null);
+  let raw: unknown;
+  try {
+    raw = await readJsonBody(request, 1_048_576);
+  } catch (error) {
+    if (error instanceof RequestBodyTooLargeError) {
+      return NextResponse.json({ error: { code: "request_too_large" } }, { status: 413 });
+    }
+    if (error instanceof UnsupportedMediaTypeError) {
+      return NextResponse.json({ error: { code: "unsupported_media_type" } }, { status: 415 });
+    }
+    throw error;
+  }
   const parsed = sendEmailSchema.safeParse(raw);
   if (!parsed.success) {
     return NextResponse.json({ error: { code: "invalid_request", details: parsed.error.flatten() } }, { status: 422 });
   }
+  if (parsed.data.attachments.length && !isFeatureEnabled("ATTACHMENTS_ENABLED")) {
+    return NextResponse.json(
+      { error: { code: "attachments_unavailable", message: "Les pièces jointes sont temporairement désactivées." } },
+      { status: 503 },
+    );
+  }
 
   const db = requireDb();
   const requestHash = sha256(canonicalJson(parsed.data));
+  const fromEmail = normalizeEmail(parsed.data.from.email);
+  const toEmail = normalizeEmail(parsed.data.to.email);
+  const replyTo = parsed.data.replyTo
+    ? normalizeEmail(parsed.data.replyTo)
+    : undefined;
   const [existing] = await db
     .select()
     .from(idempotencyKeys)
@@ -67,7 +106,7 @@ export async function POST(request: Request) {
   const [workspace] = await db.select().from(workspaces).where(eq(workspaces.id, key.workspaceId)).limit(1);
   if (!workspace) return NextResponse.json({ error: { code: "workspace_not_found" } }, { status: 404 });
 
-  const domainName = parsed.data.from.email.split("@").at(-1)!;
+  const domainName = fromEmail.split("@").at(-1)!;
   const availableDomains = await db
     .select()
     .from(domains)
@@ -97,7 +136,7 @@ export async function POST(request: Request) {
   let plainText: string;
   let contentKind: "template" | "raw";
   if (isRawContent(parsed.data.content)) {
-    if (workspace.contentPolicy !== "hybrid" || !key.scopes.includes("emails:send:raw")) {
+    if (!isFeatureEnabled("RAW_EMAIL_ENABLED") || workspace.contentPolicy !== "hybrid" || !key.scopes.includes("emails:send:raw")) {
       return NextResponse.json({ error: { code: "raw_content_forbidden", message: "Cette clé ne peut envoyer que des templates approuvés." } }, { status: 403 });
     }
     ({ subject, html, text: plainText } = parsed.data.content);
@@ -169,7 +208,7 @@ export async function POST(request: Request) {
     mode: key.mode,
     profileId: profile.id,
     provider: domain.activeProvider,
-    toEmail: parsed.data.to.email,
+    toEmail,
     workspaceId: key.workspaceId,
   });
   if (!eligibility.allowed) {
@@ -211,15 +250,18 @@ export async function POST(request: Request) {
         source: "api",
         sendMode: key.mode,
         status: simulated ? "simulated" : "queued",
-        fromEmail: parsed.data.from.email,
+        fromEmail,
         fromName: parsed.data.from.name,
-        toEmail: parsed.data.to.email,
+        toEmail,
         toName: parsed.data.to.name,
-        replyTo: parsed.data.replyTo,
+        replyTo,
         subject,
         html,
         plainText,
-        tags: parsed.data.metadata.referenceId ? { referenceId: parsed.data.metadata.referenceId } : {},
+        tags: {
+          ...(parsed.data.metadata.referenceId ? { referenceId: parsed.data.metadata.referenceId } : {}),
+          ...(parsed.data.metadata.workspaceId ? { workspaceId: parsed.data.metadata.workspaceId } : {}),
+        },
         idempotencyKey,
         requestHash,
         contentExpiresAt: new Date(now.getTime() + 30 * 864e5),
@@ -244,7 +286,9 @@ export async function POST(request: Request) {
       }
       if (!simulated) {
         await tx.insert(outboxJobs).values({ aggregateId: id, kind: "email", workspaceId: key.workspaceId });
-        const endpoints = await tx.select().from(webhookEndpoints).where(and(eq(webhookEndpoints.workspaceId, key.workspaceId), eq(webhookEndpoints.enabled, true)));
+        const endpoints = isFeatureEnabled("CUSTOMER_WEBHOOKS_ENABLED")
+          ? await tx.select().from(webhookEndpoints).where(and(eq(webhookEndpoints.workspaceId, key.workspaceId), eq(webhookEndpoints.enabled, true)))
+          : [];
         for (const endpoint of endpoints) {
           if (!endpoint.eventTypes.includes("email.queued")) continue;
           const [delivery] = await tx.insert(webhookDeliveries).values({ workspaceId: key.workspaceId, endpointId: endpoint.id, eventId: queuedEvent.id, nextAttemptAt: now }).onConflictDoNothing().returning();
@@ -257,7 +301,7 @@ export async function POST(request: Request) {
     if (error instanceof Error && error.message === "daily_limit_reached") {
       return NextResponse.json({ error: { code: "daily_limit_reached" } }, { status: 429 });
     }
-    if ((error as { code?: string }).code === "23505") {
+    if (databaseErrorCode(error) === "23505") {
       const [winner] = await db.select().from(idempotencyKeys).where(and(
         eq(idempotencyKeys.workspaceId, key.workspaceId),
         eq(idempotencyKeys.key, idempotencyKey),

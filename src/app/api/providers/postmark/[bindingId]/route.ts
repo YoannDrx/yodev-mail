@@ -3,6 +3,7 @@ import { and, eq } from "drizzle-orm";
 import { NextResponse } from "next/server";
 import { requireDb } from "@/db";
 import { domainProviderBindings, workspaceProviderAccounts } from "@/db/schema";
+import { readJsonBody, RequestBodyTooLargeError } from "@/features/api/read-json-body";
 import { ingestProviderEvent } from "@/features/providers/ingest-event";
 import { normalizePostmarkEvent, parsePostmarkWebhook } from "@/features/providers/postmark-events";
 import { enqueueProviderEvent } from "@/lib/aws";
@@ -38,15 +39,19 @@ export async function POST(request: Request, { params }: { params: Promise<{ bin
   const authorization = request.headers.get("authorization") ?? "";
   const expected = `Basic ${Buffer.from(`yodev-mail:${webhookPassword}`).toString("base64")}`;
   if (!equal(authorization, expected)) return new NextResponse(null, { status: 403 });
-  const raw = await request.text();
-  if (Buffer.byteLength(raw) > MAX_BODY_BYTES) return new NextResponse(null, { status: 413 });
   let payload: ReturnType<typeof parsePostmarkWebhook>;
-  try { payload = parsePostmarkWebhook(JSON.parse(raw)); }
-  catch { return new NextResponse(null, { status: 400 }); }
+  try { payload = parsePostmarkWebhook(await readJsonBody(request, MAX_BODY_BYTES)); }
+  catch (error) {
+    if (error instanceof RequestBodyTooLargeError) return new NextResponse(null, { status: 413 });
+    return new NextResponse(null, { status: 400 });
+  }
   if (String(payload.ServerID ?? "") !== account.externalAccountId) return new NextResponse(null, { status: 403 });
   const event = normalizePostmarkEvent(payload);
   if (event) {
-    const scopedEvent = { ...event, workspaceId: event.workspaceId ?? binding.workspaceId };
+    if (event.workspaceId && event.workspaceId !== binding.workspaceId) {
+      return new NextResponse(null, { status: 403 });
+    }
+    const scopedEvent = { ...event, workspaceId: binding.workspaceId };
     const queued = await enqueueProviderEvent({
       ...scopedEvent,
       occurredAt: event.occurredAt.toISOString(),

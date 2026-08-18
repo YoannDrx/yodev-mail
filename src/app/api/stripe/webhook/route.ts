@@ -1,102 +1,222 @@
 import type Stripe from "stripe";
-import { and, eq } from "drizzle-orm";
+import { and, eq, inArray, lt, or, sql } from "drizzle-orm";
 import { NextResponse } from "next/server";
+import { z } from "zod";
 import { requireDb } from "@/db";
-import { stripeEvents, subscriptions, workspaces } from "@/db/schema";
+import { stripeCheckoutAttempts, stripeEvents, subscriptions, workspaces } from "@/db/schema";
+import { readBodyText, RequestBodyTooLargeError } from "@/features/api/read-json-body";
+import {
+  buildStripeSubscriptionSnapshot,
+  invoiceSubscriptionId,
+  reduceStripeSubscriptionState,
+  StripeSubscriptionRejectedError,
+} from "@/features/billing/stripe-state";
 import { env } from "@/lib/env";
-import { isPaidPlan, planCatalog } from "@/lib/plans";
+import { planCatalog } from "@/lib/plans";
 import { stripe } from "@/lib/stripe";
 
-function subscriptionStatus(status: Stripe.Subscription.Status) {
-  if (status === "active" || status === "trialing" || status === "past_due" || status === "canceled") return status;
-  return "inactive" as const;
+function eventObject(event: Stripe.Event) {
+  return event.data.object as { id?: string; object?: string; customer?: string | { id: string } | null };
+}
+
+function eventSubscriptionId(event: Stripe.Event) {
+  if (event.type.startsWith("customer.subscription.")) {
+    return (event.data.object as Stripe.Subscription).id;
+  }
+  if (event.type.startsWith("invoice.")) {
+    return invoiceSubscriptionId(event.data.object as Stripe.Invoice);
+  }
+  if (event.type === "checkout.session.completed") {
+    const value = (event.data.object as Stripe.Checkout.Session).subscription;
+    return typeof value === "string" ? value : value?.id ?? null;
+  }
+  return null;
+}
+
+function eventCustomerId(event: Stripe.Event) {
+  const customer = eventObject(event).customer;
+  return typeof customer === "string" ? customer : customer?.id ?? null;
 }
 
 export async function POST(request: Request) {
-  if (!env.STRIPE_WEBHOOK_SECRET) return NextResponse.json({ error: "Stripe webhook is not configured" }, { status: 503 });
+  if (!env.STRIPE_WEBHOOK_SECRET) {
+    return NextResponse.json({ error: "Stripe webhook is not configured" }, { status: 503 });
+  }
   const signature = request.headers.get("stripe-signature");
   if (!signature) return NextResponse.json({ error: "Missing signature" }, { status: 400 });
+
   let event: Stripe.Event;
   try {
-    event = stripe().webhooks.constructEvent(await request.text(), signature, env.STRIPE_WEBHOOK_SECRET);
-  } catch {
+    event = stripe().webhooks.constructEvent(
+      await readBodyText(request, 1024 * 1024),
+      signature,
+      env.STRIPE_WEBHOOK_SECRET,
+    );
+  } catch (error) {
+    if (error instanceof RequestBodyTooLargeError) {
+      return NextResponse.json({ error: "Payload too large" }, { status: 413 });
+    }
     return NextResponse.json({ error: "Invalid signature" }, { status: 400 });
   }
 
   const db = requireDb();
-  let duplicate = false;
-  await db.transaction(async (tx) => {
-    const inserted = await tx.insert(stripeEvents).values({ eventId: event.id, type: event.type }).onConflictDoNothing().returning();
-    if (!inserted.length) {
-      duplicate = true;
-      return;
-    }
+  const staleClaim = new Date(Date.now() - 5 * 60_000);
+  const object = eventObject(event);
+  const subscriptionId = eventSubscriptionId(event);
+  await db.insert(stripeEvents).values({
+    eventId: event.id,
+    type: event.type,
+    stripeCreatedAt: new Date(event.created * 1000),
+    livemode: event.livemode,
+    objectType: object.object,
+    objectId: object.id,
+    customerId: eventCustomerId(event),
+    subscriptionId,
+  }).onConflictDoNothing();
 
-    if (event.type === "checkout.session.completed") {
-      const session = event.data.object;
-      const workspaceId = session.metadata?.workspaceId;
-      const requestedPlan = session.metadata?.plan ?? "";
-      const paymentConfirmed = session.payment_status === "paid" || session.payment_status === "no_payment_required";
-      if (workspaceId && session.client_reference_id === workspaceId && paymentConfirmed && isPaidPlan(requestedPlan) && typeof session.customer === "string" && typeof session.subscription === "string") {
-        const plan = requestedPlan;
+  const [claimed] = await db.update(stripeEvents).set({
+    status: "processing",
+    lastErrorCode: null,
+    updatedAt: new Date(),
+  }).where(and(
+    eq(stripeEvents.eventId, event.id),
+    or(
+      inArray(stripeEvents.status, ["received", "failed"]),
+      and(
+        eq(stripeEvents.status, "processing"),
+        lt(stripeEvents.updatedAt, staleClaim),
+      ),
+    ),
+  )).returning({ eventId: stripeEvents.eventId });
+  if (!claimed) return NextResponse.json({ received: true, duplicate: true });
+
+  if (event.type === "checkout.session.expired" && object.id) {
+    const sessionId = object.id;
+    const session = event.data.object as Stripe.Checkout.Session;
+    const workspaceId = z.string().uuid().safeParse(session.metadata?.workspaceId);
+    if (!workspaceId.success || session.client_reference_id !== workspaceId.data) {
+      await db.update(stripeEvents).set({
+        status: "rejected",
+        lastErrorCode: "checkout_workspace_invalid",
+        processedAt: new Date(),
+        updatedAt: new Date(),
+      }).where(eq(stripeEvents.eventId, event.id));
+      return NextResponse.json({ received: true, rejected: true });
+    }
+    await db.transaction(async (tx) => {
+      await tx.update(stripeCheckoutAttempts).set({
+        status: "expired",
+        updatedAt: new Date(),
+      }).where(and(
+        eq(stripeCheckoutAttempts.stripeSessionId, sessionId),
+        eq(stripeCheckoutAttempts.workspaceId, workspaceId.data),
+        eq(stripeCheckoutAttempts.status, "pending"),
+      ));
+      await tx.update(stripeEvents).set({
+        status: "processed",
+        processedAt: new Date(),
+        updatedAt: new Date(),
+      }).where(eq(stripeEvents.eventId, event.id));
+    });
+    return NextResponse.json({ received: true });
+  }
+
+  if (!subscriptionId) {
+    await db.update(stripeEvents).set({ status: "ignored", processedAt: new Date(), updatedAt: new Date() })
+      .where(eq(stripeEvents.eventId, event.id));
+    return NextResponse.json({ received: true, ignored: true });
+  }
+  if (!env.STRIPE_PRICE_PLATFORM || !env.STRIPE_PRICE_USAGE) {
+    await db.update(stripeEvents).set({ status: "failed", lastErrorCode: "catalog_not_configured", updatedAt: new Date() })
+      .where(eq(stripeEvents.eventId, event.id));
+    return NextResponse.json({ error: "Stripe catalog is not configured" }, { status: 503 });
+  }
+
+  try {
+    const stripeSubscription = await stripe().subscriptions.retrieve(subscriptionId);
+    const snapshot = buildStripeSubscriptionSnapshot({
+      eventCreated: event.created,
+      eventId: event.id,
+      expectedPlatformPriceId: env.STRIPE_PRICE_PLATFORM,
+      expectedUsagePriceId: env.STRIPE_PRICE_USAGE,
+      expectedLivemode: event.livemode,
+      subscription: stripeSubscription,
+    });
+
+    await db.transaction(async (tx) => {
+      await tx.execute(sql`select ${subscriptions.id} from ${subscriptions} where ${subscriptions.workspaceId} = ${snapshot.workspaceId} for update`);
+      const [current] = await tx.select().from(subscriptions)
+        .where(eq(subscriptions.workspaceId, snapshot.workspaceId)).limit(1);
+      if (!current) throw new StripeSubscriptionRejectedError("subscription_record_missing");
+      const result = reduceStripeSubscriptionState({
+        status: current.status,
+        stripeSubscriptionId: current.stripeSubscriptionId,
+        lastStripeEventCreatedAt: current.lastStripeEventCreatedAt,
+        lastStripeEventId: current.lastStripeEventId,
+        graceEndsAt: current.graceEndsAt,
+        canceledAt: current.canceledAt,
+      }, snapshot);
+
+      if (result.applied) {
         await tx.update(subscriptions).set({
-          plan,
-          status: "active",
-          stripeCustomerId: session.customer,
-          stripeSubscriptionId: session.subscription,
+          ...result.subscription,
+          lastReconciledAt: new Date(),
           updatedAt: new Date(),
-        }).where(eq(subscriptions.workspaceId, workspaceId));
+        }).where(eq(subscriptions.workspaceId, snapshot.workspaceId));
         await tx.update(workspaces).set({
-          dailyLimit: planCatalog[plan].dailyLimit,
-          plan,
+          dailyLimit: planCatalog[snapshot.plan].dailyLimit,
+          plan: snapshot.plan,
           updatedAt: new Date(),
-        }).where(eq(workspaces.id, workspaceId));
+        }).where(eq(workspaces.id, snapshot.workspaceId));
+        if (result.workspaceAction === "pause_for_billing") {
+          await tx.update(workspaces).set({
+            pauseReason: "billing",
+            pausedAt: new Date(),
+            status: "paused",
+            updatedAt: new Date(),
+          }).where(eq(workspaces.id, snapshot.workspaceId));
+        }
+        if (result.workspaceAction === "restore_if_billing_paused") {
+          await tx.update(workspaces).set({
+            pauseReason: null,
+            pausedAt: null,
+            status: "approved",
+            updatedAt: new Date(),
+          }).where(and(
+            eq(workspaces.id, snapshot.workspaceId),
+            eq(workspaces.pauseReason, "billing"),
+          ));
+        }
       }
-    }
-
-    if (event.type.startsWith("customer.subscription.")) {
-      const subscription = event.data.object as Stripe.Subscription;
-      const workspaceId = subscription.metadata.workspaceId;
-      const requestedPlan = subscription.metadata.plan ?? "";
-      if (workspaceId) {
-        const paidPlan = isPaidPlan(requestedPlan) ? requestedPlan : undefined;
-        const status = subscriptionStatus(subscription.status);
-        const period = subscription.items.data[0];
-        await tx.update(subscriptions).set({
-          currentPeriodEndsAt: period ? new Date(period.current_period_end * 1000) : null,
-          currentPeriodStartsAt: period ? new Date(period.current_period_start * 1000) : null,
-          graceEndsAt: status === "past_due" ? new Date(Date.now() + 72 * 3600_000) : null,
-          plan: paidPlan,
-          status,
-          stripePriceId: period?.price.id,
-          stripeSubscriptionId: subscription.id,
+      await tx.update(stripeEvents).set({
+        customerId: snapshot.customerId,
+        subscriptionId: snapshot.subscriptionId,
+        status: result.applied ? "processed" : "ignored",
+        processedAt: new Date(),
+        updatedAt: new Date(),
+      }).where(eq(stripeEvents.eventId, event.id));
+      if (event.type === "checkout.session.completed" && object.id) {
+        await tx.update(stripeCheckoutAttempts).set({
+          status: "completed",
+          completedAt: new Date(),
           updatedAt: new Date(),
-        }).where(eq(subscriptions.workspaceId, workspaceId));
-        if (paidPlan) {
-          await tx.update(workspaces).set({ dailyLimit: planCatalog[paidPlan].dailyLimit, plan: paidPlan, updatedAt: new Date() }).where(eq(workspaces.id, workspaceId));
-        }
-        if (status === "canceled") {
-          await tx.update(workspaces).set({ pauseReason: "billing", pausedAt: new Date(), status: "paused", updatedAt: new Date() }).where(eq(workspaces.id, workspaceId));
-        }
+        }).where(and(
+          eq(stripeCheckoutAttempts.stripeSessionId, object.id),
+          eq(stripeCheckoutAttempts.workspaceId, snapshot.workspaceId),
+        ));
       }
-    }
+    });
+  } catch (error) {
+    const rejected = error instanceof StripeSubscriptionRejectedError;
+    await db.update(stripeEvents).set({
+      status: rejected ? "rejected" : "failed",
+      lastErrorCode: rejected ? error.code : "stripe_reconciliation_failed",
+      processedAt: rejected ? new Date() : null,
+      updatedAt: new Date(),
+    }).where(eq(stripeEvents.eventId, event.id));
+    if (rejected) return NextResponse.json({ received: true, rejected: true });
+    throw error;
+  }
 
-    if (event.type === "invoice.payment_failed" || event.type === "invoice.finalization_failed") {
-      const invoice = event.data.object;
-      if (typeof invoice.customer === "string") {
-        await tx.update(subscriptions).set({ graceEndsAt: new Date(Date.now() + 72 * 3600_000), status: "past_due", updatedAt: new Date() }).where(eq(subscriptions.stripeCustomerId, invoice.customer));
-      }
-    }
-
-    if (event.type === "invoice.paid") {
-      const invoice = event.data.object;
-      if (typeof invoice.customer === "string") {
-        const [record] = await tx.update(subscriptions).set({ graceEndsAt: null, status: "active", updatedAt: new Date() }).where(eq(subscriptions.stripeCustomerId, invoice.customer)).returning({ workspaceId: subscriptions.workspaceId });
-        if (record) {
-          await tx.update(workspaces).set({ pauseReason: null, pausedAt: null, status: "approved", updatedAt: new Date() }).where(and(eq(workspaces.id, record.workspaceId), eq(workspaces.pauseReason, "billing")));
-        }
-      }
-    }
-  });
-  return NextResponse.json({ received: true, duplicate });
+  return NextResponse.json({ received: true });
 }

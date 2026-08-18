@@ -22,6 +22,8 @@ const activeEnvironments = new Set(
 const malwareProtectionEnabled =
   process.env.YODEV_MAIL_GUARDDUTY_ENABLED === "true";
 const postmarkEnabled = process.env.YODEV_MAIL_POSTMARK_ENABLED === "true";
+const stripeUsageReportingEnabled =
+  process.env.YODEV_MAIL_STRIPE_USAGE_REPORTING_ENABLED === "true";
 
 const foundation = new YodevMailFoundationStack(app, "YodevMailFoundation", {
   alertEmail,
@@ -42,6 +44,7 @@ for (const environment of ["dev", "prod"] as const) {
       env: { account, region },
       malwareProtectionEnabled,
       postmarkEnabled,
+      stripeUsageReportingEnabled,
       terminationProtection: environment === "prod",
       vercelOidcProvider: foundation.vercelOidcProvider,
       vercelTeam,

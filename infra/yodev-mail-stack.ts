@@ -35,6 +35,7 @@ export interface YodevMailStackProps extends StackProps {
   environment: "dev" | "prod";
   malwareProtectionEnabled?: boolean;
   postmarkEnabled?: boolean;
+  stripeUsageReportingEnabled?: boolean;
   vercelOidcProvider: IOpenIdConnectProvider;
   vercelTeam: string;
   standby: boolean;
@@ -144,11 +145,11 @@ export class YodevMailStack extends Stack {
       parameterName: `/${prefix}/runtime/${name}`,
       version: 1,
     });
-    const runtimeParameters = [
-      secureParameter("DatabaseUrlParameter", "database-url"),
-      secureParameter("WebhookSigningSecretParameter", "webhook-signing-secret"),
-      secureParameter("StripeSecretKeyParameter", "stripe-secret-key"),
-    ];
+    const runtimeParameters = {
+      DATABASE_URL: secureParameter("DatabaseUrlParameter", "database-url"),
+      WEBHOOK_SIGNING_SECRET: secureParameter("WebhookSigningSecretParameter", "webhook-signing-secret"),
+      STRIPE_SECRET_KEY: secureParameter("StripeSecretKeyParameter", "stripe-secret-key"),
+    };
     const commonEnvironment = {
       ATTACHMENTS_BUCKET_NAME: attachmentBucket.bucketName,
       AWS_REGION_NAME: this.region,
@@ -161,7 +162,12 @@ export class YodevMailStack extends Stack {
       SES_ENABLED: prod ? "false" : "true",
     };
     const workerFunctions: NodejsFunction[] = [];
-    const worker = (name: string, entry: string, extra: Record<string, string> = {}) => {
+    const worker = (
+      name: string,
+      entry: string,
+      extra: Record<string, string> = {},
+      runtimeSecretNames: Array<keyof typeof runtimeParameters> = ["DATABASE_URL"],
+    ) => {
       const functionName = `${prefix}-${name.toLowerCase()}`;
       const logGroup = new LogGroup(this, `${name}Logs`, {
         logGroupName: `/aws/lambda/${functionName}`,
@@ -179,7 +185,7 @@ export class YodevMailStack extends Stack {
         runtime: Runtime.NODEJS_22_X,
         timeout: Duration.seconds(60),
       });
-      for (const parameter of runtimeParameters) parameter.grantRead(fn);
+      for (const secretName of runtimeSecretNames) runtimeParameters[secretName].grantRead(fn);
       workerFunctions.push(fn);
       return fn;
     };
@@ -228,7 +234,12 @@ export class YodevMailStack extends Stack {
     providerCredentialsKey.grantEncryptDecrypt(provision);
     provision.addToRolePolicy(new PolicyStatement({ actions: ["ses:CreateConfigurationSet", "ses:CreateConfigurationSetEventDestination", "ses:CreateEmailIdentity", "ses:CreateTenant", "ses:CreateTenantResourceAssociation", "ses:GetEmailIdentity", "ses:GetTenant", "ses:PutEmailIdentityMailFromAttributes", "ses:UpdateReputationEntityPolicy"], resources: ["*"] }));
 
-    const deliver = worker("CustomerWebhooks", "src/workers/deliver-webhook.ts");
+    const deliver = worker(
+      "CustomerWebhooks",
+      "src/workers/deliver-webhook.ts",
+      {},
+      ["DATABASE_URL", "WEBHOOK_SIGNING_SECRET"],
+    );
     if (!props.standby) deliver.addEventSource(new SqsEventSource(webhooks.main, { batchSize: 10, maxConcurrency: 2, reportBatchItemFailures: true }));
     webhooks.main.grantConsumeMessages(deliver);
 
@@ -242,6 +253,15 @@ export class YodevMailStack extends Stack {
 
     const staleSending = worker("RecoverStaleSending", "src/workers/recover-stale-sending.ts");
     scheduledWorkerRule("RecoverStaleSendingSchedule", Schedule.rate(Duration.minutes(5)), staleSending);
+    const clientProvisioning = worker(
+      "ReconcileClientProvisioning",
+      "src/workers/reconcile-client-provisioning.ts",
+    );
+    scheduledWorkerRule(
+      "ReconcileClientProvisioningSchedule",
+      Schedule.rate(Duration.minutes(5)),
+      clientProvisioning,
+    );
 
     const domainHealth = worker("DomainHealth", "src/workers/domain-health.ts");
     domainHealth.addToRolePolicy(new PolicyStatement({ actions: ["ses:GetEmailIdentity"], resources: ["*"] }));
@@ -249,7 +269,16 @@ export class YodevMailStack extends Stack {
     providerCredentialsKey.grantDecrypt(domainHealth);
     scheduledWorkerRule("DomainHealthSchedule", Schedule.rate(Duration.minutes(15)), domainHealth);
 
-    const stripeUsage = worker("StripeUsage", "src/workers/report-stripe-usage.ts", { STRIPE_METER_EVENT_NAME: "yodev_mail_emails_sent" });
+    const stripeUsage = worker(
+      "StripeUsage",
+      "src/workers/report-stripe-usage.ts",
+      {
+        STRIPE_METER_EVENT_NAME: "yodev_mail_emails_sent",
+        STRIPE_USAGE_REPORTING_ENABLED:
+          props.stripeUsageReportingEnabled && !props.standby ? "true" : "false",
+      },
+      ["DATABASE_URL", "STRIPE_SECRET_KEY"],
+    );
     scheduledWorkerRule("StripeUsageSchedule", Schedule.rate(Duration.hours(1)), stripeUsage);
     const warmup = worker("WarmupProgress", "src/workers/warmup-progress.ts");
     scheduledWorkerRule("WarmupProgressSchedule", Schedule.cron({ hour: "1", minute: "15" }), warmup);
@@ -299,10 +328,12 @@ export class YodevMailStack extends Stack {
       }),
       roleName: `${prefix}-vercel`,
     });
-    email.main.grantSendMessages(vercelRole);
     providerEvents.main.grantSendMessages(vercelRole);
     providerProvisioning.main.grantSendMessages(vercelRole);
-    attachmentBucket.grantPut(vercelRole);
+    vercelRole.addToPolicy(new PolicyStatement({
+      actions: ["s3:PutObject"],
+      resources: [attachmentBucket.arnForObjects("pending/*")],
+    }));
     attachmentKey.grantEncrypt(vercelRole);
     vercelRole.addToPolicy(new PolicyStatement({ actions: ["ssm:GetParameter", "ssm:GetParameters"], resources: [`arn:aws:ssm:${this.region}:${this.account}:parameter/${prefix}/providers/*`] }));
     providerCredentialsKey.grantDecrypt(vercelRole);
@@ -320,6 +351,7 @@ export class YodevMailStack extends Stack {
     const bounceRate = new Metric({ metricName: "Reputation.BounceRate", namespace: "AWS/SES", period: Duration.minutes(5), statistic: "Average" });
     const complaintRate = new Metric({ metricName: "Reputation.ComplaintRate", namespace: "AWS/SES", period: Duration.minutes(5), statistic: "Average" });
     const attachmentRejections = new Metric({ metricName: "AttachmentScanRejected", namespace: "Yodev/Mail", dimensionsMap: { Environment: props.environment }, period: Duration.minutes(5), statistic: "Sum" });
+    const clientProvisioningFailures = new Metric({ metricName: "ClientProvisioningReconciliationFailed", namespace: "Yodev/Mail", dimensionsMap: { Environment: props.environment }, period: Duration.minutes(5), statistic: "Sum" });
     const unknownOutcomes = new Metric({ metricName: "ProviderOutcomeUnknown", namespace: "Yodev/Mail", dimensionsMap: { Environment: props.environment }, period: Duration.minutes(5), statistic: "Sum" });
     const webhookTerminalFailures = new Metric({ metricName: "CustomerWebhookTerminalFailure", namespace: "Yodev/Mail", dimensionsMap: { Environment: props.environment }, period: Duration.minutes(5), statistic: "Sum" });
     const purgeFailures = new Metric({ metricName: "AttachmentPurgeFailure", namespace: "Yodev/Mail", dimensionsMap: { Environment: props.environment }, period: Duration.minutes(5), statistic: "Sum" });
@@ -329,11 +361,13 @@ export class YodevMailStack extends Stack {
       bounce.addAlarmAction(new SnsAction(props.alertTopic));
       complaint.addAlarmAction(new SnsAction(props.alertTopic));
       const malware = attachmentRejections.createAlarm(this, "AttachmentScanRejectedAlarm", { evaluationPeriods: 1, threshold: 1, treatMissingData: TreatMissingData.NOT_BREACHING });
+      const clientProvisioningFailure = clientProvisioningFailures.createAlarm(this, "ClientProvisioningReconciliationFailedAlarm", { evaluationPeriods: 1, threshold: 1, treatMissingData: TreatMissingData.NOT_BREACHING });
       const unknown = unknownOutcomes.createAlarm(this, "ProviderOutcomeUnknownAlarm", { evaluationPeriods: 1, threshold: 1, treatMissingData: TreatMissingData.NOT_BREACHING });
       const purgeFailure = purgeFailures.createAlarm(this, "AttachmentPurgeFailureAlarm", { evaluationPeriods: 1, threshold: 1, treatMissingData: TreatMissingData.NOT_BREACHING });
       const webhookTerminal = webhookTerminalFailures.createAlarm(this, "CustomerWebhookTerminalFailureAlarm", { evaluationPeriods: 1, threshold: 1, treatMissingData: TreatMissingData.NOT_BREACHING });
       const billingFailure = stripeUsage.metricErrors().createAlarm(this, "StripeUsageFailureAlarm", { evaluationPeriods: 1, threshold: 1, treatMissingData: TreatMissingData.NOT_BREACHING });
       malware.addAlarmAction(new SnsAction(props.alertTopic));
+      clientProvisioningFailure.addAlarmAction(new SnsAction(props.alertTopic));
       unknown.addAlarmAction(new SnsAction(props.alertTopic));
       purgeFailure.addAlarmAction(new SnsAction(props.alertTopic));
       webhookTerminal.addAlarmAction(new SnsAction(props.alertTopic));
@@ -352,7 +386,7 @@ export class YodevMailStack extends Stack {
       new GraphWidget({ left: queues.map((pair) => pair.main.metricApproximateAgeOfOldestMessage()), title: "Provider-neutral queue age", width: 12 }),
       new GraphWidget({ left: workerFunctions.map((fn) => fn.metricErrors()), title: "Lambda errors", width: 12 }),
       new GraphWidget({ left: [bounceRate, complaintRate], title: "SES account reputation", width: 12 }),
-      new GraphWidget({ left: [attachmentRejections, unknownOutcomes, purgeFailures, webhookTerminalFailures], title: "Security and ambiguous outcomes", width: 12 }),
+      new GraphWidget({ left: [attachmentRejections, clientProvisioningFailures, unknownOutcomes, purgeFailures, webhookTerminalFailures], title: "Security and ambiguous outcomes", width: 12 }),
     );
 
     Tags.of(this).add("Application", "yodev-mail");

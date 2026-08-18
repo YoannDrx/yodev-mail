@@ -30,6 +30,7 @@ beforeAll(() => {
     env,
     malwareProtectionEnabled: true,
     postmarkEnabled: false,
+    stripeUsageReportingEnabled: true,
     standby: false,
     vercelOidcProvider: foundationStack.vercelOidcProvider,
     vercelTeam: "yoanndrxs-projects",
@@ -66,6 +67,34 @@ describe("Mail by Yodev AWS infrastructure", () => {
     );
   });
 
+  test("limits the Vercel role to ingress operations without attachment decrypt", () => {
+    const policies = activeProductionWorkload.findResources("AWS::IAM::Policy");
+    const vercelPolicy = Object.values(policies).find((policy) =>
+      JSON.stringify(policy.Properties.Roles).includes("VercelRole"),
+    );
+    expect(vercelPolicy).toBeDefined();
+    const statements = vercelPolicy!.Properties.PolicyDocument.Statement as Array<{
+      Action: string | string[];
+      Resource: unknown;
+    }>;
+    const actions = statements.flatMap((statement) =>
+      Array.isArray(statement.Action) ? statement.Action : [statement.Action],
+    );
+    expect(actions).toContain("s3:PutObject");
+    expect(actions).not.toContain("s3:GetObject");
+    const decryptStatements = statements.filter((statement) =>
+      (Array.isArray(statement.Action) ? statement.Action : [statement.Action]).includes("kms:Decrypt"),
+    );
+    expect(decryptStatements).not.toHaveLength(0);
+    for (const statement of decryptStatements) {
+      expect(JSON.stringify(statement.Resource)).not.toContain("AttachmentKey");
+    }
+    const queueStatements = statements.filter((statement) =>
+      (Array.isArray(statement.Action) ? statement.Action : [statement.Action]).includes("sqs:SendMessage"),
+    );
+    expect(queueStatements).toHaveLength(2);
+  });
+
   test("can reuse an OIDC provider owned by the legacy foundation stack", () => {
     const app = new App();
     const importedFoundation = new YodevMailFoundationStack(
@@ -84,6 +113,100 @@ describe("Mail by Yodev AWS infrastructure", () => {
       "Custom::AWSCDKOpenIdConnectProvider",
       0,
     );
+  });
+
+  test("records and validates encrypted account management events", () => {
+    foundation.resourceCountIs("AWS::CloudTrail::Trail", 1);
+    foundation.hasResourceProperties("AWS::CloudTrail::Trail", {
+      EnableLogFileValidation: true,
+      IncludeGlobalServiceEvents: true,
+      IsLogging: true,
+      IsMultiRegionTrail: true,
+      TrailName: "yodev-mail-management",
+    });
+    foundation.hasResourceProperties(
+      "AWS::S3::Bucket",
+      Match.objectLike({
+        BucketEncryption: Match.objectLike({
+          ServerSideEncryptionConfiguration: Match.anyValue(),
+        }),
+        LifecycleConfiguration: Match.objectLike({
+          Rules: Match.arrayWith([
+            Match.objectLike({ ExpirationInDays: 365 }),
+          ]),
+        }),
+        PublicAccessBlockConfiguration: {
+          BlockPublicAcls: true,
+          BlockPublicPolicy: true,
+          IgnorePublicAcls: true,
+          RestrictPublicBuckets: true,
+        },
+        VersioningConfiguration: { Status: "Enabled" },
+      }),
+    );
+    foundation.hasResourceProperties("AWS::Logs::MetricFilter", {
+      FilterPattern:
+        '{ ($.userIdentity.type = "Root") && ($.userIdentity.invokedBy NOT EXISTS) && ($.eventType != "AwsServiceEvent") }',
+      MetricTransformations: Match.arrayWith([
+        Match.objectLike({
+          MetricName: "RootAccountUsage",
+          MetricNamespace: "Yodev/Mail",
+          MetricValue: "1",
+        }),
+      ]),
+    });
+    foundation.hasResourceProperties("AWS::Logs::LogGroup", {
+      KmsKeyId: Match.anyValue(),
+      LogGroupName: "/aws/cloudtrail/yodev-mail-management",
+      RetentionInDays: 365,
+    });
+    foundation.hasResourceProperties("AWS::CloudWatch::Alarm", {
+      ComparisonOperator: "GreaterThanOrEqualToThreshold",
+      EvaluationPeriods: 1,
+      MetricName: "RootAccountUsage",
+      Namespace: "Yodev/Mail",
+      Threshold: 1,
+      TreatMissingData: "notBreaching",
+    });
+    foundation.hasResourceProperties("AWS::KMS::Key", {
+      EnableKeyRotation: true,
+      KeyPolicy: Match.objectLike({
+        Statement: Match.arrayWith([
+          Match.objectLike({
+            Action: Match.arrayWith([
+              "kms:Decrypt",
+              "kms:Describe*",
+              "kms:Encrypt",
+              "kms:GenerateDataKey*",
+              "kms:ReEncrypt*",
+            ]),
+            Condition: {
+              ArnEquals: {
+                "kms:EncryptionContext:aws:logs:arn":
+                  Match.objectLike({ "Fn::Join": Match.anyValue() }),
+              },
+            },
+            Principal: {
+              Service: Match.objectLike({ "Fn::Join": Match.anyValue() }),
+            },
+          }),
+          Match.objectLike({
+            Action: Match.arrayWith(["kms:Decrypt", "kms:GenerateDataKey*"]),
+            Principal: { Service: "cloudwatch.amazonaws.com" },
+          }),
+          Match.objectLike({
+            Action: Match.arrayWith(["kms:Decrypt", "kms:GenerateDataKey*"]),
+            Principal: { Service: "sns.amazonaws.com" },
+          }),
+        ]),
+      }),
+    });
+    const keyPolicy = JSON.stringify(
+      Object.values(foundation.findResources("AWS::KMS::Key"))[0].Properties
+        .KeyPolicy,
+    );
+    expect(keyPolicy).toContain("logs.");
+    expect(keyPolicy).toContain("/aws/cloudtrail/yodev-mail-management");
   });
 
   test("encrypts every queue and keeps standby resources passive", () => {
@@ -129,6 +252,23 @@ describe("Mail by Yodev AWS infrastructure", () => {
     );
   });
 
+  test("reconciles accepted client owner invitations on a disabled-in-standby schedule", () => {
+    activeProductionWorkload.hasResourceProperties(
+      "AWS::Events::Rule",
+      Match.objectLike({
+        ScheduleExpression: "rate(5 minutes)",
+        State: "ENABLED",
+      }),
+    );
+    activeProductionWorkload.hasResourceProperties(
+      "AWS::CloudWatch::Alarm",
+      Match.objectLike({
+        MetricName: "ClientProvisioningReconciliationFailed",
+        Namespace: "Yodev/Mail",
+      }),
+    );
+  });
+
   test("keeps every SQS visibility timeout at least six times the Lambda timeout", () => {
     const queues = Object.values(activeProductionWorkload.findResources("AWS::SQS::Queue"));
     const workloadQueues = queues.filter((queue) => !String(queue.Properties.QueueName).endsWith("-dlq"));
@@ -162,6 +302,24 @@ describe("Mail by Yodev AWS infrastructure", () => {
         }),
       }),
     );
+
+    const keyPolicies = Object.values(foundation.findResources("AWS::KMS::Key"))
+      .flatMap((key) => key.Properties.KeyPolicy.Statement as Array<{
+        Action: string | string[];
+        Condition?: Record<string, unknown>;
+        Principal?: Record<string, unknown>;
+      }>);
+    const cloudTrailStatements = keyPolicies.filter((statement) =>
+      JSON.stringify(statement.Principal).includes("cloudtrail.amazonaws.com"),
+    );
+    expect(cloudTrailStatements.map((statement) => statement.Action)).toEqual(
+      expect.arrayContaining(["kms:GenerateDataKey*", "kms:DescribeKey"]),
+    );
+    const cloudTrailPolicy = JSON.stringify(cloudTrailStatements);
+    expect(cloudTrailPolicy).toContain("aws:SourceArn");
+    expect(cloudTrailPolicy).toContain("yodev-mail-management");
+    expect(cloudTrailPolicy).toContain("kms:EncryptionContext:aws:cloudtrail:arn");
+    expect(cloudTrailPolicy).toContain(":cloudtrail:*:123456789012:trail/*");
   });
 
   test("transforms SES events before enqueueing them", () => {
@@ -171,13 +329,40 @@ describe("Mail by Yodev AWS infrastructure", () => {
     }));
   });
 
-  test("creates cent-level cost alerts and a single shared operations topic", () => {
+  test("opens Stripe usage only on an explicitly active workload", () => {
+    activeProductionWorkload.hasResourceProperties(
+      "AWS::Lambda::Function",
+      Match.objectLike({
+        Environment: Match.objectLike({
+          Variables: Match.objectLike({
+            STRIPE_USAGE_REPORTING_ENABLED: "true",
+          }),
+        }),
+      }),
+    );
+    standbyWorkload.hasResourceProperties(
+      "AWS::Lambda::Function",
+      Match.objectLike({
+        Environment: Match.objectLike({
+          Variables: Match.objectLike({
+            STRIPE_USAGE_REPORTING_ENABLED: "false",
+          }),
+        }),
+      }),
+    );
+  });
+
+  test("creates staged account cost alerts and a single encrypted operations topic", () => {
     foundation.resourceCountIs("AWS::Budgets::Budget", 1);
     foundation.resourceCountIs("AWS::SNS::Topic", 1);
+    foundation.hasResourceProperties("AWS::SNS::Topic", {
+      KmsMasterKeyId: Match.anyValue(),
+      TopicName: "yodev-mail-operations-alerts",
+    });
     foundation.hasResourceProperties("AWS::Budgets::Budget", {
       Budget: Match.objectLike({
-        BudgetName: "yodev-mail-account-zero-cost",
-        BudgetLimit: { Amount: 1, Unit: "USD" },
+        BudgetName: "yodev-mail-account-monthly",
+        BudgetLimit: { Amount: 10, Unit: "USD" },
         CostTypes: Match.objectLike({
           IncludeCredit: false,
           IncludeRefund: false,
@@ -186,8 +371,8 @@ describe("Mail by Yodev AWS infrastructure", () => {
       NotificationsWithSubscribers: Match.arrayWith([
         Match.objectLike({
           Notification: Match.objectLike({
-            Threshold: 0.01,
-            ThresholdType: "ABSOLUTE_VALUE",
+            Threshold: 50,
+            ThresholdType: "PERCENTAGE",
           }),
         }),
       ]),

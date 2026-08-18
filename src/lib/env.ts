@@ -2,6 +2,7 @@ import { z } from "zod";
 
 const optionalUrl = z.string().url().optional().or(z.literal(""));
 const optionalSecret = z.string().min(32).optional().or(z.literal(""));
+const optionalSecret16 = z.string().min(16).optional().or(z.literal(""));
 
 const schema = z.object({
   DATABASE_URL: optionalUrl,
@@ -13,8 +14,8 @@ const schema = z.object({
   BETTER_AUTH_GOOGLE_CLIENT_SECRET: z.string().optional(),
   BETTER_AUTH_EMAIL_PASSWORD_ENABLED: z.enum(["true", "false"]).default("false"),
   AUTH_BOOTSTRAP_EMAIL: z.string().email().default("yoann.andrieux@gmail.com"),
-  API_KEY_PEPPER: z.string().min(16).optional(),
-  WEBHOOK_SIGNING_SECRET: z.string().min(16).optional(),
+  API_KEY_PEPPER: optionalSecret16,
+  WEBHOOK_SIGNING_SECRET: optionalSecret16,
   AWS_REGION: z.string().default("eu-west-3"),
   AWS_ACCOUNT_ID: z.string().optional(),
   AWS_OIDC_AUDIENCE: optionalUrl,
@@ -31,6 +32,13 @@ const schema = z.object({
   STRIPE_PRICE_PLATFORM: z.string().optional(),
   STRIPE_PRICE_USAGE: z.string().optional(),
   STRIPE_METER_EVENT_NAME: z.string().default("yodev_mail_emails_sent"),
+  COMMERCIAL_ONBOARDING_ENABLED: z.enum(["true", "false"]).default("false"),
+  LIVE_CHECKOUT_ENABLED: z.enum(["true", "false"]).default("false"),
+  STRIPE_USAGE_REPORTING_ENABLED: z.enum(["true", "false"]).default("false"),
+  ATTACHMENTS_ENABLED: z.enum(["true", "false"]).default("false"),
+  RAW_EMAIL_ENABLED: z.enum(["true", "false"]).default("false"),
+  LIVE_EMAIL_ACCEPTANCE_ENABLED: z.enum(["true", "false"]).default("false"),
+  CUSTOMER_WEBHOOKS_ENABLED: z.enum(["true", "false"]).default("false"),
 });
 
 export const env = schema.parse(process.env);
@@ -54,4 +62,17 @@ export function isAwsConfigured() {
 
 export function isStripeConfigured() {
   return Boolean(env.STRIPE_SECRET_KEY);
+}
+
+export function isFeatureEnabled(
+  feature:
+    | "COMMERCIAL_ONBOARDING_ENABLED"
+    | "LIVE_CHECKOUT_ENABLED"
+    | "STRIPE_USAGE_REPORTING_ENABLED"
+    | "ATTACHMENTS_ENABLED"
+    | "RAW_EMAIL_ENABLED"
+    | "LIVE_EMAIL_ACCEPTANCE_ENABLED"
+    | "CUSTOMER_WEBHOOKS_ENABLED",
+) {
+  return env[feature] === "true";
 }

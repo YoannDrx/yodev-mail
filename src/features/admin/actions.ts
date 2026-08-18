@@ -1,28 +1,262 @@
 "use server";
 
-import { and, eq } from "drizzle-orm";
+import { randomUUID } from "node:crypto";
+import { and, eq, inArray, lt, or, sql } from "drizzle-orm";
 import { revalidatePath } from "next/cache";
-import { headers } from "next/headers";
 import { z } from "zod";
 import { requireDb } from "@/db";
 import {
   adminReviews,
   auditEvents,
+  authInvitations,
+  authMembers,
+  authOrganizations,
+  authUsers,
+  clientProvisioningRuns,
   domainProviderBindings,
   domains,
   subscriptions,
   templates,
   transactionalProfiles,
+  workspaceSettings,
   workspaceProviderAccounts,
   workspaces,
 } from "@/db/schema";
 import { enqueueProviderProvisioning } from "@/lib/aws";
-import { getAuth } from "@/lib/auth";
+import { sendAuthEmail } from "@/lib/auth-emails";
+import { env, isFeatureEnabled } from "@/lib/env";
 import { requireAdmin } from "@/lib/page-auth";
+import { reconcileOwnerProvisioningRun } from "@/features/onboarding/reconcile-owner";
 import { provisionBinding } from "@/workers/provider-provisioning";
 
 const idSchema = z.string().uuid();
 const pilotDaysSchema = z.union([z.literal(30), z.literal(60), z.literal(90), z.null()]);
+const clientWorkspaceSchema = z.object({
+  name: z.string().trim().min(2).max(140),
+  slug: z.string().trim().toLowerCase().min(2).max(120).regex(/^[a-z0-9]+(?:-[a-z0-9]+)*$/),
+  ownerEmail: z.string().trim().email().max(320).transform((value) => value.toLowerCase()),
+  websiteUrl: z.string().trim().url().max(2_048),
+  useCase: z.string().trim().min(20).max(4_000),
+  expectedMonthlyVolume: z.coerce.number().int().min(1).max(10_000_000),
+});
+
+function invitationUrl(invitationId: string) {
+  const baseUrl = (env.NEXT_PUBLIC_APP_URL || "http://localhost:3000").replace(/\/$/, "");
+  return `${baseUrl}/invitation?id=${encodeURIComponent(invitationId)}`;
+}
+
+async function deliverClientOwnerInvitation(runId: string, actorUserId: string) {
+  const db = requireDb();
+  const staleClaim = new Date(Date.now() - 5 * 60_000);
+  const [claimed] = await db
+    .update(clientProvisioningRuns)
+    .set({
+      status: "sending_email",
+      attemptCount: sql`${clientProvisioningRuns.attemptCount} + 1`,
+      lastErrorCode: null,
+      updatedAt: new Date(),
+    })
+    .where(
+      and(
+        eq(clientProvisioningRuns.id, runId),
+        or(
+          inArray(clientProvisioningRuns.status, [
+            "pending_email",
+            "invitation_sent",
+            "email_failed",
+          ]),
+          and(
+            eq(clientProvisioningRuns.status, "sending_email"),
+            lt(clientProvisioningRuns.updatedAt, staleClaim),
+          ),
+        ),
+      ),
+    )
+    .returning({
+      invitationId: clientProvisioningRuns.invitationId,
+      workspaceId: clientProvisioningRuns.workspaceId,
+    });
+  if (!claimed) return;
+
+  const [target] = await db
+    .select({
+      email: authInvitations.email,
+      invitationStatus: authInvitations.status,
+      organizationId: authInvitations.organizationId,
+      organizationName: authOrganizations.name,
+    })
+    .from(authInvitations)
+    .innerJoin(
+      authOrganizations,
+      eq(authOrganizations.id, authInvitations.organizationId),
+    )
+    .innerJoin(
+      workspaces,
+      eq(workspaces.authOrganizationId, authInvitations.organizationId),
+    )
+    .where(and(
+      eq(authInvitations.id, claimed.invitationId),
+      eq(workspaces.id, claimed.workspaceId),
+    ))
+    .limit(1);
+
+  try {
+    if (!target || target.invitationStatus !== "pending") {
+      throw new Error("The owner invitation is no longer pending.");
+    }
+    await db
+      .update(authInvitations)
+      .set({ expiresAt: new Date(Date.now() + 48 * 60 * 60_000) })
+      .where(
+        and(
+          eq(authInvitations.id, claimed.invitationId),
+          eq(authInvitations.organizationId, target.organizationId),
+          eq(authInvitations.status, "pending"),
+        ),
+      );
+    await sendAuthEmail({
+      actionUrl: invitationUrl(claimed.invitationId),
+      intro: `Vous êtes invité à rejoindre ${target.organizationName}.`,
+      kind: "organization_invitation",
+      to: target.email,
+    });
+    await db.transaction(async (tx) => {
+      await tx
+        .update(clientProvisioningRuns)
+        .set({
+          status: "invitation_sent",
+          emailSentAt: new Date(),
+          lastErrorCode: null,
+          updatedAt: new Date(),
+        })
+        .where(and(
+          eq(clientProvisioningRuns.id, runId),
+          eq(clientProvisioningRuns.workspaceId, claimed.workspaceId),
+        ));
+      await tx.insert(auditEvents).values({
+        workspaceId: claimed.workspaceId,
+        actorUserId,
+        action: "client.owner_invitation_sent",
+        entityType: "auth_invitation",
+        entityId: claimed.invitationId,
+        metadata: { role: "owner" },
+      });
+    });
+  } catch {
+    await db.transaction(async (tx) => {
+      await tx
+        .update(clientProvisioningRuns)
+        .set({
+          status: "email_failed",
+          lastErrorCode: "invitation_delivery_failed",
+          updatedAt: new Date(),
+        })
+        .where(and(
+          eq(clientProvisioningRuns.id, runId),
+          eq(clientProvisioningRuns.workspaceId, claimed.workspaceId),
+        ));
+      await tx.insert(auditEvents).values({
+        workspaceId: claimed.workspaceId,
+        actorUserId,
+        action: "client.owner_invitation_delivery_failed",
+        entityType: "auth_invitation",
+        entityId: claimed.invitationId,
+        metadata: { errorCode: "invitation_delivery_failed" },
+      });
+    });
+  }
+}
+
+export async function provisionClientWorkspaceAction(formData: FormData) {
+  if (!isFeatureEnabled("COMMERCIAL_ONBOARDING_ENABLED")) {
+    throw new Error("Commercial onboarding is disabled.");
+  }
+  const input = clientWorkspaceSchema.parse({
+    name: formData.get("name"),
+    slug: formData.get("slug"),
+    ownerEmail: formData.get("ownerEmail"),
+    websiteUrl: formData.get("websiteUrl"),
+    useCase: formData.get("useCase"),
+    expectedMonthlyVolume: formData.get("expectedMonthlyVolume"),
+  });
+  const { userId } = await requireAdmin();
+  const organizationId = randomUUID();
+  const invitationId = randomUUID();
+  const db = requireDb();
+  const [run] = await db.transaction(async (tx) => {
+    const [existingWorkspace] = await tx
+      .select({ id: workspaces.id })
+      .from(workspaces)
+      .where(eq(workspaces.slug, input.slug))
+      .limit(1);
+    if (existingWorkspace) throw new Error("This workspace slug is already in use.");
+
+    await tx.insert(authOrganizations).values({
+      id: organizationId,
+      name: input.name,
+      slug: input.slug,
+    });
+    const [workspace] = await tx
+      .insert(workspaces)
+      .values({
+        authOrganizationId: organizationId,
+        contentPolicy: "template_only",
+        dailyLimit: 50,
+        expectedMonthlyVolume: input.expectedMonthlyVolume,
+        name: input.name,
+        plan: "sandbox",
+        slug: input.slug,
+        status: "sandbox",
+        useCase: input.useCase,
+        websiteUrl: input.websiteUrl,
+      })
+      .returning({ id: workspaces.id });
+    await tx.insert(workspaceSettings).values({ workspaceId: workspace.id });
+    await tx.insert(subscriptions).values({ workspaceId: workspace.id });
+    await tx.insert(adminReviews).values({ workspaceId: workspace.id });
+    await tx.insert(authInvitations).values({
+      id: invitationId,
+      organizationId,
+      email: input.ownerEmail,
+      role: "owner",
+      status: "pending",
+      expiresAt: new Date(Date.now() + 48 * 60 * 60_000),
+      inviterId: userId,
+    });
+    const [provisioningRun] = await tx
+      .insert(clientProvisioningRuns)
+      .values({ workspaceId: workspace.id, invitationId })
+      .returning({ id: clientProvisioningRuns.id });
+    await tx.insert(auditEvents).values({
+      workspaceId: workspace.id,
+      actorUserId: userId,
+      action: "client.workspace_provisioned",
+      entityType: "workspace",
+      entityId: workspace.id,
+      metadata: { initialDailyLimit: 50, ownerRole: "owner" },
+    });
+    return [provisioningRun];
+  });
+  await deliverClientOwnerInvitation(run.id, userId);
+  revalidatePath("/admin");
+}
+
+export async function retryClientOwnerInvitationAction(runId: string) {
+  if (!isFeatureEnabled("COMMERCIAL_ONBOARDING_ENABLED")) {
+    throw new Error("Commercial onboarding is disabled.");
+  }
+  const id = idSchema.parse(runId);
+  const { userId } = await requireAdmin();
+  await deliverClientOwnerInvitation(id, userId);
+  revalidatePath("/admin");
+}
+
+export async function reconcileClientOwnerAction(runId: string) {
+  const id = idSchema.parse(runId);
+  const { userId } = await requireAdmin();
+  await reconcileOwnerProvisioningRun(id, userId);
+  revalidatePath("/admin");
+}
 
 export async function inviteWorkspaceMemberAction(workspaceId: string, formData: FormData) {
   const id = idSchema.parse(workspaceId);
@@ -36,20 +270,62 @@ export async function inviteWorkspaceMemberAction(workspaceId: string, formData:
   if (!workspace || workspace.status !== "approved" || !workspace.authOrganizationId) {
     throw new Error("An approved workspace linked to Better Auth is required");
   }
-  const invitation = await getAuth().api.createInvitation({
-    headers: await headers(),
-    body: {
-      email,
+  const [existingMember] = await db
+    .select({ id: authMembers.id })
+    .from(authMembers)
+    .innerJoin(authUsers, eq(authUsers.id, authMembers.userId))
+    .where(
+      and(
+        eq(authMembers.organizationId, workspace.authOrganizationId),
+        sql`lower(${authUsers.email}) = ${email}`,
+      ),
+    )
+    .limit(1);
+  if (existingMember) throw new Error("This user is already a workspace member.");
+
+  const [existingInvitation] = await db
+    .select({ id: authInvitations.id })
+    .from(authInvitations)
+    .where(
+      and(
+        eq(authInvitations.organizationId, workspace.authOrganizationId),
+        eq(authInvitations.status, "pending"),
+        sql`lower(${authInvitations.email}) = ${email}`,
+      ),
+    )
+    .limit(1);
+  const invitationId = existingInvitation?.id ?? randomUUID();
+  if (existingInvitation) {
+    await db
+      .update(authInvitations)
+      .set({ expiresAt: new Date(Date.now() + 48 * 60 * 60_000) })
+      .where(and(
+        eq(authInvitations.id, invitationId),
+        eq(authInvitations.organizationId, workspace.authOrganizationId),
+      ));
+  } else {
+    await db.insert(authInvitations).values({
+      id: invitationId,
       organizationId: workspace.authOrganizationId,
+      email,
       role: "member",
-    },
+      status: "pending",
+      expiresAt: new Date(Date.now() + 48 * 60 * 60_000),
+      inviterId: userId,
+    });
+  }
+  await sendAuthEmail({
+    actionUrl: invitationUrl(invitationId),
+    intro: "Vous êtes invité à rejoindre votre workspace Mail by Yodev.",
+    kind: "organization_invitation",
+    to: email,
   });
   await db.insert(auditEvents).values({
     workspaceId: id,
     actorUserId: userId,
     action: "workspace.member_invited",
     entityType: "auth_invitation",
-    entityId: invitation.id,
+    entityId: invitationId,
     metadata: { role: "member" },
   });
   revalidatePath("/admin");
@@ -83,6 +359,11 @@ export async function reviewWorkspaceAction(workspaceId: string, decision: "appr
   const id = idSchema.parse(workspaceId);
   const { userId } = await requireAdmin();
   const db = requireDb();
+  const [current] = await db.select({ status: workspaces.status }).from(workspaces).where(eq(workspaces.id, id)).limit(1);
+  if (!current) throw new Error("Workspace not found");
+  if (decision === "approved" && current.status !== "pending_review") {
+    throw new Error("A completed onboarding review is required before approval.");
+  }
   await db.transaction(async (tx) => {
     if (decision === "approved") {
       await tx.update(workspaces).set({ approvedAt: new Date(), dailyLimit: 50, pauseReason: null, pausedAt: null, status: "approved", warmupAdvancedAt: new Date(), warmupStage: 1, updatedAt: new Date() }).where(eq(workspaces.id, id));
@@ -163,8 +444,14 @@ export async function activateDomainBindingAction(bindingId: string) {
   const [binding] = await db.select().from(domainProviderBindings).where(eq(domainProviderBindings.id, id)).limit(1);
   if (!binding || binding.status !== "verified") throw new Error("Binding must be verified first");
   await db.transaction(async (tx) => {
-    await tx.update(domainProviderBindings).set({ isActive: false, updatedAt: new Date() }).where(eq(domainProviderBindings.domainId, binding.domainId));
-    await tx.update(domainProviderBindings).set({ isActive: true, updatedAt: new Date() }).where(eq(domainProviderBindings.id, id));
+    await tx.update(domainProviderBindings).set({ isActive: false, updatedAt: new Date() }).where(and(
+      eq(domainProviderBindings.domainId, binding.domainId),
+      eq(domainProviderBindings.workspaceId, binding.workspaceId),
+    ));
+    await tx.update(domainProviderBindings).set({ isActive: true, updatedAt: new Date() }).where(and(
+      eq(domainProviderBindings.id, id),
+      eq(domainProviderBindings.workspaceId, binding.workspaceId),
+    ));
     await tx.update(domains).set({ activeProvider: binding.provider, status: "verified", updatedAt: new Date() }).where(and(eq(domains.id, binding.domainId), eq(domains.workspaceId, binding.workspaceId)));
     await tx.update(workspaces).set({ defaultProvider: binding.provider, updatedAt: new Date() }).where(eq(workspaces.id, binding.workspaceId));
     await tx.insert(auditEvents).values({ workspaceId: binding.workspaceId, actorUserId: userId, action: "domain.provider_activated", entityType: "domain_binding", entityId: id, metadata: { provider: binding.provider } });
