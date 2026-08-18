@@ -39,14 +39,14 @@ les validations externes correspondantes ne sont pas terminées.
 | Contrôle | Résultat |
 |---|---|
 | `npm run check` | Vert : lint, TypeScript, 97 tests et build Next.js 16.3.1 |
-| Suite PostgreSQL | 54 scénarios PostgreSQL 17 verts |
-| `npm run test:coverage:full` | 151 tests verts avec seuils CI atteints |
+| Suite PostgreSQL | 55 scénarios PostgreSQL 17 verts |
+| `npm run test:coverage:full` | 152 tests verts avec seuils CI atteints |
 | `npm run test:e2e` | 5 scénarios Playwright verts |
 | `npm run infra:synth` | CDK synthétisé pour les stacks configurées |
 | `npx drizzle-kit check` | Journal et schéma cohérents |
 | `npm run db:preflight:0009` | Aucun doublon ou chevauchement bloquant |
 | `npm audit --audit-level=high` | 0 vulnérabilité connue |
-| Health checks publics | HTTP 200, base `ok`, version déployée `3f64987` |
+| Health checks publics | HTTP 200, base `ok`, version déployée `99c51ba` |
 
 La suite PostgreSQL couvre notamment l'acceptation exactement une fois, les
 résultats fournisseur ambigus, les retries transitoires, le rollback d'un
@@ -57,8 +57,8 @@ déduplication d'un webhook Stripe.
 
 ## Couverture mesurée et imposée
 
-La suite unifiée atteint 78,28 % de statements, 68,80 % de branches, 65,44 % de
-fonctions et 81,72 % de lignes. Les seuils globaux sont désormais imposés par
+La suite unifiée atteint 78,53 % de statements, 69,38 % de branches, 65,44 % de
+fonctions et 82,00 % de lignes. Les seuils globaux sont désormais imposés par
 `vitest.full.config.ts` à 70 % pour les statements/lignes et 60 % pour les
 branches/fonctions.
 
@@ -116,6 +116,17 @@ La CI exécute désormais :
   réconciliation propriétaire est actif toutes les cinq minutes avec ses
   alarmes. Les huit files et DLQ Production sont vides. Dev reste explicitement
   en standby et n'a pas été activé.
+- Sécurité AWS : une session créée par `aws login` sur le profil par défaut a
+  été identifiée comme une session du compte root lors de l'audit final. Les
+  seules opérations root observées dans CloudTrail correspondent aux contrôles
+  CLI de cette session et à la suppression des deux anciens paramètres Stripe.
+  La session a été fermée avec `aws logout`; le profil par défaut échoue
+  désormais sans authentification et le profil explicite `yodev-mail-admin`
+  est confirmé comme rôle SSO
+  `AWSReservedSSO_YoDevMailAdministrator`. L'alarme root est revenue
+  naturellement à `OK`, sans changement manuel d'état. Le nouvel audit compte
+  64 alarmes, aucune active, huit files vides et conclut `BASELINE: READY` sur
+  la version `99c51ba`.
 - SES est toujours en sandbox (200 messages/jour, 1/s). L'identité
   `mail.yodev.fr` et son MAIL FROM sont vérifiés, mais SES reste volontairement
   désactivé comme transport de production.
@@ -123,7 +134,10 @@ La CI exécute désormais :
   désactivés. DKIM et Return-Path sont vérifiés. Le webhook HTTPS est authentifié,
   écoute delivery/bounce/complaint, exclut le contenu et désactive open/click.
   La base contient deux messages live déjà arrivés à l'état `delivered`.
-- Vercel : la production sert le merge commit `3f64987`; les deux health checks
+  Le compte est approuvé et live, mais reste sur le forfait Developer : 30 des
+  100 emails mensuels sont consommés. Le forfait Basic 10 000 emails à
+  15 USD/mois est préparé dans l'interface, sans validation de paiement.
+- Vercel : la production sert le merge commit `99c51ba`; les deux health checks
   répondent HTTP 200 avec `database=ok`. Les variables historiques de campagnes/newsletters, anciens
   tarifs Stripe, files d'import/campagne, désinscription et alias Neon non lus
   ont été retirées de Production, Preview et Development. Les deux seules
@@ -178,14 +192,23 @@ La CI exécute désormais :
 - `ATTACHMENTS_ENABLED` a été refermé et redéployé après l'audit. Le parcours réel
   upload présigné, scan GuardDuty, envoi Gmail et purge S3 attend encore une clé
   éphémère créée avec confirmation utilisateur au moment exact de sa création.
+- Les deux sondes non sensibles envoyées depuis le compte opérateur contrôlé
+  vers `support@yodev.fr` et `abuse@yodev.fr` apparaissent dans les messages
+  envoyés puis dans la boîte de réception Gmail. Les deux routages sont donc
+  prouvés en production.
+- L'audit des clés API a identifié une clé historique encore active,
+  `Ads by Yodev staging runtime 2026-08-18`, jamais utilisée et dotée des scopes
+  `emails:send`, `emails:read` et `emails:send:raw`. Le gate live reste fermé
+  tant que sa révocation n'est pas confirmée et exécutée. La clé de canari
+  actuelle est limitée à `emails:send` et `attachments:write` et sera révoquée
+  après le parcours réel.
 - Aucun bounce/complaint officiel Postmark n'a été provoqué sur cette version.
 - Aucun endpoint client contrôlé n'a encore certifié en production la signature,
   la re-résolution DNS, le retry et l'état terminal des webhooks.
 - Aucun checkout, paiement, webhook, facture, annulation, portail ou meter event
   Stripe YoDevMail réel n'a été exécuté.
 - Les canaris Outlook et iCloud, ainsi que l'observation de 72 heures, restent à
-  réaliser. Le connecteur Gmail demande une nouvelle authentification avant les
-  sondes `support@yodev.fr` et `abuse@yodev.fr`.
+  réaliser.
 
 Le compte Stripe exposé au connecteur est `RoutineKids`, pas un compte YoDevMail.
 Aucune mutation Stripe n'a donc été réalisée. Un compte dédié et sa fiscalité
@@ -203,7 +226,14 @@ est activée et sa première session SSO est réussie. `sts get-caller-identity`
 confirme une session `AWSReservedSSO_YoDevMailAdministrator`, non-root, dans le
 compte attendu.
 
-Les health checks publics servent la version `3f64987`. Le smoke test authentifié
+Le compte root n'a aucune clé d'accès et son MFA est actif. Le seul utilisateur
+IAM historique, `yoann_andrieux`, n'a aucune clé d'accès et possède un MFA, mais
+conserve un accès console et la politique `AdministratorAccess`. Sa suppression
+est recommandée après une connexion web réussie via le portail SSO; la page SSO
+et le formulaire de mot de passe de l'utilisateur historique ont été ouverts
+pour permettre cette décision à l'opérateur.
+
+Les health checks publics servent la version `99c51ba`. Le smoke test authentifié
 de `/dashboard/membres` confirme un propriétaire, zéro invitation et la limite de
 trois sièges. Le nom du workspace a été aligné transactionnellement sur
 `Mail by Yodev` avec une trace d'audit.
