@@ -43,10 +43,11 @@ export async function disableTransactionalProfileAction(profileId: string) {
   const id = z.string().uuid().parse(profileId);
   const { workspace, userId } = await currentWorkspace({ admin: true });
   await requireDb().transaction(async (tx) => {
-    await tx.update(transactionalProfiles).set({ status: "disabled", updatedAt: new Date() }).where(and(
+    const disabled = await tx.update(transactionalProfiles).set({ status: "disabled", updatedAt: new Date() }).where(and(
       eq(transactionalProfiles.id, id),
       eq(transactionalProfiles.workspaceId, workspace.id),
-    ));
+    )).returning({ id: transactionalProfiles.id });
+    if (!disabled.length) throw new Error("Transactional profile not found");
     await tx.insert(auditEvents).values({ workspaceId: workspace.id, actorUserId: userId, action: "transactional_profile.disabled", entityType: "transactional_profile", entityId: id });
   });
   revalidatePath("/dashboard/profils");

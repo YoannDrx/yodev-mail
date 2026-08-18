@@ -1,6 +1,7 @@
 import Link from "next/link";
 import { notFound } from "next/navigation";
 import { ArrowLeft, CheckCircle2, CircleDashed, MailWarning } from "lucide-react";
+import { z } from "zod";
 import { Badge } from "@/components/ui/badge";
 import { DashboardPage } from "@/components/dashboard-page";
 import { getMessageDetail } from "@/features/dashboard/queries";
@@ -13,7 +14,9 @@ function formatDate(date: Date | null) {
 }
 
 export default async function Page({ params }: { params: Promise<{ id: string }> }) {
-  const { id } = await params;
+  const parsedId = z.string().uuid().safeParse((await params).id);
+  if (!parsedId.success) notFound();
+  const id = parsedId.data;
   const context = await requirePageWorkspace();
   if (!context) notFound();
   const result = await getMessageDetail(context.workspace.id, id);

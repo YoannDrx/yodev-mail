@@ -24,6 +24,18 @@ export default defineConfig({
           branches: 90,
           lines: 90,
         },
+        "src/workers/attachment-scan.ts": {
+          branches: 75,
+          lines: 95,
+        },
+        "src/workers/deliver-webhook.ts": {
+          branches: 85,
+          lines: 70,
+        },
+        "src/workers/report-stripe-usage.ts": {
+          branches: 65,
+          lines: 95,
+        },
       },
     },
     environment: "node",

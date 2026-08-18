@@ -1,15 +1,23 @@
 import { and, eq } from "drizzle-orm";
 import { NextResponse } from "next/server";
+import { z } from "zod";
 import { requireDb } from "@/db";
 import { messages, transactionalProfiles } from "@/db/schema";
 import { authenticateApiKey } from "@/features/api/authenticate-api-key";
 import { consumeWorkspaceRateLimit } from "@/features/api/rate-limit";
+
+const messageIdSchema = z.string().uuid();
+
 export async function GET(request: Request, { params }: { params: Promise<{ id: string }> }) {
   const key = await authenticateApiKey(request, "emails:read");
   if (!key) return NextResponse.json({ error: { code: "unauthorized" } }, { status: 401 });
   const rate = await consumeWorkspaceRateLimit(key.workspaceId, key.mode);
   if (!rate.allowed) return NextResponse.json({ error: { code: "rate_limit_exceeded" } }, { status: 429 });
-  const { id } = await params;
+  const parsedId = messageIdSchema.safeParse((await params).id);
+  if (!parsedId.success) {
+    return NextResponse.json({ error: { code: "not_found" } }, { status: 404 });
+  }
+  const id = parsedId.data;
   const [message] = await requireDb().select({
     id: messages.id,
     status: messages.status,

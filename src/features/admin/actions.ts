@@ -9,9 +9,7 @@ import {
   adminReviews,
   auditEvents,
   authInvitations,
-  authMembers,
   authOrganizations,
-  authUsers,
   clientProvisioningRuns,
   domainProviderBindings,
   domains,
@@ -27,6 +25,7 @@ import { sendAuthEmail } from "@/lib/auth-emails";
 import { env, isFeatureEnabled } from "@/lib/env";
 import { requireAdmin } from "@/lib/page-auth";
 import { reconcileOwnerProvisioningRun } from "@/features/onboarding/reconcile-owner";
+import { inviteWorkspaceMember } from "@/features/members/service";
 import { provisionBinding } from "@/workers/provider-provisioning";
 
 const idSchema = z.string().uuid();
@@ -270,63 +269,12 @@ export async function inviteWorkspaceMemberAction(workspaceId: string, formData:
   if (!workspace || workspace.status !== "approved" || !workspace.authOrganizationId) {
     throw new Error("An approved workspace linked to Better Auth is required");
   }
-  const [existingMember] = await db
-    .select({ id: authMembers.id })
-    .from(authMembers)
-    .innerJoin(authUsers, eq(authUsers.id, authMembers.userId))
-    .where(
-      and(
-        eq(authMembers.organizationId, workspace.authOrganizationId),
-        sql`lower(${authUsers.email}) = ${email}`,
-      ),
-    )
-    .limit(1);
-  if (existingMember) throw new Error("This user is already a workspace member.");
-
-  const [existingInvitation] = await db
-    .select({ id: authInvitations.id })
-    .from(authInvitations)
-    .where(
-      and(
-        eq(authInvitations.organizationId, workspace.authOrganizationId),
-        eq(authInvitations.status, "pending"),
-        sql`lower(${authInvitations.email}) = ${email}`,
-      ),
-    )
-    .limit(1);
-  const invitationId = existingInvitation?.id ?? randomUUID();
-  if (existingInvitation) {
-    await db
-      .update(authInvitations)
-      .set({ expiresAt: new Date(Date.now() + 48 * 60 * 60_000) })
-      .where(and(
-        eq(authInvitations.id, invitationId),
-        eq(authInvitations.organizationId, workspace.authOrganizationId),
-      ));
-  } else {
-    await db.insert(authInvitations).values({
-      id: invitationId,
-      organizationId: workspace.authOrganizationId,
-      email,
-      role: "member",
-      status: "pending",
-      expiresAt: new Date(Date.now() + 48 * 60 * 60_000),
-      inviterId: userId,
-    });
-  }
-  await sendAuthEmail({
-    actionUrl: invitationUrl(invitationId),
-    intro: "Vous êtes invité à rejoindre votre workspace Mail by Yodev.",
-    kind: "organization_invitation",
-    to: email,
-  });
-  await db.insert(auditEvents).values({
-    workspaceId: id,
+  await inviteWorkspaceMember({
     actorUserId: userId,
-    action: "workspace.member_invited",
-    entityType: "auth_invitation",
-    entityId: invitationId,
-    metadata: { role: "member" },
+    db,
+    email,
+    organizationId: workspace.authOrganizationId,
+    workspaceId: id,
   });
   revalidatePath("/admin");
 }

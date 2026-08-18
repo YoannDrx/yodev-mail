@@ -3,7 +3,7 @@
 ## Décision
 
 YoDevMail est conservé et consolidé sur la branche locale
-`codex/yodev-mail-hardening`. Ce document distingue les preuves reproductibles
+`codex/production-completion`. Ce document distingue les preuves reproductibles
 obtenues localement des validations qui exigent un environnement externe réel.
 
 Ce travail ne constitue pas encore un GO de production ou un GO commercial.
@@ -38,15 +38,15 @@ les validations externes correspondantes ne sont pas terminées.
 
 | Contrôle | Résultat |
 |---|---|
-| `npm run check` | Vert : lint, TypeScript, 86 tests et build Next.js 16.3.1 |
-| `npm run test:integration` | 35 scénarios PostgreSQL 17 verts |
-| `npm run test:coverage:full` | 121 tests verts avec seuils CI atteints |
+| `npm run check` | Vert : lint, TypeScript, 97 tests et build Next.js 16.3.1 |
+| Suite PostgreSQL | 54 scénarios PostgreSQL 17 verts |
+| `npm run test:coverage:full` | 151 tests verts avec seuils CI atteints |
 | `npm run test:e2e` | 5 scénarios Playwright verts |
 | `npm run infra:synth` | CDK synthétisé pour les stacks configurées |
 | `npx drizzle-kit check` | Journal et schéma cohérents |
 | `npm run db:preflight:0009` | Aucun doublon ou chevauchement bloquant |
 | `npm audit --audit-level=high` | 0 vulnérabilité connue |
-| Health checks publics | HTTP 200, base `ok`, version déployée `c0d4a80` |
+| Health checks publics | HTTP 200, base `ok`, version déployée `639b79b` |
 
 La suite PostgreSQL couvre notamment l'acceptation exactement une fois, les
 résultats fournisseur ambigus, les retries transitoires, le rollback d'un
@@ -57,8 +57,8 @@ déduplication d'un webhook Stripe.
 
 ## Couverture mesurée et imposée
 
-La suite unifiée atteint 75,01 % de statements, 65,57 % de branches, 62,89 % de
-fonctions et 77,88 % de lignes. Les seuils globaux sont désormais imposés par
+La suite unifiée atteint 78,28 % de statements, 68,80 % de branches, 65,44 % de
+fonctions et 81,72 % de lignes. Les seuils globaux sont désormais imposés par
 `vitest.full.config.ts` à 70 % pour les statements/lignes et 60 % pour les
 branches/fonctions.
 
@@ -68,6 +68,12 @@ Les trois modules transactionnels critiques satisfont également la barrière de
 - worker d'envoi : 100 % de lignes et 90,90 % de branches ;
 - ingestion fournisseur : 100 % de lignes et 92,59 % de branches ;
 - réconciliation propriétaire : 97,05 % de lignes et 93,54 % de branches.
+
+Les workers de pièces jointes, webhooks clients et facturation d'usage ont
+désormais leurs propres seuils de non-régression. Les scénarios PostgreSQL
+couvrent les événements GuardDuty dupliqués ou concurrents, un résultat propre
+retardé après rejet malware, la purge S3, un worker webhook périmé après livraison
+réussie et la perte de claim après soumission d'un meter event Stripe.
 
 La CI PostgreSQL exécute cette suite unifiée et échoue automatiquement si l'un
 de ces seuils régresse.
@@ -118,7 +124,7 @@ La CI exécute désormais :
   désactivés. DKIM et Return-Path sont vérifiés. Le webhook HTTPS est authentifié,
   écoute delivery/bounce/complaint, exclut le contenu et désactive open/click.
   La base contient deux messages live déjà arrivés à l'état `delivered`.
-- Vercel : la production est saine mais sert encore le commit `c0d4a80`, pas ce
+- Vercel : la production est saine mais sert encore le commit `639b79b`, pas ce
   durcissement. Les variables historiques de campagnes/newsletters, anciens
   tarifs Stripe, files d'import/campagne, désinscription et alias Neon non lus
   ont été retirées de Production, Preview et Development. Les deux seules
@@ -161,13 +167,24 @@ La CI exécute désormais :
 
 ## Validations externes restant à exécuter
 
-- L'application Vercel Production sert encore l'ancien commit `c0d4a80`.
-- Aucun gate live n'a été activé.
+- L'application Vercel Production sert encore le commit `639b79b`, pas la branche
+  de complétion et son écran de gestion des membres.
+- `LIVE_EMAIL_ACCEPTANCE_ENABLED=true` a été ouvert pour le workspace interne.
+  Un canari Postmark réel vers Gmail a atteint `delivered` avec exactement un
+  ledger, une tentative et aucun outbox en attente. Sa clé éphémère a été révoquée.
+- Le template de production a ensuite été corrigé pour utiliser la marque
+  `Mail by Yodev`; un second canari reste requis pour prouver ce rendu corrigé.
+- `ATTACHMENTS_ENABLED` a été refermé et redéployé après l'audit. Le parcours réel
+  upload présigné, scan GuardDuty, envoi Gmail et purge S3 attend encore une clé
+  éphémère créée avec confirmation utilisateur au moment exact de sa création.
 - Aucun bounce/complaint officiel Postmark n'a été provoqué sur cette version.
+- Aucun endpoint client contrôlé n'a encore certifié en production la signature,
+  la re-résolution DNS, le retry et l'état terminal des webhooks.
 - Aucun checkout, paiement, webhook, facture, annulation, portail ou meter event
-  Stripe réel n'a été exécuté.
-- Aucun canari Gmail, Outlook ou iCloud et aucune observation de 72 heures n'ont
-  été réalisés.
+  Stripe YoDevMail réel n'a été exécuté.
+- Les canaris Outlook et iCloud, ainsi que l'observation de 72 heures, restent à
+  réaliser. Le connecteur Gmail demande une nouvelle authentification avant les
+  sondes `support@yodev.fr` et `abuse@yodev.fr`.
 
 Le compte Stripe exposé au connecteur est `RoutineKids`, pas un compte YoDevMail.
 Aucune mutation Stripe n'a donc été réalisée. Un compte dédié et sa fiscalité
@@ -181,14 +198,17 @@ est activée et sa première session SSO est réussie. `sts get-caller-identity`
 confirme une session `AWSReservedSSO_YoDevMailAdministrator`, non-root, dans le
 compte attendu.
 
-Les health checks publics servent toujours la version `c0d4a80`; ils prouvent
+Les health checks publics servent toujours la version `639b79b`; ils prouvent
 la disponibilité de l'ancienne version déployée, pas celle de la branche locale.
 
 ## Prochaine barrière de décision
 
-Avant un GO interne, il reste à fusionner et déployer l'application avec tous
-les gates fermés, puis exécuter les trois canaris et observer 72 heures. La
-migration Production, le workload AWS, la fondation passive et l'identité SSO
+Avant un GO interne, il reste à fusionner et déployer l'application, terminer le
+canari Gmail corrigé, exécuter les canaris Outlook et iCloud et observer 72 heures.
+Les pièces jointes et webhooks clients peuvent rester fermés pour le pilote
+transactionnel interne, mais ne peuvent être annoncés comme opérationnels avant
+leurs canaris réels respectifs. La migration Production, le workload AWS, la
+fondation passive et l'identité SSO
 non-root sont désormais vérifiés. Stripe n'est pas requis pour ce GO et doit
 rester fermé jusqu'à sa certification séparée.
 
