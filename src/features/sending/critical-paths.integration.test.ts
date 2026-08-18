@@ -320,6 +320,26 @@ function emailRequest(input: {
   });
 }
 
+function rawEmailRequest(input: { idempotencyKey: string }) {
+  return new Request("https://api.mail.yodev.fr/v1/emails", {
+    method: "POST",
+    headers: {
+      "content-type": "application/json",
+      "idempotency-key": input.idempotencyKey,
+    },
+    body: JSON.stringify({
+      category: "receipt",
+      content: {
+        subject: "Your receipt",
+        html: "<p>Your receipt</p>",
+        text: "Your receipt",
+      },
+      from: { email: "sender@example.com" },
+      to: { email: "recipient@example.net" },
+    }),
+  });
+}
+
 beforeEach(async () => {
   dependencies.afterEligibility = undefined;
   dependencies.apiKey = undefined;
@@ -1160,6 +1180,57 @@ describe("transactional email critical paths", () => {
     expect(response.status).toBe(403);
     const rows = await db.select().from(messages).where(eq(messages.workspaceId, first.workspaceId));
     expect(rows).toHaveLength(0);
+  });
+
+  it("requires the deployment gate, hybrid policy and raw scope together", async () => {
+    const context = await seedTransactionalContext();
+    dependencies.apiKey = {
+      mode: "live",
+      scopes: ["emails:send", "emails:send:raw"],
+      workspaceId: context.workspaceId,
+    };
+    await db.update(workspaces).set({ contentPolicy: "hybrid" }).where(eq(
+      workspaces.id,
+      context.workspaceId,
+    ));
+
+    dependencies.enabledFeatures.delete("RAW_EMAIL_ENABLED");
+    const closedGate = await sendEmailRoute(rawEmailRequest({ idempotencyKey: "raw-closed-gate" }));
+    expect(closedGate.status).toBe(403);
+
+    dependencies.enabledFeatures.add("RAW_EMAIL_ENABLED");
+    await db.update(workspaces).set({ contentPolicy: "template_only" }).where(eq(
+      workspaces.id,
+      context.workspaceId,
+    ));
+    const templatesOnly = await sendEmailRoute(rawEmailRequest({ idempotencyKey: "raw-templates-only" }));
+    expect(templatesOnly.status).toBe(403);
+
+    await db.update(workspaces).set({ contentPolicy: "hybrid" }).where(eq(
+      workspaces.id,
+      context.workspaceId,
+    ));
+    dependencies.apiKey = {
+      mode: "live",
+      scopes: ["emails:send"],
+      workspaceId: context.workspaceId,
+    };
+    const missingScope = await sendEmailRoute(rawEmailRequest({ idempotencyKey: "raw-missing-scope" }));
+    expect(missingScope.status).toBe(403);
+
+    dependencies.apiKey = {
+      mode: "live",
+      scopes: ["emails:send", "emails:send:raw"],
+      workspaceId: context.workspaceId,
+    };
+    const allowed = await sendEmailRoute(rawEmailRequest({ idempotencyKey: "raw-allowed" }));
+    const [message] = await db.select().from(messages).where(eq(
+      messages.workspaceId,
+      context.workspaceId,
+    ));
+
+    expect(allowed.status).toBe(202);
+    expect(message).toMatchObject({ contentKind: "raw", status: "queued" });
   });
 
   it("persists and deduplicates a signed Stripe subscription webhook", async () => {
