@@ -38,6 +38,7 @@ export class YodevMailFoundationStack extends Stack {
       removalPolicy: RemovalPolicy.RETAIN,
     });
     const alarmArn = `arn:${this.partition}:cloudwatch:${this.region}:${this.account}:alarm:*`;
+    const cloudTrailLogGroupArn = `arn:${this.partition}:logs:${this.region}:${this.account}:log-group:/aws/cloudtrail/yodev-mail-management`;
     const operationsTopicArn = `arn:${this.partition}:sns:${this.region}:${this.account}:yodev-mail-operations-alerts`;
     const trailArn = `arn:${this.partition}:cloudtrail:${this.region}:${this.account}:trail/yodev-mail-management`;
     const cloudTrailPrincipal = new ServicePrincipal("cloudtrail.amazonaws.com");
@@ -57,6 +58,22 @@ export class YodevMailFoundationStack extends Stack {
       actions: ["kms:DescribeKey"],
       conditions: { StringEquals: { "aws:SourceArn": trailArn } },
       principals: [cloudTrailPrincipal],
+      resources: ["*"],
+    }));
+    auditKey.addToResourcePolicy(new PolicyStatement({
+      actions: [
+        "kms:Decrypt",
+        "kms:Describe*",
+        "kms:Encrypt",
+        "kms:GenerateDataKey*",
+        "kms:ReEncrypt*",
+      ],
+      conditions: {
+        ArnEquals: {
+          "kms:EncryptionContext:aws:logs:arn": cloudTrailLogGroupArn,
+        },
+      },
+      principals: [new ServicePrincipal(`logs.${this.region}.${this.urlSuffix}`)],
       resources: ["*"],
     }));
     auditKey.addToResourcePolicy(new PolicyStatement({
@@ -107,6 +124,7 @@ export class YodevMailFoundationStack extends Stack {
       versioned: true,
     });
     const trailLogGroup = new LogGroup(this, "CloudTrailLogGroup", {
+      encryptionKey: auditKey,
       logGroupName: "/aws/cloudtrail/yodev-mail-management",
       removalPolicy: RemovalPolicy.RETAIN,
       retention: RetentionDays.ONE_YEAR,

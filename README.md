@@ -67,13 +67,11 @@ All externally consequential capabilities are fail-closed. New environments star
 Workload stacks are passive unless explicitly activated:
 
 ```bash
-YODEV_MAIL_VERCEL_OIDC_PROVIDER_ARN=arn:aws:iam::274319534967:oidc-provider/oidc.vercel.com/yoanndrxs-projects \
-  YODEV_MAIL_AWS_ACTIVE_ENVIRONMENTS=dev npm run infra:deploy:dev
-YODEV_MAIL_VERCEL_OIDC_PROVIDER_ARN=arn:aws:iam::274319534967:oidc-provider/oidc.vercel.com/yoanndrxs-projects \
-  YODEV_MAIL_AWS_ACTIVE_ENVIRONMENTS=prod npm run infra:deploy:prod
+npm run infra:deploy:dev
+npm run infra:deploy:prod
 ```
 
-Always pass the existing OIDC provider ARN when diffing or deploying. Omitting `YODEV_MAIL_AWS_ACTIVE_ENVIRONMENTS` intentionally synthesizes passive workers and schedules; it must never be used for an active production deployment.
+The infrastructure scripts load the same ignored `.env.local` as the application and database scripts. Before every diff or deployment, keep `YODEV_MAIL_VERCEL_OIDC_PROVIDER_ARN` set to the existing provider and make `YODEV_MAIL_AWS_ACTIVE_ENVIRONMENTS` match every currently active deployed stack (currently `dev,prod`). This also preserves cross-stack exports when deploying the foundation alone. An empty value intentionally synthesizes passive workers and schedules and must never be used for an active production deployment.
 
 `YODEV_MAIL_GUARDDUTY_ENABLED` must match the deployed account state when diffing. Malware Protection is currently active for the `pending/` prefix in production, but the attachment API remains closed until the application path has passed its isolated checksum/MIME/scan/expiry tests.
 

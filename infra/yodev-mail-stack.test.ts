@@ -155,6 +155,11 @@ describe("Mail by Yodev AWS infrastructure", () => {
         }),
       ]),
     });
+    foundation.hasResourceProperties("AWS::Logs::LogGroup", {
+      KmsKeyId: Match.anyValue(),
+      LogGroupName: "/aws/cloudtrail/yodev-mail-management",
+      RetentionInDays: 365,
+    });
     foundation.hasResourceProperties("AWS::CloudWatch::Alarm", {
       ComparisonOperator: "GreaterThanOrEqualToThreshold",
       EvaluationPeriods: 1,
@@ -168,6 +173,24 @@ describe("Mail by Yodev AWS infrastructure", () => {
       KeyPolicy: Match.objectLike({
         Statement: Match.arrayWith([
           Match.objectLike({
+            Action: Match.arrayWith([
+              "kms:Decrypt",
+              "kms:Describe*",
+              "kms:Encrypt",
+              "kms:GenerateDataKey*",
+              "kms:ReEncrypt*",
+            ]),
+            Condition: {
+              ArnEquals: {
+                "kms:EncryptionContext:aws:logs:arn":
+                  Match.objectLike({ "Fn::Join": Match.anyValue() }),
+              },
+            },
+            Principal: {
+              Service: Match.objectLike({ "Fn::Join": Match.anyValue() }),
+            },
+          }),
+          Match.objectLike({
             Action: Match.arrayWith(["kms:Decrypt", "kms:GenerateDataKey*"]),
             Principal: { Service: "cloudwatch.amazonaws.com" },
           }),
@@ -178,6 +201,12 @@ describe("Mail by Yodev AWS infrastructure", () => {
         ]),
       }),
     });
+    const keyPolicy = JSON.stringify(
+      Object.values(foundation.findResources("AWS::KMS::Key"))[0].Properties
+        .KeyPolicy,
+    );
+    expect(keyPolicy).toContain("logs.");
+    expect(keyPolicy).toContain("/aws/cloudtrail/yodev-mail-management");
   });
 
   test("encrypts every queue and keeps standby resources passive", () => {

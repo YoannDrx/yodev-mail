@@ -94,10 +94,12 @@ La CI exécute désormais :
   trouvé aucun drift sur les ressources prises en charge. Les huit files de
   production, dont quatre DLQ, sont vides. Les deux plans GuardDuty Malware
   Protection S3 sont actifs sur `pending/` en développement et production.
-- Le `cdk diff` ne remplace aucune ressource stateful existante. Il ajoute la
-  fondation CloudTrail/KMS/alarme root et resserre les permissions IAM. Cette
-  fondation n'est pas encore déployée et aucun détecteur GuardDuty général n'est
-  actif en `eu-west-3`.
+- La fondation AWS passive est déployée et protégée contre la suppression.
+  CloudTrail multi-région livre sans erreur vers S3 et CloudWatch Logs; le
+  bucket, le groupe de logs et SNS utilisent la clé KMS rotative dédiée. La
+  rétention vaut un an, l'alarme d'usage root est `OK`, l'abonnement SNS est
+  confirmé et les budgets YoDevMail valent 10 USD pour le compte et 5 USD pour
+  GuardDuty. Aucun détecteur GuardDuty général n'est actif en `eu-west-3`.
 - SES est toujours en sandbox (200 messages/jour, 1/s). L'identité
   `mail.yodev.fr` et son MAIL FROM sont vérifiés, mais SES reste volontairement
   désactivé comme transport de production.
@@ -113,10 +115,13 @@ La CI exécute désormais :
   GitHub ne contient aucune variable ni aucun secret de dépôt ou d'environnement.
 - Configuration locale : `.env.local` est l'unique fichier de valeurs, ignoré
   par Git et protégé en mode `0600`. Le modèle versionné `.env.example` contient
-  42 clés documentées par responsabilité. `npm run env:normalize` conserve les
+  43 clés documentées par responsabilité. `npm run env:normalize` conserve les
   valeurs reconnues sans les afficher et retire les clés obsolètes ; le premier
-  passage en a retiré 15 et le second a confirmé son idempotence.
-- Preview : le commit `9c93ce8` est déployé sur une Preview Vercel reliée à une
+  passage en a retiré 15 et les suivants ont confirmé son idempotence. Les
+  commandes CDK chargent désormais ce même fichier et les entrées locales
+  reflètent exactement les stacks actives, GuardDuty, Postmark, le profil SSO et
+  le fournisseur OIDC existant.
+- Preview : le commit `87ccdad` est déployé sur une Preview Vercel reliée à une
   branche Neon dédiée où `0009` est appliquée. Les deux health checks répondent
   HTTP 200 avec `database=ok` et la bonne version. Les variables de base, URL et
   origine Better Auth sont limitées à la branche Git du durcissement.
@@ -145,7 +150,7 @@ La CI exécute désormais :
 
 ## Validations externes restant à exécuter
 
-- Aucun déploiement production n'a été déclenché.
+- Aucun déploiement du workload applicatif de production n'a été déclenché.
 - Aucun gate live n'a été activé.
 - Aucun bounce/complaint officiel Postmark n'a été provoqué sur cette version.
 - Aucun checkout, paiement, webhook, facture, annulation, portail ou meter event
