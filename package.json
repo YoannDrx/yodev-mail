@@ -15,6 +15,7 @@
     "test:e2e": "playwright test",
     "check": "npm run lint && npm run typecheck && npm run test && npm run build",
     "env:normalize": "node scripts/normalize-env-local.mjs",
+    "internal-go:audit": "dotenv -e .env.local -- tsx scripts/audit-internal-go.ts",
     "db:generate": "drizzle-kit generate",
     "db:migrate": "dotenv -e .env.local -- drizzle-kit migrate",
     "db:preflight:0009": "dotenv -e .env.local -- tsx scripts/preflight-migration-0009.ts",
