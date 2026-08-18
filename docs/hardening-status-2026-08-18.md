@@ -2,8 +2,8 @@
 
 ## Décision
 
-YoDevMail est conservé et consolidé sur la branche locale
-`codex/production-completion`. Ce document distingue les preuves reproductibles
+YoDevMail est conservé et consolidé. La branche `codex/production-completion` a
+été fusionnée dans `main` par la PR `#22`. Ce document distingue les preuves reproductibles
 obtenues localement des validations qui exigent un environnement externe réel.
 
 Ce travail ne constitue pas encore un GO de production ou un GO commercial.
@@ -46,7 +46,7 @@ les validations externes correspondantes ne sont pas terminées.
 | `npx drizzle-kit check` | Journal et schéma cohérents |
 | `npm run db:preflight:0009` | Aucun doublon ou chevauchement bloquant |
 | `npm audit --audit-level=high` | 0 vulnérabilité connue |
-| Health checks publics | HTTP 200, base `ok`, version déployée `639b79b` |
+| Health checks publics | HTTP 200, base `ok`, version déployée `3f64987` |
 
 La suite PostgreSQL couvre notamment l'acceptation exactement une fois, les
 résultats fournisseur ambigus, les retries transitoires, le rollback d'un
@@ -89,9 +89,8 @@ La CI exécute désormais :
 
 ## Preuves externes obtenues le 18 août 2026
 
-- GitHub : la branche `codex/yodev-mail-hardening` est publiée dans la draft PR
-  `#19`. Les checks qualité, intégration PostgreSQL, E2E, GitGuardian et Vercel
-  sont verts sur la tête de branche publiée.
+- GitHub : la PR `#22` a été fusionnée dans `main`. Les checks qualité,
+  intégration PostgreSQL, E2E, GitGuardian et Vercel étaient tous verts.
 - Neon : une branche de répétition a été créée depuis une branche de sauvegarde,
   `0009` a été appliquée en transaction, puis le schéma et les données ont été
   comparés. La restauration depuis le parent a réussi en 864 ms, sans écart de
@@ -124,8 +123,8 @@ La CI exécute désormais :
   désactivés. DKIM et Return-Path sont vérifiés. Le webhook HTTPS est authentifié,
   écoute delivery/bounce/complaint, exclut le contenu et désactive open/click.
   La base contient deux messages live déjà arrivés à l'état `delivered`.
-- Vercel : la production est saine mais sert encore le commit `639b79b`, pas ce
-  durcissement. Les variables historiques de campagnes/newsletters, anciens
+- Vercel : la production sert le merge commit `3f64987`; les deux health checks
+  répondent HTTP 200 avec `database=ok`. Les variables historiques de campagnes/newsletters, anciens
   tarifs Stripe, files d'import/campagne, désinscription et alias Neon non lus
   ont été retirées de Production, Preview et Development. Les deux seules
   connexions Neon conservées sont `DATABASE_URL` et `DATABASE_URL_UNPOOLED`.
@@ -167,11 +166,13 @@ La CI exécute désormais :
 
 ## Validations externes restant à exécuter
 
-- L'application Vercel Production sert encore le commit `639b79b`, pas la branche
-  de complétion et son écran de gestion des membres.
-- `LIVE_EMAIL_ACCEPTANCE_ENABLED=true` a été ouvert pour le workspace interne.
-  Un canari Postmark réel vers Gmail a atteint `delivered` avec exactement un
-  ledger, une tentative et aucun outbox en attente. Sa clé éphémère a été révoquée.
+- L'application et les quatre Lambda modifiées sont déployées. Le stack est
+  `UPDATE_COMPLETE`, les fonctions sont `Active/Successful` et les huit files et
+  DLQ sont vides. L'audit post-déploiement est `BASELINE: READY`.
+- `LIVE_EMAIL_ACCEPTANCE_ENABLED` a été refermé avant le déploiement coordonné.
+  Le canari Postmark réalisé auparavant vers Gmail a atteint `delivered` avec
+  exactement un ledger, une tentative et aucun outbox en attente. Sa clé
+  éphémère a été révoquée.
 - Le template de production a ensuite été corrigé pour utiliser la marque
   `Mail by Yodev`; un second canari reste requis pour prouver ce rendu corrigé.
 - `ATTACHMENTS_ENABLED` a été refermé et redéployé après l'audit. Le parcours réel
@@ -198,13 +199,15 @@ est activée et sa première session SSO est réussie. `sts get-caller-identity`
 confirme une session `AWSReservedSSO_YoDevMailAdministrator`, non-root, dans le
 compte attendu.
 
-Les health checks publics servent toujours la version `639b79b`; ils prouvent
-la disponibilité de l'ancienne version déployée, pas celle de la branche locale.
+Les health checks publics servent la version `3f64987`. Le smoke test authentifié
+de `/dashboard/membres` confirme un propriétaire, zéro invitation et la limite de
+trois sièges. Le nom du workspace a été aligné transactionnellement sur
+`Mail by Yodev` avec une trace d'audit.
 
 ## Prochaine barrière de décision
 
-Avant un GO interne, il reste à fusionner et déployer l'application, terminer le
-canari Gmail corrigé, exécuter les canaris Outlook et iCloud et observer 72 heures.
+Avant un GO interne, il reste à terminer le canari Gmail corrigé, exécuter les
+canaris Outlook et iCloud et observer 72 heures.
 Les pièces jointes et webhooks clients peuvent rester fermés pour le pilote
 transactionnel interne, mais ne peuvent être annoncés comme opérationnels avant
 leurs canaris réels respectifs. La migration Production, le workload AWS, la

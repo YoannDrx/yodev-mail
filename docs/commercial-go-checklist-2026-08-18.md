@@ -8,12 +8,12 @@ doit jamais être interprété comme une fonctionnalité certifiée.
 
 | Fonction | Preuve automatisée | Preuve externe | Gate production | Décision |
 |---|---|---|---|---|
-| Authentification Better Auth, organisations et isolation A/B | Verte | Deux propriétaires et deux workspaces en Preview | active | prête pour déploiement de la branche |
-| Membres, invitations et limite de trois sièges | Concurrence PostgreSQL verte | aucune sur la nouvelle UI | n/a | déployer puis smoke test propriétaire/membre |
+| Authentification Better Auth, organisations et isolation A/B | Verte | Deux propriétaires et deux workspaces en Preview | active | déployée |
+| Membres, invitations et limite de trois sièges | Concurrence PostgreSQL verte | UI Production : un propriétaire, zéro invitation, limite trois | n/a | déployée, invitation réelle encore à exercer |
 | Domaines, DKIM, Return-Path et DMARC | Verte | `yodev.fr` vérifié dans Postmark | active pour l'interne | prête pour l'interne |
 | Profils et templates approuvés | Verte | template interne approuvé | active | second canari de marque requis |
 | Clés test/live, scopes et révocation | Verte | clé live canari révoquée | active | prête pour l'interne |
-| API transactionnelle, idempotence et quota | Concurrence PostgreSQL verte | Gmail livré, ledger unique | `LIVE_EMAIL_ACCEPTANCE_ENABLED=true` | Outlook, iCloud et 72 h requis |
+| API transactionnelle, idempotence et quota | Concurrence PostgreSQL verte | Gmail livré, ledger unique | fermée après déploiement | second Gmail, Outlook, iCloud et 72 h requis |
 | Événements fournisseur, suppressions et auto-pause | Concurrence et désordre verts | delivery Postmark réelle | active | bounce et complaint réels requis |
 | Webhooks clients signés et retries | SSRF, signature, claim périmé et huit retries verts | aucun endpoint contrôlé réel | fermée | canari succès, échec et terminal requis |
 | Pièces jointes | Scan, course malware, checksum, MIME, envoi et purge verts | GuardDuty/S3 actifs, aucun upload réel | fermée | canari upload, scan, Gmail et purge requis |
@@ -28,8 +28,8 @@ doit jamais être interprété comme une fonctionnalité certifiée.
 
 ## GO interne
 
-Le GO interne n'est accordé que lorsque la branche finale est fusionnée et
-déployée, que Gmail, Outlook et iCloud ont chacun reçu le même canari de marque,
+Le GO interne n'est accordé que lorsque Gmail, Outlook et iCloud ont chacun reçu
+le même canari de marque,
 que les files et DLQ restent vides, qu'aucun état `unknown` ou réservation
 incohérente n'apparaît et que l'observation de 72 heures est terminée.
 
