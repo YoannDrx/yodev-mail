@@ -1,6 +1,6 @@
 import { createHash } from "node:crypto";
 import { GetObjectCommand } from "@aws-sdk/client-s3";
-import { and, eq } from "drizzle-orm";
+import { and, eq, inArray } from "drizzle-orm";
 import { requireDb } from "@/db/runtime";
 import { attachments } from "@/db/schema";
 import { awsClients } from "@/lib/aws";
@@ -42,13 +42,19 @@ export async function handler(event: MalwareScanEvent) {
   if (scanResult !== "NO_THREATS_FOUND") {
     emitOperationalMetric("AttachmentScanRejected");
     await db.update(attachments).set({ status: "rejected", scanResult, updatedAt: new Date() }).where(and(
-      eq(attachments.id, attachment.id), eq(attachments.workspaceId, attachment.workspaceId),
+      eq(attachments.id, attachment.id),
+      eq(attachments.workspaceId, attachment.workspaceId),
+      inArray(attachments.status, ["pending_upload", "scanning", "clean"]),
     ));
     return;
   }
-  await db.update(attachments).set({ status: "scanning", scanResult, updatedAt: new Date() }).where(and(
-    eq(attachments.id, attachment.id), eq(attachments.workspaceId, attachment.workspaceId),
-  ));
+  if (attachment.status === "clean") return;
+  const [claimed] = await db.update(attachments).set({ status: "scanning", scanResult, updatedAt: new Date() }).where(and(
+    eq(attachments.id, attachment.id),
+    eq(attachments.workspaceId, attachment.workspaceId),
+    inArray(attachments.status, ["pending_upload", "scanning"]),
+  )).returning({ id: attachments.id });
+  if (!claimed) return;
   const bucket = process.env.ATTACHMENTS_BUCKET_NAME;
   if (!bucket) throw new Error("Attachment bucket is not configured");
   const { s3 } = await awsClients();
@@ -67,5 +73,10 @@ export async function handler(event: MalwareScanEvent) {
     status: clean ? "clean" : "rejected",
     verifiedSha256,
     updatedAt: new Date(),
-  }).where(and(eq(attachments.id, attachment.id), eq(attachments.workspaceId, attachment.workspaceId)));
+  }).where(and(
+    eq(attachments.id, attachment.id),
+    eq(attachments.workspaceId, attachment.workspaceId),
+    eq(attachments.status, "scanning"),
+    eq(attachments.scanResult, "NO_THREATS_FOUND"),
+  ));
 }

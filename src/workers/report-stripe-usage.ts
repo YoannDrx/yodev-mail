@@ -50,12 +50,13 @@ export async function handler() {
   let reported = 0;
   let unknown = stale.length + tooOld.length;
   for (const candidate of candidates) {
+    const claimTime = new Date();
     const [claimed] = await db.update(stripeUsageReportJobs).set({
       status: "processing",
-      claimedAt: new Date(),
+      claimedAt: claimTime,
       attemptCount: sql`${stripeUsageReportJobs.attemptCount} + 1`,
       lastErrorCode: null,
-      updatedAt: new Date(),
+      updatedAt: claimTime,
     }).where(and(
       eq(stripeUsageReportJobs.id, candidate.id),
       eq(stripeUsageReportJobs.workspaceId, candidate.workspaceId),
@@ -77,7 +78,7 @@ export async function handler() {
       submitted = true;
       const month = candidate.acceptedAt.toISOString().slice(0, 7);
       await db.transaction(async (tx) => {
-        await tx.update(stripeUsageReportJobs).set({
+        const [finalized] = await tx.update(stripeUsageReportJobs).set({
           status: "reported",
           claimedAt: null,
           reportedAt: new Date(),
@@ -86,7 +87,9 @@ export async function handler() {
           eq(stripeUsageReportJobs.id, candidate.id),
           eq(stripeUsageReportJobs.workspaceId, candidate.workspaceId),
           eq(stripeUsageReportJobs.status, "processing"),
-        ));
+          eq(stripeUsageReportJobs.claimedAt, claimTime),
+        )).returning({ id: stripeUsageReportJobs.id });
+        if (!finalized) throw new Error("stripe_usage_claim_lost");
         await tx.update(usageMonths).set({
           stripeReportedEmails: sql`${usageMonths.stripeReportedEmails} + 1`,
           updatedAt: new Date(),
@@ -113,6 +116,7 @@ export async function handler() {
         eq(stripeUsageReportJobs.id, candidate.id),
         eq(stripeUsageReportJobs.workspaceId, candidate.workspaceId),
         eq(stripeUsageReportJobs.status, "processing"),
+        eq(stripeUsageReportJobs.claimedAt, claimTime),
       ));
     }
   }

@@ -31,12 +31,13 @@ async function recordExpectedFailure(input: {
   attempt: number;
   errorCode: string;
   statusCode?: number;
+  claimedAt: Date;
   now: Date;
 }) {
   const db = requireDb();
   const nextAttemptAt = nextWebhookAttemptAt(input.attempt, input.now);
-  await db.transaction(async (tx) => {
-    await tx.update(webhookDeliveries).set({
+  const terminal = await db.transaction(async (tx) => {
+    const [updated] = await tx.update(webhookDeliveries).set({
       attempt: input.attempt,
       claimedAt: null,
       lastError: input.errorCode,
@@ -44,7 +45,14 @@ async function recordExpectedFailure(input: {
       statusCode: input.statusCode,
       terminalAt: nextAttemptAt ? null : input.now,
       updatedAt: input.now,
-    }).where(and(eq(webhookDeliveries.id, input.deliveryId), eq(webhookDeliveries.workspaceId, input.workspaceId)));
+    }).where(and(
+      eq(webhookDeliveries.id, input.deliveryId),
+      eq(webhookDeliveries.workspaceId, input.workspaceId),
+      eq(webhookDeliveries.claimedAt, input.claimedAt),
+      isNull(webhookDeliveries.deliveredAt),
+      isNull(webhookDeliveries.terminalAt),
+    )).returning({ id: webhookDeliveries.id });
+    if (!updated) return false;
     if (nextAttemptAt) {
       await tx.insert(outboxJobs).values({
         workspaceId: input.workspaceId,
@@ -53,8 +61,9 @@ async function recordExpectedFailure(input: {
         kind: "webhook",
       });
     }
+    return !nextAttemptAt;
   });
-  if (!nextAttemptAt) emitOperationalMetric("CustomerWebhookTerminalFailure");
+  if (terminal) emitOperationalMetric("CustomerWebhookTerminalFailure");
 }
 
 export async function deliverWebhook(deliveryId: string, now = new Date()) {
@@ -98,7 +107,7 @@ export async function deliverWebhook(deliveryId: string, now = new Date()) {
   try {
     safeUrl = await validateWebhookUrl(row.endpoint.url);
   } catch {
-    await recordExpectedFailure({ deliveryId, workspaceId: row.delivery.workspaceId, attempt, errorCode: "webhook_url_rejected", now });
+    await recordExpectedFailure({ deliveryId, workspaceId: row.delivery.workspaceId, attempt, errorCode: "webhook_url_rejected", claimedAt: now, now });
     return;
   }
 
@@ -116,7 +125,7 @@ export async function deliverWebhook(deliveryId: string, now = new Date()) {
       timeoutMs: 10_000,
     });
     if (statusCode < 200 || statusCode >= 300) {
-      await recordExpectedFailure({ deliveryId, workspaceId: row.delivery.workspaceId, attempt, errorCode: `http_${statusCode}`, statusCode, now });
+      await recordExpectedFailure({ deliveryId, workspaceId: row.delivery.workspaceId, attempt, errorCode: `http_${statusCode}`, statusCode, claimedAt: now, now });
       return;
     }
     await db.update(webhookDeliveries).set({
@@ -127,8 +136,14 @@ export async function deliverWebhook(deliveryId: string, now = new Date()) {
       nextAttemptAt: null,
       statusCode,
       updatedAt: now,
-    }).where(and(eq(webhookDeliveries.id, deliveryId), eq(webhookDeliveries.workspaceId, row.delivery.workspaceId)));
+    }).where(and(
+      eq(webhookDeliveries.id, deliveryId),
+      eq(webhookDeliveries.workspaceId, row.delivery.workspaceId),
+      eq(webhookDeliveries.claimedAt, now),
+      isNull(webhookDeliveries.deliveredAt),
+      isNull(webhookDeliveries.terminalAt),
+    ));
   } catch {
-    await recordExpectedFailure({ deliveryId, workspaceId: row.delivery.workspaceId, attempt, errorCode: "network_error", now });
+    await recordExpectedFailure({ deliveryId, workspaceId: row.delivery.workspaceId, attempt, errorCode: "network_error", claimedAt: now, now });
   }
 }

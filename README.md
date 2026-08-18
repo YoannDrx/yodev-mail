@@ -112,4 +112,5 @@ The foundation stack creates an encrypted multi-region management CloudTrail, on
 
 Better Auth uses a distinct `BETTER_AUTH_SECRET` and Google OAuth client in every environment. Public organization creation is disabled; the first organization is rebound to the existing workspace only for `AUTH_BOOTSTRAP_EMAIL`. Email/password stays disabled until the Postmark system Server is approved and configured.
 
-See [architecture](docs/architecture.md) and the [production runbook](docs/production-runbook.md).
+See [architecture](docs/architecture.md), the [production runbook](docs/production-runbook.md)
+and the dated [production/commercial GO checklist](docs/commercial-go-checklist-2026-08-18.md).

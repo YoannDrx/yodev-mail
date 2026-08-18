@@ -39,6 +39,27 @@ export function assertPostmarkServerDeliveryType(server: PostmarkServer, environ
   }
 }
 
+export function normalizePostmarkWebhookBaseUrl(value: string | undefined) {
+  if (!value) throw new Error("POSTMARK_WEBHOOK_BASE_URL is required before provisioning Postmark.");
+  let url: URL;
+  try {
+    url = new URL(value);
+  } catch {
+    throw new Error("POSTMARK_WEBHOOK_BASE_URL must be a valid HTTPS origin.");
+  }
+  if (
+    url.protocol !== "https:"
+    || url.username
+    || url.password
+    || url.search
+    || url.hash
+    || (url.pathname !== "/" && url.pathname !== "")
+  ) {
+    throw new Error("POSTMARK_WEBHOOK_BASE_URL must be a valid HTTPS origin.");
+  }
+  return url.origin;
+}
+
 export async function provisionPostmarkDomain(input: {
   environment: "dev" | "prod";
   workspaceId: string;
@@ -47,6 +68,11 @@ export async function provisionPostmarkDomain(input: {
   domain: string;
   existingAccount?: { externalAccountId: string; credentialParameterName: string };
 }) {
+  const webhookBaseUrl = normalizePostmarkWebhookBaseUrl(process.env.POSTMARK_WEBHOOK_BASE_URL);
+  const keyId = process.env.PROVIDER_CREDENTIALS_KMS_KEY_ARN;
+  if (!input.existingAccount && !keyId) {
+    throw new Error("PROVIDER_CREDENTIALS_KMS_KEY_ARN is required before provisioning Postmark.");
+  }
   const accountParameter = process.env.POSTMARK_ACCOUNT_TOKEN_PARAMETER ?? `/yodev-mail-${input.environment}/providers/postmark/account-token`;
   const accountToken = await getSecureParameter(accountParameter);
   const serverName = `Mail by Yodev · ${input.workspaceName} · ${input.environment.toUpperCase()}`;
@@ -85,15 +111,10 @@ export async function provisionPostmarkDomain(input: {
     ? await getSecureParameter(webhookParameterName)
     : randomBytes(32).toString("base64url");
   const { ssm } = await awsClients();
-  const keyId = process.env.PROVIDER_CREDENTIALS_KMS_KEY_ARN;
   await Promise.all([
     input.existingAccount ? Promise.resolve() : ssm.send(new PutParameterCommand({ KeyId: keyId, Name: `${credentialPrefix}/server-token`, Type: "SecureString", Value: serverToken, Overwrite: true })),
     input.existingAccount ? Promise.resolve() : ssm.send(new PutParameterCommand({ KeyId: keyId, Name: webhookParameterName, Type: "SecureString", Value: webhookPassword, Overwrite: true })),
   ]);
-  const webhookBaseUrl = process.env.POSTMARK_WEBHOOK_BASE_URL?.replace(/\/$/, "");
-  if (!webhookBaseUrl) {
-    throw new Error("POSTMARK_WEBHOOK_BASE_URL is required before provisioning Postmark.");
-  }
   const webhookUrl = `${webhookBaseUrl}/api/providers/postmark/${input.bindingId}`;
   const existingWebhooks = await fetch("https://api.postmarkapp.com/webhooks?MessageStream=outbound", {
     headers: { Accept: "application/json", "X-Postmark-Server-Token": serverToken },
