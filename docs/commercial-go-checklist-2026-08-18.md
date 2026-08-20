@@ -12,7 +12,7 @@ doit jamais être interprété comme une fonctionnalité certifiée.
 | Membres, invitations et limite de trois sièges | Concurrence PostgreSQL verte | UI Production : un propriétaire, zéro invitation, limite trois | n/a | déployée, invitation réelle encore à exercer |
 | Domaines, DKIM, Return-Path et DMARC | Verte | `yodev.fr` vérifié dans Postmark | active pour l'interne | prête pour l'interne |
 | Profils et templates approuvés | Verte | template interne approuvé | active | second canari de marque requis |
-| Clés test/live, scopes et révocation | Verte | clé live canari révoquée | active | prête pour l'interne |
+| Clés test/live, scopes et révocation | Verte | clé de canari minimale créée; une clé historique Ads by Yodev reste active | active | révoquer la clé historique puis la clé canari après usage |
 | API transactionnelle, idempotence et quota | Concurrence PostgreSQL verte | Gmail livré, ledger unique | fermée après déploiement | second Gmail, Outlook, iCloud et 72 h requis |
 | Événements fournisseur, suppressions et auto-pause | Concurrence et désordre verts | delivery Postmark réelle | active | bounce et complaint réels requis |
 | Webhooks clients signés et retries | SSRF, signature, claim périmé et huit retries verts | aucun endpoint contrôlé réel | fermée | canari succès, échec et terminal requis |
@@ -20,11 +20,13 @@ doit jamais être interprété comme une fonctionnalité certifiée.
 | Stripe Checkout et portail | Catalogue et état webhook partiellement couverts | credentials RoutineKids retirés de Vercel et SSM | fermée | compte YoDevMail dédié et cycle complet requis |
 | Facturation à l'usage | Claim et ambiguïté PostgreSQL verts | aucun meter event YoDevMail réel | fermée | meter, facture et réconciliation requis |
 | Onboarding commercial | Réconciliation propriétaire verte | deux organisations en Preview | fermée | garder fermé jusqu'au GO commercial |
-| AWS SQS/Lambda/EventBridge/KMS/CloudTrail | CDK et tests verts | stacks saines, files et DLQ vides | production active | prête, sous surveillance |
+| AWS SQS/Lambda/EventBridge/KMS/CloudTrail | CDK et tests verts | stacks saines, files et DLQ vides, session root fermée, rôle SSO confirmé, 64 alarmes vertes | production active | prête, sous surveillance |
+| Accès opérateur AWS | n/a | root sans clé et avec MFA; SSO CLI vert; utilisateur IAM administrateur historique encore présent | n/a | valider SSO web puis supprimer l'accès IAM historique |
 | SES | Code sandbox testé partiellement | compte encore sandbox | fermée | hors dépendance de lancement Postmark |
+| Capacité Postmark | n/a | compte approuvé et live, 30/100 emails Developer consommés | envoi disponible | passer au forfait Basic 10 000 avant commercialisation |
 | Restauration Neon | Migrations et préflight verts | restauration mesurée en 864 ms | n/a | refaire après le déploiement final |
 | Pages légales, DPA et sous-traitants | Build et E2E publics verts | contenu publié | active | validation juridique humaine requise |
-| Support et abus | adresses publiées | connecteur Gmail expiré | n/a | réauthentifier et prouver les deux routages |
+| Support et abus | adresses publiées | sondes Gmail envoyées et reçues sur les deux alias | n/a | certifiée |
 
 ## GO interne
 

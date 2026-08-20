@@ -51,7 +51,13 @@ export async function POST(request: Request) {
     ContentLength: parsed.data.sizeBytes,
     ChecksumSHA256: checksum,
   });
-  const uploadUrl = await getSignedUrl(s3, command, { expiresIn: 600 });
+  const uploadUrl = await getSignedUrl(s3, command, {
+    expiresIn: 600,
+    // S3 presigning hoists x-amz-* headers into the query string by default.
+    // Keep the checksum as a signed header because the public response requires
+    // clients to send it; sending both a hoisted value and a header is rejected.
+    unhoistableHeaders: new Set(["x-amz-checksum-sha256"]),
+  });
   await requireDb().insert(attachments).values({
     id,
     workspaceId: key.workspaceId,
