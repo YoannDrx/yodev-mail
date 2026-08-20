@@ -1,16 +1,37 @@
 import Stripe from "stripe";
-import { stripeCatalogManifest } from "../src/features/billing/stripe-catalog";
+import { stripeCatalogManifest, validateStripeCatalog } from "../src/features/billing/stripe-catalog";
+
+const productDefinition = {
+  name: "Mail by Yodev — Accès plateforme",
+  description: "Passerelle API française pour l’envoi, le suivi et la sécurisation d’e-mails transactionnels.",
+  statementDescriptor: "MAIL BY YODEV",
+  url: "https://mail.yodev.fr",
+  marketingFeatures: [
+    "API transactionnelle multi-projet",
+    "Domaines, modèles et événements de livraison",
+    "Quotas, suppressions et isolation par workspace",
+  ],
+} as const;
 
 async function main() {
   const secret = process.env.STRIPE_SECRET_KEY;
-  if (!secret?.startsWith("sk_test_")) throw new Error("stripe:sync only accepts a Stripe test secret key");
+  if (!secret || !/^(?:sk|rk)_test_/.test(secret)) {
+    throw new Error("stripe:sync only accepts a Stripe test secret or restricted key");
+  }
   const stripe = new Stripe(secret);
   const products = await stripe.products.search({ query: "metadata['yodev_product']:'mail'", limit: 1 });
-  const product = products.data[0] ?? await stripe.products.create({
-    name: "Mail by Yodev — Accès plateforme",
-    description: "Passerelle privée d’emails exclusivement transactionnels pour applications vérifiées.",
-    metadata: { yodev_product: "mail" },
-  });
+  const existingProduct = products.data[0];
+  const productInput = {
+    name: productDefinition.name,
+    description: productDefinition.description,
+    statement_descriptor: productDefinition.statementDescriptor,
+    url: productDefinition.url,
+    marketing_features: productDefinition.marketingFeatures.map((name) => ({ name })),
+    metadata: stripeCatalogManifest.productMetadata,
+  } satisfies Stripe.ProductCreateParams;
+  const product = existingProduct
+    ? await stripe.products.update(existingProduct.id, productInput)
+    : await stripe.products.create(productInput);
   const meters = await stripe.billing.meters.list({ limit: 100 });
   const meter = meters.data.find((item) => item.event_name === "yodev_mail_emails_sent") ?? await stripe.billing.meters.create({
     display_name: "Emails transactionnels acceptés",
@@ -42,6 +63,13 @@ async function main() {
     nickname: "Email accepté",
     metadata: { yodev_product: "mail", component: "usage" },
   });
+  const validationErrors = validateStripeCatalog({ platform, usage, expectedLivemode: false });
+  if (validationErrors.length) {
+    throw new Error(`Stripe catalog validation failed: ${validationErrors.join(", ")}`);
+  }
+  if (product.default_price !== platform.id) {
+    await stripe.products.update(product.id, { default_price: platform.id });
+  }
   console.log(`platform=${platform.id} usage=${usage.id} product=${product.id} meter=${meter.id}`);
 }
 
