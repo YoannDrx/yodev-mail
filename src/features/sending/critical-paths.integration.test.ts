@@ -881,7 +881,10 @@ describe("transactional email critical paths", () => {
 
     const [message] = await db.select().from(messages).where(eq(messages.id, messageId));
     const rows = await db.select().from(suppressions).where(eq(suppressions.workspaceId, context.workspaceId));
-    const [usage] = await db.select().from(usageDays).where(eq(usageDays.workspaceId, context.workspaceId));
+    const [usage] = await db.select().from(usageDays).where(and(
+      eq(usageDays.workspaceId, context.workspaceId),
+      eq(usageDays.day, utcDay(deliveredAt)),
+    ));
     expect(duplicate.duplicate).toBe(true);
     expect(message.status).toBe("complained");
     expect(message.deliveredAt).toEqual(deliveredAt);

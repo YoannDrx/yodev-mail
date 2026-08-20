@@ -98,10 +98,10 @@ export async function ingestProviderEvent(event: NormalizedProviderEvent) {
       await tx.insert(usageDays).values({ day: utcDay(event.occurredAt), workspaceId: message.workspaceId, ...metrics }).onConflictDoUpdate({
         target: [usageDays.workspaceId, usageDays.day],
         set: {
-          complaints: metrics.complaints ? sql`${usageDays.complaints} + 1` : usageDays.complaints,
-          deliveredEmails: metrics.deliveredEmails ? sql`${usageDays.deliveredEmails} + 1` : usageDays.deliveredEmails,
-          failedEmails: metrics.failedEmails ? sql`${usageDays.failedEmails} + 1` : usageDays.failedEmails,
-          hardBounces: metrics.hardBounces ? sql`${usageDays.hardBounces} + 1` : usageDays.hardBounces,
+          ...(metrics.complaints ? { complaints: sql`${usageDays.complaints} + 1` } : {}),
+          ...(metrics.deliveredEmails ? { deliveredEmails: sql`${usageDays.deliveredEmails} + 1` } : {}),
+          ...(metrics.failedEmails ? { failedEmails: sql`${usageDays.failedEmails} + 1` } : {}),
+          ...(metrics.hardBounces ? { hardBounces: sql`${usageDays.hardBounces} + 1` } : {}),
           updatedAt: new Date(),
         },
       });
