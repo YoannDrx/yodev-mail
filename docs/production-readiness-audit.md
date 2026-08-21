@@ -1,5 +1,20 @@
 # Audit de préparation à la production
 
+> Addendum du 21 août 2026 : la PR `#26` est fusionnée et la production Vercel
+> sert `4df89d8`. `npm run check` couvre 102 tests, les 5 scénarios Playwright
+> publics sont verts et la CI PostgreSQL 17 est verte. Les stacks
+> `YodevMailFoundation` et `YodevMailProd` sont `IN_SYNC`; le déploiement du code
+> Lambda du 21 août n'a remplacé aucune ressource persistante. Les huit files
+> Production sont vides, aucune alarme applicative n'est en état `ALARM`,
+> `POSTMARK_ENABLED=true`, `SES_ENABLED=false` et
+> `STRIPE_USAGE_REPORTING_ENABLED=false`. SES reste en sandbox avec l'identité
+> `mail.yodev.fr`, DKIM RSA 2048 et `bounce.mail.yodev.fr` vérifiés; aucun tenant
+> ni configuration set client n'est encore provisionné. Un tenant isolé
+> `ym-sandbox-cert` et son configuration set ont toutefois certifié quatre
+> scénarios du simulateur AWS : six événements ont traversé
+> EventBridge → SQS → Lambda, sans DLQ ni alarme. La photographie historique
+> ci-dessous est conservée pour la traçabilité et ne décrit plus l'état courant.
+
 > Ce document conserve les preuves observées lors de l’audit initial. Au 17 août 2026, les remédiations post-audit et la migration `0009_concerned_miracleman.sql` existent uniquement dans le worktree local : elles ne sont ni déployées ni prouvées en production. Les gates de production restent fermés jusqu’aux validations du runbook.
 
 Version du 13 août 2026. Ce document est le registre de décision du lancement interne. Il distingue volontairement le code, les tests, la configuration, le déploiement et la preuve réelle.

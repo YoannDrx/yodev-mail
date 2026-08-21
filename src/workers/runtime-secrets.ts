@@ -4,6 +4,7 @@ import { awsClients } from "@/lib/aws";
 const parameterSuffixes = {
   DATABASE_URL: "database-url",
   STRIPE_SECRET_KEY: "stripe-secret-key",
+  STRIPE_USAGE_SECRET_KEY: "stripe-usage-secret-key",
   WEBHOOK_SIGNING_SECRET: "webhook-signing-secret",
 } as const;
 

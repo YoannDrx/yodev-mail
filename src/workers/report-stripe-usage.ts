@@ -14,8 +14,8 @@ export async function handler() {
   if (!isFeatureEnabled("STRIPE_USAGE_REPORTING_ENABLED")) {
     return { reported: 0, disabled: true, unknown: 0 };
   }
-  await loadRuntimeSecrets(["DATABASE_URL", "STRIPE_SECRET_KEY"]);
-  const secret = process.env.STRIPE_SECRET_KEY;
+  await loadRuntimeSecrets(["DATABASE_URL", "STRIPE_USAGE_SECRET_KEY"]);
+  const secret = process.env.STRIPE_USAGE_SECRET_KEY;
   if (!secret) throw new Error("Stripe usage reporting is not configured");
   const stripe = new Stripe(secret);
   const db = requireDb();

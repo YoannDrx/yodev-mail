@@ -149,7 +149,7 @@ export class YodevMailStack extends Stack {
     const runtimeParameters = {
       DATABASE_URL: secureParameter("DatabaseUrlParameter", "database-url"),
       WEBHOOK_SIGNING_SECRET: secureParameter("WebhookSigningSecretParameter", "webhook-signing-secret"),
-      STRIPE_SECRET_KEY: secureParameter("StripeSecretKeyParameter", "stripe-secret-key"),
+      STRIPE_USAGE_SECRET_KEY: secureParameter("StripeUsageSecretKeyParameter", "stripe-usage-secret-key"),
     };
     const commonEnvironment = {
       ATTACHMENTS_BUCKET_NAME: attachmentBucket.bucketName,
@@ -278,7 +278,7 @@ export class YodevMailStack extends Stack {
         STRIPE_USAGE_REPORTING_ENABLED:
           props.stripeUsageReportingEnabled && !props.standby ? "true" : "false",
       },
-      ["DATABASE_URL", "STRIPE_SECRET_KEY"],
+      ["DATABASE_URL", "STRIPE_USAGE_SECRET_KEY"],
     );
     scheduledWorkerRule("StripeUsageSchedule", Schedule.rate(Duration.hours(1)), stripeUsage);
     const warmup = worker("WarmupProgress", "src/workers/warmup-progress.ts");
