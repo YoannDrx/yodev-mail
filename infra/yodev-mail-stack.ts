@@ -35,6 +35,7 @@ export interface YodevMailStackProps extends StackProps {
   environment: "dev" | "prod";
   malwareProtectionEnabled?: boolean;
   postmarkEnabled?: boolean;
+  sesEnabled?: boolean;
   stripeUsageReportingEnabled?: boolean;
   vercelOidcProvider: IOpenIdConnectProvider;
   vercelTeam: string;
@@ -159,7 +160,7 @@ export class YodevMailStack extends Stack {
       POSTMARK_WEBHOOK_BASE_URL: prod ? "https://mail.yodev.fr" : "",
       PROVIDER_CREDENTIALS_KMS_KEY_ARN: providerCredentialsKey.keyArn,
       RUNTIME_PARAMETER_PREFIX: `/${prefix}/runtime`,
-      SES_ENABLED: prod ? "false" : "true",
+      SES_ENABLED: props.sesEnabled && !props.standby ? "true" : "false",
     };
     const workerFunctions: NodejsFunction[] = [];
     const worker = (

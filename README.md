@@ -96,7 +96,16 @@ The infrastructure scripts load the same ignored `.env.local` as the application
 
 `YODEV_MAIL_STRIPE_USAGE_REPORTING_ENABLED` is the CDK synthesis input for the scheduled AWS usage worker. It sets the Lambda runtime gate `STRIPE_USAGE_REPORTING_ENABLED` and defaults to `false`; enable it only for an active workload after the Stripe meter and reconciliation path are certified.
 
-Production CDK sets `SES_ENABLED=false`. Postmark credentials are stored under:
+`YODEV_MAIL_SES_ENABLED` is the only CDK synthesis input that can set the
+Lambda runtime `SES_ENABLED=true`. It defaults to `false`, and a standby stack
+stays closed even when the input is accidentally enabled. Keep it false outside
+an explicitly approved SES certification window.
+
+`STRIPE_TAX_MODE` defaults to `unconfigured` and blocks Checkout. Set it to
+`franchise_base` only after confirming that no active Stripe Tax registration
+exists and that the business is legally eligible for the franchise en base. Set
+it to `registered` only when an active Stripe Tax registration matches the real
+tax registration. Postmark credentials are stored under:
 
 ```text
 /yodev-mail-prod/providers/postmark/account-token

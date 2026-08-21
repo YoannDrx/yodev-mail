@@ -32,6 +32,9 @@ const schema = z.object({
   STRIPE_PRICE_PLATFORM: z.string().optional(),
   STRIPE_PRICE_USAGE: z.string().optional(),
   STRIPE_METER_EVENT_NAME: z.string().default("yodev_mail_emails_sent"),
+  STRIPE_TAX_MODE: z
+    .enum(["unconfigured", "franchise_base", "registered"])
+    .default("unconfigured"),
   COMMERCIAL_ONBOARDING_ENABLED: z.enum(["true", "false"]).default("false"),
   LIVE_CHECKOUT_ENABLED: z.enum(["true", "false"]).default("false"),
   STRIPE_USAGE_REPORTING_ENABLED: z.enum(["true", "false"]).default("false"),

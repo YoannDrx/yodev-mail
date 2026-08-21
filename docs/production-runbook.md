@@ -8,6 +8,8 @@
 - the Postmark Account Token exists in SSM without appearing in logs;
 - Vercel, Better Auth, Stripe, AWS and DNS inventories are exported without secret values;
 - `SES_ENABLED=false` is present in Vercel Production and the production workload;
+- `YODEV_MAIL_SES_ENABLED=false` is used for ordinary CDK synthesis and deployment;
+- `STRIPE_TAX_MODE=unconfigured` keeps Checkout closed until the tax regime is independently confirmed;
 - `support@yodev.fr` and `abuse@yodev.fr` receive mail;
 - public legal pages contain the final RNE/RCS wording from the official INPI extract.
 - the AWS account has completed the one-time “GuardDuty Malware Protection for S3 only” enrollment before `YODEV_MAIL_GUARDDUTY_ENABLED=true` is used or `AWS_ATTACHMENTS_BUCKET` is exposed to Vercel;
@@ -78,7 +80,26 @@ Record the operator, timestamp, commit, environment, expected evidence and rollb
 
 Checkout Sessions expire after one hour. Closing `LIVE_CHECKOUT_ENABLED` prevents new sessions but does not revoke a URL already issued ; list and expire every pending YoDevMail session in Stripe during an emergency rollback, then verify the corresponding `checkout.session.expired` webhooks before declaring checkout closed.
 
-The required opening order is: commercial onboarding in Preview, live acceptance for internal canaries, Stripe checkout certification, Stripe usage reporting, then commercial onboarding in production. Opening usage requires a CDK deployment synthesized with `YODEV_MAIL_STRIPE_USAGE_REPORTING_ENABLED=true`, which writes `STRIPE_USAGE_REPORTING_ENABLED=true` only into the active usage Lambda; the synthesis input defaults to false and standby remains closed. Attachments are independent and stay closed until GuardDuty is proven. `SES_ENABLED` stays false.
+The required opening order is: commercial onboarding in Preview, live acceptance for internal canaries, Stripe checkout certification, Stripe usage reporting, then commercial onboarding in production. Opening usage requires a CDK deployment synthesized with `YODEV_MAIL_STRIPE_USAGE_REPORTING_ENABLED=true`, which writes `STRIPE_USAGE_REPORTING_ENABLED=true` only into the active usage Lambda; the synthesis input defaults to false and standby remains closed. Attachments are independent and stay closed until GuardDuty is proven. `SES_ENABLED` stays false unless an active certification workload is deliberately synthesized with `YODEV_MAIL_SES_ENABLED=true`.
+
+## Stripe tax regime
+
+Checkout is fail-closed while `STRIPE_TAX_MODE=unconfigured`.
+
+- `franchise_base`: confirm the absence of a voluntary VAT option and threshold
+  overrun with the business tax account or SIE. Stripe must have no active Tax
+  registration. Automatic Tax remains off and the invoice footer must contain
+  the legally applicable franchise wording.
+- `registered`: verify the real VAT registration first, then create the matching
+  Stripe Tax registration. Automatic Tax is enabled only in this mode.
+- Never create a Stripe Tax registration as a substitute for a real tax
+  registration and never rewrite historical invoices when changing mode.
+
+For a future `franchise_base` to `registered` transition, close Checkout, record
+the effective date and jurisdiction, configure and verify the Stripe Tax
+registration, update the invoice footer, set `STRIPE_TAX_MODE=registered`, run
+`npm run stripe:verify`, complete a sandbox invoice and only then reopen
+Checkout. Preserve all earlier invoices unchanged.
 
 ## Backup, recovery and incident objectives
 
