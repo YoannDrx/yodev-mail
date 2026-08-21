@@ -119,12 +119,12 @@ beforeEach(async () => {
   dependencies.createMeterEvent.mockReset();
   dependencies.enabled = true;
   dependencies.loadRuntimeSecrets.mockReset();
-  process.env.STRIPE_SECRET_KEY = "sk_test_integration";
+  process.env.STRIPE_USAGE_SECRET_KEY = "usage-secret-integration";
   process.env.STRIPE_METER_EVENT_NAME = "yodev_mail_emails_sent";
 });
 
 afterAll(async () => {
-  delete process.env.STRIPE_SECRET_KEY;
+  delete process.env.STRIPE_USAGE_SECRET_KEY;
   delete process.env.STRIPE_METER_EVENT_NAME;
   await pool.end();
 });

@@ -17,6 +17,7 @@ afterEach(() => {
   delete process.env.RUNTIME_PARAMETER_PREFIX;
   delete process.env.DATABASE_URL;
   delete process.env.STRIPE_SECRET_KEY;
+  delete process.env.STRIPE_USAGE_SECRET_KEY;
   delete process.env.WEBHOOK_SIGNING_SECRET;
 });
 
@@ -33,6 +34,10 @@ describe("worker runtime parameters", () => {
           Value: "sk_test_example",
         },
         {
+          Name: "/yodev-mail-dev/runtime/stripe-usage-secret-key",
+          Value: "usage-secret-example",
+        },
+        {
           Name: "/yodev-mail-dev/runtime/webhook-signing-secret",
           Value: "webhook-secret",
         },
@@ -40,6 +45,7 @@ describe("worker runtime parameters", () => {
     ).toEqual({
       DATABASE_URL: "postgres://example",
       STRIPE_SECRET_KEY: "sk_test_example",
+      STRIPE_USAGE_SECRET_KEY: "usage-secret-example",
       WEBHOOK_SIGNING_SECRET: "webhook-secret",
     });
   });

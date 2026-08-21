@@ -82,6 +82,13 @@ Checkout Sessions expire after one hour. Closing `LIVE_CHECKOUT_ENABLED` prevent
 
 The required opening order is: commercial onboarding in Preview, live acceptance for internal canaries, Stripe checkout certification, Stripe usage reporting, then commercial onboarding in production. Opening usage requires a CDK deployment synthesized with `YODEV_MAIL_STRIPE_USAGE_REPORTING_ENABLED=true`, which writes `STRIPE_USAGE_REPORTING_ENABLED=true` only into the active usage Lambda; the synthesis input defaults to false and standby remains closed. Attachments are independent and stay closed until GuardDuty is proven. `SES_ENABLED` stays false unless an active certification workload is deliberately synthesized with `YODEV_MAIL_SES_ENABLED=true`.
 
+Checkout and portal use the restricted key exposed to the web application as
+`STRIPE_SECRET_KEY`. Usage reporting uses a different restricted key stored only
+as the encrypted SSM parameter
+`/yodev-mail-{environment}/runtime/stripe-usage-secret-key`; the Lambda loads it
+as `STRIPE_USAGE_SECRET_KEY`. Never grant meter-event write access to the web
+runtime key and never install the usage key in Vercel.
+
 ## Stripe tax regime
 
 Checkout is fail-closed while `STRIPE_TAX_MODE=unconfigured`.

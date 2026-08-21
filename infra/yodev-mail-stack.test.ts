@@ -378,6 +378,19 @@ describe("Mail by Yodev AWS infrastructure", () => {
         }),
       }),
     );
+    const productionFunctions = Object.values(
+      activeProductionWorkload.findResources("AWS::Lambda::Function"),
+    );
+    const stripeUsageFunction = productionFunctions.find((fn) =>
+      fn.Properties.FunctionName === "yodev-mail-prod-stripeusage",
+    );
+    expect(stripeUsageFunction).toBeDefined();
+    expect(JSON.stringify(stripeUsageFunction!.Properties.Environment)).not.toContain(
+      "STRIPE_SECRET_KEY",
+    );
+    const productionTemplate = JSON.stringify(activeProductionWorkload.toJSON());
+    expect(productionTemplate).toContain("runtime/stripe-usage-secret-key");
+    expect(productionTemplate).not.toContain("runtime/stripe-secret-key");
   });
 
   test("creates staged account cost alerts and a single encrypted operations topic", () => {
