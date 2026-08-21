@@ -33,7 +33,7 @@ const pages:Record<string,LegalPage>={
       ["Accès","L’accès est nominatif, sur invitation et après validation du dossier. Le client protège ses clés Yodev et les révoque sans délai en cas de doute."],
       ["Service","Mail by Yodev fournit une API transactionnelle. Le fournisseur de transport est choisi par Yodev et peut évoluer sans modifier le contrat API, sous réserve de la liste des sous-traitants."],
       ["Obligations du client","Le client garantit la licéité du traitement, l’exactitude de son dossier, la relation légitime avec chaque destinataire et le caractère strictement transactionnel des contenus."],
-      ["Prix","La bêta est facturée 29 € HT par mois, plus 0,0025 € HT par email accepté par le service de livraison. Les simulations et rejets antérieurs à l’acceptation ne sont pas facturés."],
+      ["Prix","La bêta est facturée 29 € par mois, plus 0,0025 € par email accepté par le service de livraison. La TVA est appliquée selon le régime fiscal en vigueur au moment de la facturation. Les simulations et rejets antérieurs à l’acceptation ne sont pas facturés."],
       ["Suspension et résiliation","Yodev peut suspendre immédiatement un workspace, domaine, profil, template ou accès en cas de risque, de plainte, d’impayé, d’information inexacte ou de violation de la politique anti-abus."],
       ["Limites techniques","L’idempotence empêche la répétition d’une même requête côté Yodev. Un résultat fournisseur ambigu n’est jamais renvoyé automatiquement ; aucune garantie d’exécution exactement une fois n’est formulée."],
     ],

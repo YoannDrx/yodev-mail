@@ -6,6 +6,7 @@ import { and, desc, eq, isNull } from "drizzle-orm";
 import { requireDb } from "@/db";
 import { auditEvents, stripeCheckoutAttempts, subscriptions } from "@/db/schema";
 import { stripeSecretLivemode, validateStripeCatalog } from "@/features/billing/stripe-catalog";
+import { stripeAutomaticTax, validateStripeTaxConfiguration } from "@/features/billing/stripe-tax";
 import { currentWorkspace } from "@/lib/current-workspace";
 import { env, isFeatureEnabled } from "@/lib/env";
 import { stripe } from "@/lib/stripe";
@@ -24,19 +25,27 @@ export async function checkoutAction() {
   const { workspace, userId } = await currentWorkspace({ admin: true });
   if (workspace.status !== "approved") throw new Error("Le dossier doit être approuvé par Yodev avant la souscription.");
   if (!env.STRIPE_PRICE_PLATFORM || !env.STRIPE_PRICE_USAGE) throw new Error("Le catalogue Stripe privé n’est pas configuré.");
+  if (env.STRIPE_TAX_MODE === "unconfigured") {
+    throw new Error("Le régime fiscal Stripe doit être certifié avant toute souscription.");
+  }
 
   const stripeClient = stripe();
   if (!env.STRIPE_SECRET_KEY) throw new Error("Stripe secret key is not configured.");
   const expectedLivemode = stripeSecretLivemode(env.STRIPE_SECRET_KEY);
-  const [platformPrice, usagePrice] = await Promise.all([
+  const [platformPrice, usagePrice, registrations] = await Promise.all([
     stripeClient.prices.retrieve(env.STRIPE_PRICE_PLATFORM),
     stripeClient.prices.retrieve(env.STRIPE_PRICE_USAGE),
+    stripeClient.tax.registrations.list({ limit: 100, status: "active" }),
   ]);
   const catalogErrors = validateStripeCatalog({
     expectedLivemode,
     platform: platformPrice,
     usage: usagePrice,
   });
+  catalogErrors.push(...validateStripeTaxConfiguration({
+    activeRegistrationCountries: registrations.data.map((registration) => registration.country),
+    mode: env.STRIPE_TAX_MODE,
+  }));
   const meterId = usagePrice.recurring?.meter;
   if (meterId) {
     const meter = await stripeClient.billing.meters.retrieve(meterId);
@@ -93,7 +102,7 @@ export async function checkoutAction() {
 
   const metadata = { plan: "beta", workspaceId: workspace.id, yodev_product: "mail" };
   const session = await stripeClient.checkout.sessions.create({
-    automatic_tax: { enabled: true },
+    ...stripeAutomaticTax(env.STRIPE_TAX_MODE),
     cancel_url: `${env.NEXT_PUBLIC_APP_URL}/dashboard/facturation?checkout=cancelled`,
     client_reference_id: workspace.id,
     consent_collection: { terms_of_service: "required" },

@@ -22,6 +22,7 @@ const activeEnvironments = new Set(
 const malwareProtectionEnabled =
   process.env.YODEV_MAIL_GUARDDUTY_ENABLED === "true";
 const postmarkEnabled = process.env.YODEV_MAIL_POSTMARK_ENABLED === "true";
+const sesEnabled = process.env.YODEV_MAIL_SES_ENABLED === "true";
 const stripeUsageReportingEnabled =
   process.env.YODEV_MAIL_STRIPE_USAGE_REPORTING_ENABLED === "true";
 
@@ -44,6 +45,7 @@ for (const environment of ["dev", "prod"] as const) {
       env: { account, region },
       malwareProtectionEnabled,
       postmarkEnabled,
+      sesEnabled,
       stripeUsageReportingEnabled,
       terminationProtection: environment === "prod",
       vercelOidcProvider: foundation.vercelOidcProvider,

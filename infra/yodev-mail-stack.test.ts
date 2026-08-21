@@ -7,6 +7,7 @@ import { YodevMailStack } from "./yodev-mail-stack";
 let foundation: Template;
 let standbyWorkload: Template;
 let activeProductionWorkload: Template;
+let sesCertificationWorkload: Template;
 
 beforeAll(() => {
   const app = new App();
@@ -20,6 +21,7 @@ beforeAll(() => {
     alertTopic: foundationStack.alertTopic,
     environment: "dev",
     env,
+    sesEnabled: true,
     standby: true,
     vercelOidcProvider: foundationStack.vercelOidcProvider,
     vercelTeam: "yoanndrxs-projects",
@@ -35,9 +37,19 @@ beforeAll(() => {
     vercelOidcProvider: foundationStack.vercelOidcProvider,
     vercelTeam: "yoanndrxs-projects",
   });
+  const sesCertificationStack = new YodevMailStack(app, "SesCertification", {
+    alertTopic: foundationStack.alertTopic,
+    environment: "dev",
+    env,
+    sesEnabled: true,
+    standby: false,
+    vercelOidcProvider: foundationStack.vercelOidcProvider,
+    vercelTeam: "yoanndrxs-projects",
+  });
   foundation = Template.fromStack(foundationStack);
   standbyWorkload = Template.fromStack(workloadStack);
   activeProductionWorkload = Template.fromStack(productionStack);
+  sesCertificationWorkload = Template.fromStack(sesCertificationStack);
 }, 30_000);
 
 describe("Mail by Yodev AWS infrastructure", () => {
@@ -299,6 +311,22 @@ describe("Mail by Yodev AWS infrastructure", () => {
             POSTMARK_ENABLED: "false",
             SES_ENABLED: "false",
           }),
+        }),
+      }),
+    );
+    standbyWorkload.hasResourceProperties(
+      "AWS::Lambda::Function",
+      Match.objectLike({
+        Environment: Match.objectLike({
+          Variables: Match.objectLike({ SES_ENABLED: "false" }),
+        }),
+      }),
+    );
+    sesCertificationWorkload.hasResourceProperties(
+      "AWS::Lambda::Function",
+      Match.objectLike({
+        Environment: Match.objectLike({
+          Variables: Match.objectLike({ SES_ENABLED: "true" }),
         }),
       }),
     );
