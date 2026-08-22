@@ -1,29 +1,7 @@
 import "server-only";
 
 import { getSecureParameter } from "@/workers/runtime-secrets";
-
-type AuthEmailKind =
-  | "email_verification"
-  | "organization_invitation"
-  | "password_reset"
-  | "security_alert";
-
-const subjects: Record<AuthEmailKind, string> = {
-  email_verification: "Vérifiez votre adresse Mail by Yodev",
-  organization_invitation: "Invitation à rejoindre Mail by Yodev",
-  password_reset: "Réinitialisez votre mot de passe Mail by Yodev",
-  security_alert: "Alerte de sécurité Mail by Yodev",
-};
-
-function escapeHtml(value: string) {
-  return value.replace(
-    /[&<>"']/g,
-    (character) =>
-      ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#039;" })[
-        character
-      ]!,
-  );
-}
+import { buildAuthEmailContent, type AuthEmailKind } from "@/i18n/auth-email";
 
 function systemTokenParameter() {
   if (process.env.POSTMARK_SYSTEM_SERVER_TOKEN_PARAMETER) {
@@ -44,9 +22,7 @@ export async function sendAuthEmail(input: {
   }
 
   const token = await getSecureParameter(systemTokenParameter());
-  const subject = subjects[input.kind];
-  const intro = escapeHtml(input.intro);
-  const actionUrl = escapeHtml(input.actionUrl);
+  const content = buildAuthEmailContent(input);
   const response = await fetch("https://api.postmarkapp.com/email", {
     method: "POST",
     headers: {
@@ -57,9 +33,9 @@ export async function sendAuthEmail(input: {
     body: JSON.stringify({
       From: "Mail by Yodev <hello@yodev.fr>",
       To: input.to,
-      Subject: subject,
-      HtmlBody: `<p>${intro}</p><p><a href="${actionUrl}">Continuer dans Mail by Yodev</a></p><p>Ce lien est personnel et temporaire.</p>`,
-      TextBody: `${input.intro}\n\n${input.actionUrl}\n\nCe lien est personnel et temporaire.`,
+      Subject: content.subject,
+      HtmlBody: content.html,
+      TextBody: content.text,
       MessageStream: "outbound",
       TrackOpens: false,
       TrackLinks: "None",

@@ -1,8 +1,10 @@
 import { notFound } from "next/navigation";
 import { PageShell } from "@/components/page-shell";
+import { enLegalPages } from "@/i18n/legal-en";
+import { getLocale } from "@/i18n/server";
 
-type LegalPage={title:string;intro:string;sections:Array<[string,string]>};
-const pages:Record<string,LegalPage>={
+export type LegalPage={title:string;intro:string;sections:Array<[string,string]>};
+const frPages:Record<string,LegalPage>={
   "anti-abus":{
     title:"Politique anti-abus",
     intro:"Mail by Yodev est exclusivement réservé aux messages transactionnels attendus par leur destinataire.",
@@ -88,5 +90,5 @@ const pages:Record<string,LegalPage>={
   },
 };
 
-export function generateStaticParams(){return Object.keys(pages).map((legal)=>({legal}))}
-export default async function Page({params}:{params:Promise<{legal:string}>}){const {legal}=await params;const page=pages[legal];if(!page)notFound();return <PageShell eyebrow="Informations légales" title={page.title} intro={page.intro}><div className="mx-auto grid max-w-3xl gap-8">{page.sections.map(([title,text])=><section key={title}><h2 className="text-xl font-semibold">{title}</h2><p className="mt-3 leading-7 text-muted-foreground">{text}</p></section>)}<p className="text-sm text-muted-foreground">Dernière mise à jour : 17 août 2026.</p></div></PageShell>}
+export function generateStaticParams(){return Object.keys(frPages).map((legal)=>({legal}))}
+export default async function Page({params}:{params:Promise<{legal:string}>}){const [{legal},locale]=await Promise.all([params,getLocale()]);const page=(locale === "fr" ? frPages : enLegalPages)[legal];if(!page)notFound();return <PageShell eyebrow={locale === "fr" ? "Informations légales" : "Legal information"} title={page.title} intro={page.intro}><div className="mx-auto grid max-w-3xl gap-8">{page.sections.map(([title,text])=><section key={title}><h2 className="text-xl font-semibold">{title}</h2><p className="mt-3 leading-7 text-muted-foreground">{text}</p></section>)}<p className="text-sm text-muted-foreground">{locale === "fr" ? "Dernière mise à jour : 17 août 2026." : "Last updated: August 17, 2026."}</p></div></PageShell>}

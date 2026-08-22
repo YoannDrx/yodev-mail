@@ -14,6 +14,20 @@ The public contract never accepts a provider, `cc`, `bcc`, tracking option, camp
 - Stripe Billing
 - Vitest, Playwright and AWS CDK
 
+## Languages and routing
+
+The human interface is available in French and English under explicit `/fr`
+and `/en` prefixes. Requests without a prefix are redirected according to the
+`yodev_mail_locale` cookie, then the browser `Accept-Language` header, with
+French as the fallback. The language selector preserves the current route and
+query parameters, including invitation and password-reset tokens.
+
+Machine contracts are intentionally never localized: `/api`, `/v1`, `/health`
+and `/openapi.json` keep stable URLs and payloads. Public pages publish
+canonical and `hreflang` alternates, and the sitemap contains both locales.
+Authentication system emails include French and English because a recipient's
+language is not persisted before they accept an invitation.
+
 ## Commands
 
 ```bash
