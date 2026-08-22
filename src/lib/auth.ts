@@ -197,7 +197,7 @@ function createAuth() {
         },
         sendInvitationEmail: async ({ email, id, organization: invitedOrganization }) => {
           await sendAuthEmail({
-            actionUrl: `${baseURL}/invitation?id=${encodeURIComponent(id)}`,
+            actionUrl: `${baseURL}/fr/invitation?id=${encodeURIComponent(id)}`,
             intro: `Vous êtes invité à rejoindre ${invitedOrganization.name}.`,
             kind: "organization_invitation",
             to: email,

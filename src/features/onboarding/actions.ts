@@ -2,6 +2,8 @@
 
 import { eq } from "drizzle-orm";
 import { redirect } from "next/navigation";
+import { localizedPath } from "@/i18n/config";
+import { getLocale } from "@/i18n/server";
 import { z } from "zod";
 import { requireDb } from "@/db";
 import {
@@ -93,5 +95,5 @@ export async function completeOnboardingAction(formData: FormData) {
       workspaceId: workspace.id,
     });
   });
-  redirect("/dashboard");
+  redirect(localizedPath(await getLocale(), "/dashboard"));
 }

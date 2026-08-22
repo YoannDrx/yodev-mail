@@ -21,7 +21,7 @@ export const workspaceMemberLimit = planCatalog.beta.members;
 
 function invitationUrl(invitationId: string) {
   const baseUrl = (env.NEXT_PUBLIC_APP_URL || "http://localhost:3000").replace(/\/$/, "");
-  return `${baseUrl}/invitation?id=${encodeURIComponent(invitationId)}`;
+  return `${baseUrl}/fr/invitation?id=${encodeURIComponent(invitationId)}`;
 }
 
 export async function inviteWorkspaceMember(input: {

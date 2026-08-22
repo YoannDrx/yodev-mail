@@ -13,7 +13,7 @@ export default defineConfig({
     trace: "on-first-retry",
   },
   webServer: {
-    command: `env DATABASE_URL= DATABASE_URL_UNPOOLED= BETTER_AUTH_SECRET= BETTER_AUTH_GOOGLE_CLIENT_ID= BETTER_AUTH_GOOGLE_CLIENT_SECRET= npm run dev -- --port ${e2ePort}`,
+    command: `env DATABASE_URL= DATABASE_URL_UNPOOLED= BETTER_AUTH_SECRET= BETTER_AUTH_GOOGLE_CLIENT_ID= BETTER_AUTH_GOOGLE_CLIENT_SECRET= BETTER_AUTH_EMAIL_PASSWORD_ENABLED=true npm run dev -- --port ${e2ePort}`,
     url: e2eBaseUrl,
     reuseExistingServer: !process.env.CI,
   },
