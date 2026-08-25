@@ -43,7 +43,7 @@ export const enLegalPages: Record<string, LegalPage> = {
       ["Publisher", "Mail by Yodev is published under the Yodev trade name by Yoann Andrieux, sole proprietor (EI)."],
       ["Registration and activity", "Yoann Andrieux EI is registered with the French National Business Register (RNE) and the Paris Trade and Companies Register (RCS) under SIREN 803 272 590. SIRET: 803 272 590 00024. Main activity: software programming (NAF/APE 62.01Z)."],
       ["VAT regime", "VAT not applicable under Article 293 B of the French General Tax Code."],
-      ["Business address", "11 rue de la Chine, 75020 Paris, France."],
+      ["Business address", "7 allée des Jonquilles, 95130 Franconville, France."],
       ["Publication director", "Yoann Andrieux."],
       ["Contact", "support@yodev.fr."],
       ["Hosting", "The application is hosted by Vercel Inc., 440 N Barranca Avenue #4133, Covina, CA 91723, United States. The application database is provided by Neon. Other subprocessors are listed on the dedicated page."],

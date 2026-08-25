@@ -47,7 +47,7 @@ const frPages:Record<string,LegalPage>={
       ["Éditeur","Mail by Yodev est édité sous le nom commercial Yodev par Yoann Andrieux, entrepreneur individuel (EI)."],
       ["Immatriculation et activité","Yoann Andrieux EI est immatriculé au Registre national des entreprises (RNE) et au Registre du commerce et des sociétés (RCS) de Paris sous le numéro SIREN 803 272 590. SIRET : 803 272 590 00024. Activité principale : programmation informatique (NAF/APE 62.01Z)."],
       ["Régime de TVA","TVA non applicable, article 293 B du Code général des impôts."],
-      ["Adresse professionnelle","11 rue de la Chine, 75020 Paris, France."],
+      ["Adresse professionnelle","7 allée des Jonquilles, 95130 Franconville, France."],
       ["Directeur de la publication","Yoann Andrieux."],
       ["Contact","support@yodev.fr."],
       ["Hébergement","L’application est hébergée par Vercel Inc., 440 N Barranca Avenue #4133, Covina, CA 91723, États-Unis. La base applicative est fournie par Neon. Les autres sous-traitants sont listés sur la page dédiée."],
@@ -91,4 +91,4 @@ const frPages:Record<string,LegalPage>={
 };
 
 export function generateStaticParams(){return Object.keys(frPages).map((legal)=>({legal}))}
-export default async function Page({params}:{params:Promise<{legal:string}>}){const [{legal},locale]=await Promise.all([params,getLocale()]);const page=(locale === "fr" ? frPages : enLegalPages)[legal];if(!page)notFound();return <PageShell eyebrow={locale === "fr" ? "Informations légales" : "Legal information"} title={page.title} intro={page.intro}><div className="mx-auto grid max-w-3xl gap-8">{page.sections.map(([title,text])=><section key={title}><h2 className="text-xl font-semibold">{title}</h2><p className="mt-3 leading-7 text-muted-foreground">{text}</p></section>)}<p className="text-sm text-muted-foreground">{locale === "fr" ? "Dernière mise à jour : 17 août 2026." : "Last updated: August 17, 2026."}</p></div></PageShell>}
+export default async function Page({params}:{params:Promise<{legal:string}>}){const [{legal},locale]=await Promise.all([params,getLocale()]);const page=(locale === "fr" ? frPages : enLegalPages)[legal];if(!page)notFound();return <PageShell eyebrow={locale === "fr" ? "Informations légales" : "Legal information"} title={page.title} intro={page.intro}><div className="mx-auto grid max-w-3xl gap-8">{page.sections.map(([title,text])=><section key={title}><h2 className="text-xl font-semibold">{title}</h2><p className="mt-3 leading-7 text-muted-foreground">{text}</p></section>)}<p className="text-sm text-muted-foreground">{locale === "fr" ? "Dernière mise à jour : 25 août 2026." : "Last updated: August 25, 2026."}</p></div></PageShell>}
