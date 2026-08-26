@@ -1011,7 +1011,7 @@ describe("transactional email critical paths", () => {
       messageId,
       workspaceId: context.workspaceId,
       type: "complained" as const,
-      occurredAt: new Date("2026-08-18T12:00:00.000Z"),
+      occurredAt: new Date(),
     };
 
     const first = await ingestProviderEvent(event);
