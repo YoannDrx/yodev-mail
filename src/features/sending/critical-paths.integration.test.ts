@@ -997,6 +997,48 @@ describe("transactional email critical paths", () => {
     expect(workspace.status).toBe("approved");
   });
 
+  it("auto-pauses and audits a workspace exactly once after a complaint", async () => {
+    const context = await seedTransactionalContext();
+    const messageId = await seedQueuedMessage(context);
+    await db.update(messages).set({
+      status: "sent",
+      providerMessageId: "postmark-complaint-pause",
+    }).where(eq(messages.id, messageId));
+    const event = {
+      provider: "postmark" as const,
+      externalEventId: "complaint-auto-pause",
+      providerMessageId: "postmark-complaint-pause",
+      messageId,
+      workspaceId: context.workspaceId,
+      type: "complained" as const,
+      occurredAt: new Date(),
+    };
+
+    const first = await ingestProviderEvent(event);
+    const duplicate = await ingestProviderEvent(event);
+
+    const [workspace] = await db.select().from(workspaces).where(eq(
+      workspaces.id,
+      context.workspaceId,
+    ));
+    const audits = await db.select().from(auditEvents).where(and(
+      eq(auditEvents.workspaceId, context.workspaceId),
+      eq(auditEvents.action, "workspace.auto_paused"),
+    ));
+    expect(first).toEqual({ skipped: false, duplicate: false });
+    expect(duplicate).toEqual({ skipped: false, duplicate: true });
+    expect(workspace).toMatchObject({
+      status: "paused",
+      pauseReason: "reputation",
+    });
+    expect(audits).toHaveLength(1);
+    expect(audits[0].metadata).toMatchObject({
+      complaints: 1,
+      reason: "reputation",
+      windowDays: 7,
+    });
+  });
+
   it("reconciles an accepted Better Auth owner exactly once under concurrency", async () => {
     const { invitationId, organizationId, userId, workspaceId } =
       await seedAcceptedOwnerInvitation();
