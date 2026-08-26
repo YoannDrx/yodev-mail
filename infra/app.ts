@@ -8,6 +8,10 @@ const region = "eu-west-3";
 const account = process.env.CDK_DEFAULT_ACCOUNT;
 const vercelTeam = String(app.node.tryGetContext("vercelTeam") ?? "yoanndrxs-projects");
 const alertEmail = process.env.YODEV_MAIL_ALERT_EMAIL;
+const budgetAlertEmails = (process.env.YODEV_MAIL_BUDGET_ALERT_EMAILS ?? "")
+  .split(",")
+  .map((email) => email.trim())
+  .filter(Boolean);
 const existingVercelOidcProviderArn =
   process.env.YODEV_MAIL_VERCEL_OIDC_PROVIDER_ARN ??
   (account
@@ -28,6 +32,7 @@ const stripeUsageReportingEnabled =
 
 const foundation = new YodevMailFoundationStack(app, "YodevMailFoundation", {
   alertEmail,
+  budgetAlertEmails,
   env: { account, region },
   existingVercelOidcProviderArn,
   guardDutyBudgetEmail: "hello@yodev.fr",

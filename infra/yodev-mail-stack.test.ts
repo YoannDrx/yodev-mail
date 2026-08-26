@@ -15,6 +15,7 @@ beforeAll(() => {
   const foundationStack = new YodevMailFoundationStack(app, "Foundation", {
     alertEmail: "alerts@example.com",
     env,
+    guardDutyBudgetEmail: "hello@yodev.fr",
     vercelTeam: "yoanndrxs-projects",
   });
   const workloadStack = new YodevMailStack(app, "Workload", {
@@ -172,6 +173,20 @@ describe("Mail by Yodev AWS infrastructure", () => {
       LogGroupName: "/aws/cloudtrail/yodev-mail-management",
       RetentionInDays: 365,
     });
+    foundation.hasResourceProperties("AWS::IAM::Policy", {
+      PolicyDocument: Match.objectLike({
+        Statement: Match.arrayWith([
+          Match.objectLike({
+            Action: Match.arrayWith([
+              "kms:DescribeKey",
+              "kms:Encrypt",
+              "kms:GenerateDataKey*",
+            ]),
+            Effect: "Allow",
+          }),
+        ]),
+      }),
+    });
     foundation.hasResourceProperties("AWS::CloudWatch::Alarm", {
       ComparisonOperator: "GreaterThanOrEqualToThreshold",
       EvaluationPeriods: 1,
@@ -219,6 +234,44 @@ describe("Mail by Yodev AWS infrastructure", () => {
     );
     expect(keyPolicy).toContain("logs.");
     expect(keyPolicy).toContain("/aws/cloudtrail/yodev-mail-management");
+  });
+
+  test("alerts both operations addresses before and at the account budget limit", () => {
+    foundation.hasResourceProperties("AWS::Budgets::Budget", {
+      Budget: Match.objectLike({
+        BudgetLimit: { Amount: 10, Unit: "USD" },
+        BudgetName: "yodev-mail-account-monthly",
+        BudgetType: "COST",
+        TimeUnit: "MONTHLY",
+      }),
+      NotificationsWithSubscribers: Match.arrayWith([
+        Match.objectLike({
+          Notification: Match.objectLike({
+            NotificationType: "ACTUAL",
+            Threshold: 50,
+            ThresholdType: "PERCENTAGE",
+          }),
+          Subscribers: Match.arrayWith([
+            { Address: "alerts@example.com", SubscriptionType: "EMAIL" },
+            { Address: "hello@yodev.fr", SubscriptionType: "EMAIL" },
+          ]),
+        }),
+        Match.objectLike({
+          Notification: Match.objectLike({
+            NotificationType: "FORECASTED",
+            Threshold: 80,
+            ThresholdType: "PERCENTAGE",
+          }),
+        }),
+        Match.objectLike({
+          Notification: Match.objectLike({
+            NotificationType: "ACTUAL",
+            Threshold: 100,
+            ThresholdType: "PERCENTAGE",
+          }),
+        }),
+      ]),
+    });
   });
 
   test("encrypts every queue and keeps standby resources passive", () => {
@@ -393,8 +446,8 @@ describe("Mail by Yodev AWS infrastructure", () => {
     expect(productionTemplate).not.toContain("runtime/stripe-secret-key");
   });
 
-  test("creates staged account cost alerts and a single encrypted operations topic", () => {
-    foundation.resourceCountIs("AWS::Budgets::Budget", 1);
+  test("creates staged account and GuardDuty cost alerts with one encrypted operations topic", () => {
+    foundation.resourceCountIs("AWS::Budgets::Budget", 2);
     foundation.resourceCountIs("AWS::SNS::Topic", 1);
     foundation.hasResourceProperties("AWS::SNS::Topic", {
       KmsMasterKeyId: Match.anyValue(),

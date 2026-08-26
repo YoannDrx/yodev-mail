@@ -6,6 +6,7 @@ import { ReadWriteType, Trail } from "aws-cdk-lib/aws-cloudtrail";
 import {
   OpenIdConnectProvider,
   PolicyStatement,
+  Role,
   ServicePrincipal,
   type IOpenIdConnectProvider,
 } from "aws-cdk-lib/aws-iam";
@@ -18,6 +19,7 @@ import type { Construct } from "constructs";
 
 export interface YodevMailFoundationStackProps extends StackProps {
   alertEmail?: string;
+  budgetAlertEmails?: string[];
   existingVercelOidcProviderArn?: string;
   guardDutyBudgetEmail?: string;
   vercelTeam: string;
@@ -129,7 +131,7 @@ export class YodevMailFoundationStack extends Stack {
       removalPolicy: RemovalPolicy.RETAIN,
       retention: RetentionDays.ONE_YEAR,
     });
-    new Trail(this, "ManagementTrail", {
+    const managementTrail = new Trail(this, "ManagementTrail", {
       bucket: trailBucket,
       cloudWatchLogGroup: trailLogGroup,
       enableFileValidation: true,
@@ -140,6 +142,13 @@ export class YodevMailFoundationStack extends Stack {
       sendToCloudWatchLogs: true,
       trailName: "yodev-mail-management",
     });
+    const trailLogsRole = managementTrail.node.findChild("LogsRole") as Role;
+    auditKey.grant(
+      trailLogsRole,
+      "kms:DescribeKey",
+      "kms:Encrypt",
+      "kms:GenerateDataKey*",
+    );
     const rootUsage = new MetricFilter(this, "RootAccountUsageMetric", {
       filterPattern: FilterPattern.literal(
         '{ ($.userIdentity.type = "Root") && ($.userIdentity.invokedBy NOT EXISTS) && ($.eventType != "AwsServiceEvent") }',
@@ -163,9 +172,12 @@ export class YodevMailFoundationStack extends Stack {
       this.alertTopic.addSubscription(new EmailSubscription(props.alertEmail));
     }
 
-    const subscribers = props.alertEmail
-      ? [{ address: props.alertEmail, subscriptionType: "EMAIL" }]
-      : [];
+    const subscribers = [...new Set([
+      ...(props.budgetAlertEmails ?? []),
+      props.alertEmail,
+      props.guardDutyBudgetEmail,
+    ].filter((email): email is string => Boolean(email)))]
+      .map((address) => ({ address, subscriptionType: "EMAIL" }));
 
     new CfnBudget(this, "AccountMonthlyBudget", {
       budget: {
@@ -192,7 +204,7 @@ export class YodevMailFoundationStack extends Stack {
             {
               notification: {
                 comparisonOperator: "GREATER_THAN",
-                notificationType: "ACTUAL",
+                notificationType: "FORECASTED",
                 threshold: 80,
                 thresholdType: "PERCENTAGE",
               },
@@ -201,7 +213,7 @@ export class YodevMailFoundationStack extends Stack {
             {
               notification: {
                 comparisonOperator: "GREATER_THAN",
-                notificationType: "FORECASTED",
+                notificationType: "ACTUAL",
                 threshold: 100,
                 thresholdType: "PERCENTAGE",
               },
