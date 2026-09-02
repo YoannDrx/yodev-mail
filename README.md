@@ -2,6 +2,10 @@
 
 Mail by Yodev is a private, API-only gateway for transactional email. Yodev owns and operates the provider accounts; clients use only `ym_test_*` and `ym_live_*` keys, verified domains, approved transactional profiles and approved templates.
 
+The source code is licensed under the GNU Affero General Public License v3.0
+(`AGPL-3.0-only`). Security issues must be reported privately according to
+[`SECURITY.md`](SECURITY.md).
+
 The public contract never accepts a provider, `cc`, `bcc`, tracking option, campaign, audience or contact import. Postmark is the initial production route. Amazon SES is implemented for sandbox tests and remains disabled in production until AWS explicitly grants production access.
 
 ## Stack
@@ -102,7 +106,9 @@ npm run infra:deploy:dev
 npm run infra:deploy:prod
 ```
 
-The infrastructure scripts load the same ignored `.env.local` as the application and database scripts. Before every diff or deployment, keep `YODEV_MAIL_VERCEL_OIDC_PROVIDER_ARN` set to the existing provider and make `YODEV_MAIL_AWS_ACTIVE_ENVIRONMENTS` match every currently active deployed stack (currently `prod`; `dev` remains in standby). This also preserves cross-stack exports when deploying the foundation alone. An empty value intentionally synthesizes passive workers and schedules and must never be used for an active production deployment.
+The infrastructure scripts load the same ignored `.env.local` as the application and database scripts. Before every diff or deployment, keep `YODEV_MAIL_VERCEL_OIDC_PROVIDER_ARN` set to the existing provider and set `YODEV_MAIL_AWS_OPERATING_MODE_DEV` and `YODEV_MAIL_AWS_OPERATING_MODE_PROD` explicitly to `standby`, `certification` or `live`. Both environments are currently in `standby`; this is the safe default while no real client is active. `YODEV_MAIL_AWS_ACTIVE_ENVIRONMENTS` remains only as a backwards-compatible fallback when no explicit mode is set.
+
+`standby` removes SQS event-source mappings, disables every workload EventBridge rule, closes provider and billing runtime gates, and suppresses workload alarms. `certification` and `live` activate the transport; the independent product gates still determine which synthetic or commercial traffic may enter the system. Scheduled invocations are not retried by EventBridge because the next scheduled run is the bounded recovery attempt.
 
 Set `YODEV_MAIL_BUDGET_ALERT_EMAILS` to the comma-separated operational
 recipients that must receive account budget alerts. This is distinct from
@@ -110,7 +116,7 @@ recipients that must receive account budget alerts. This is distinct from
 
 `YODEV_MAIL_GUARDDUTY_ENABLED` must match the deployed account state when diffing. Malware Protection is currently active for the `pending/` prefix in production, but the attachment API remains closed until the application path has passed its isolated checksum/MIME/scan/expiry tests.
 
-`YODEV_MAIL_POSTMARK_ENABLED` must likewise match the deployed account state. Postmark is currently enabled in the production workload; a new environment must keep it disabled until the account, Platform, retention, system domain and content-free webhooks are verified.
+`YODEV_MAIL_POSTMARK_ENABLED` must likewise match the intended account state. Postmark credentials are configured for production, but every worker receives `POSTMARK_ENABLED=false` while the workload is in standby. A new environment must keep it disabled until the account, Platform, retention, system domain and content-free webhooks are verified.
 
 `YODEV_MAIL_STRIPE_USAGE_REPORTING_ENABLED` is the CDK synthesis input for the scheduled AWS usage worker. It sets the Lambda runtime gate `STRIPE_USAGE_REPORTING_ENABLED` and defaults to `false`; enable it only for an active workload after the Stripe meter and reconciliation path are certified.
 

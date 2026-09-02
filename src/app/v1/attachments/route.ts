@@ -7,6 +7,7 @@ import { authenticateApiKey } from "@/features/api/authenticate-api-key";
 import { consumeWorkspaceRateLimit } from "@/features/api/rate-limit";
 import { readJsonBody, RequestBodyTooLargeError, UnsupportedMediaTypeError } from "@/features/api/read-json-body";
 import { attachmentUploadSchema } from "@/features/emails/schema";
+import { withSafeRouteErrors } from "@/features/api/safe-route";
 import { awsClients } from "@/lib/aws";
 import { env, isFeatureEnabled } from "@/lib/env";
 
@@ -14,7 +15,7 @@ function safeFileName(value: string) {
   return value.normalize("NFKC").replace(/[\\/\0-\x1f\x7f]/g, "-").replace(/\s+/g, " ").slice(0, 180);
 }
 
-export async function POST(request: Request) {
+async function createAttachmentUpload(request: Request) {
   const key = await authenticateApiKey(request, "attachments:write");
   if (!key) return NextResponse.json({ error: { code: "unauthorized" } }, { status: 401 });
   const rate = await consumeWorkspaceRateLimit(key.workspaceId, key.mode);
@@ -80,3 +81,5 @@ export async function POST(request: Request) {
     },
   }, { status: 201 });
 }
+
+export const POST = withSafeRouteErrors(createAttachmentUpload);

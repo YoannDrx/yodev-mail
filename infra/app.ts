@@ -30,6 +30,18 @@ const sesEnabled = process.env.YODEV_MAIL_SES_ENABLED === "true";
 const stripeUsageReportingEnabled =
   process.env.YODEV_MAIL_STRIPE_USAGE_REPORTING_ENABLED === "true";
 
+function operatingModeFor(environment: "dev" | "prod") {
+  const explicit = process.env[
+    `YODEV_MAIL_AWS_OPERATING_MODE_${environment.toUpperCase()}`
+  ];
+  const fallback = activeEnvironments.has(environment) ? "live" : "standby";
+  const mode = explicit || fallback;
+  if (!["standby", "certification", "live"].includes(mode)) {
+    throw new Error(`Invalid AWS operating mode for ${environment}: ${mode}`);
+  }
+  return mode as "standby" | "certification" | "live";
+}
+
 const foundation = new YodevMailFoundationStack(app, "YodevMailFoundation", {
   alertEmail,
   budgetAlertEmails,
@@ -49,13 +61,13 @@ for (const environment of ["dev", "prod"] as const) {
       environment,
       env: { account, region },
       malwareProtectionEnabled,
+      operatingMode: operatingModeFor(environment),
       postmarkEnabled,
       sesEnabled,
       stripeUsageReportingEnabled,
       terminationProtection: environment === "prod",
       vercelOidcProvider: foundation.vercelOidcProvider,
       vercelTeam,
-      standby: !activeEnvironments.has(environment),
     },
   );
   stack.addStackDependency(foundation);

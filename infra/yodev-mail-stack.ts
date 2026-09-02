@@ -7,7 +7,7 @@ import {
   Tags,
   type StackProps,
 } from "aws-cdk-lib";
-import { Dashboard, GraphWidget, Metric, TreatMissingData } from "aws-cdk-lib/aws-cloudwatch";
+import { Dashboard, GraphWidget, MathExpression, Metric, TreatMissingData } from "aws-cdk-lib/aws-cloudwatch";
 import { SnsAction } from "aws-cdk-lib/aws-cloudwatch-actions";
 import { EventField, Rule, RuleTargetInput, Schedule } from "aws-cdk-lib/aws-events";
 import { LambdaFunction, SqsQueue } from "aws-cdk-lib/aws-events-targets";
@@ -39,14 +39,15 @@ export interface YodevMailStackProps extends StackProps {
   stripeUsageReportingEnabled?: boolean;
   vercelOidcProvider: IOpenIdConnectProvider;
   vercelTeam: string;
-  standby: boolean;
+  operatingMode: "standby" | "certification" | "live";
 }
 
 export class YodevMailStack extends Stack {
   constructor(scope: Construct, id: string, props: YodevMailStackProps) {
     super(scope, id, props);
     const prod = props.environment === "prod";
-    const monitoringEnabled = prod && !props.standby;
+    const standby = props.operatingMode === "standby";
+    const monitoringEnabled = prod && !standby;
     const prefix = `yodev-mail-${props.environment}`;
     const oidcIssuer = `oidc.vercel.com/${props.vercelTeam}`;
     const oidcAudience = `https://vercel.com/${props.vercelTeam}`;
@@ -156,11 +157,12 @@ export class YodevMailStack extends Stack {
       AWS_REGION_NAME: this.region,
       DEPLOYMENT_ENVIRONMENT: props.environment,
       NODE_OPTIONS: "--enable-source-maps",
-      POSTMARK_ENABLED: props.postmarkEnabled ? "true" : "false",
+      OPERATING_MODE: props.operatingMode,
+      POSTMARK_ENABLED: props.postmarkEnabled && !standby ? "true" : "false",
       POSTMARK_WEBHOOK_BASE_URL: prod ? "https://mail.yodev.fr" : "",
       PROVIDER_CREDENTIALS_KMS_KEY_ARN: providerCredentialsKey.keyArn,
       RUNTIME_PARAMETER_PREFIX: `/${prefix}/runtime`,
-      SES_ENABLED: props.sesEnabled && !props.standby ? "true" : "false",
+      SES_ENABLED: props.sesEnabled && !standby ? "true" : "false",
     };
     const workerFunctions: NodejsFunction[] = [];
     const worker = (
@@ -191,7 +193,11 @@ export class YodevMailStack extends Stack {
       return fn;
     };
     const scheduledWorkerRule = (id: string, schedule: Schedule, fn: NodejsFunction) => {
-      const rule = new Rule(this, id, { enabled: !props.standby, schedule, targets: [new LambdaFunction(fn)] });
+      const rule = new Rule(this, id, {
+        enabled: !standby,
+        schedule,
+        targets: [new LambdaFunction(fn, { retryAttempts: 0 })],
+      });
       if (monitoringEnabled) {
         const failedInvocations = new Metric({
           namespace: "AWS/Events",
@@ -201,7 +207,8 @@ export class YodevMailStack extends Stack {
           statistic: "Sum",
         });
         const alarm = failedInvocations.createAlarm(this, `${id}FailedInvocationAlarm`, {
-          evaluationPeriods: 1,
+          datapointsToAlarm: 2,
+          evaluationPeriods: 3,
           threshold: 1,
           treatMissingData: TreatMissingData.NOT_BREACHING,
         });
@@ -211,7 +218,7 @@ export class YodevMailStack extends Stack {
     };
 
     const send = worker("SendEmail", "src/workers/send-email.ts");
-    if (!props.standby) send.addEventSource(new SqsEventSource(email.main, { batchSize: 1, maxConcurrency: 2, reportBatchItemFailures: true }));
+    if (!standby) send.addEventSource(new SqsEventSource(email.main, { batchSize: 1, maxConcurrency: 2, reportBatchItemFailures: true }));
     email.main.grantConsumeMessages(send);
     send.addToRolePolicy(new PolicyStatement({
       actions: ["s3:GetObject"],
@@ -225,11 +232,11 @@ export class YodevMailStack extends Stack {
     providerCredentialsKey.grantDecrypt(send);
 
     const ingest = worker("ProviderEvents", "src/workers/ses-events.ts");
-    if (!props.standby) ingest.addEventSource(new SqsEventSource(providerEvents.main, { batchSize: 10, maxConcurrency: 2, reportBatchItemFailures: true }));
+    if (!standby) ingest.addEventSource(new SqsEventSource(providerEvents.main, { batchSize: 10, maxConcurrency: 2, reportBatchItemFailures: true }));
     providerEvents.main.grantConsumeMessages(ingest);
 
     const provision = worker("ProviderProvisioning", "src/workers/provider-provisioning.ts", {},);
-    if (!props.standby) provision.addEventSource(new SqsEventSource(providerProvisioning.main, { batchSize: 1, maxConcurrency: 2, reportBatchItemFailures: true }));
+    if (!standby) provision.addEventSource(new SqsEventSource(providerProvisioning.main, { batchSize: 1, maxConcurrency: 2, reportBatchItemFailures: true }));
     providerProvisioning.main.grantConsumeMessages(provision);
     provision.addToRolePolicy(new PolicyStatement({ actions: ["ssm:GetParameter", "ssm:GetParameters", "ssm:PutParameter"], resources: [`arn:aws:ssm:${this.region}:${this.account}:parameter/${prefix}/providers/*`] }));
     providerCredentialsKey.grantEncryptDecrypt(provision);
@@ -241,7 +248,7 @@ export class YodevMailStack extends Stack {
       {},
       ["DATABASE_URL", "WEBHOOK_SIGNING_SECRET"],
     );
-    if (!props.standby) deliver.addEventSource(new SqsEventSource(webhooks.main, { batchSize: 10, maxConcurrency: 2, reportBatchItemFailures: true }));
+    if (!standby) deliver.addEventSource(new SqsEventSource(webhooks.main, { batchSize: 10, maxConcurrency: 2, reportBatchItemFailures: true }));
     webhooks.main.grantConsumeMessages(deliver);
 
     const outbox = worker("OutboxDispatch", "src/workers/outbox-dispatch.ts", {
@@ -276,7 +283,7 @@ export class YodevMailStack extends Stack {
       {
         STRIPE_METER_EVENT_NAME: "yodev_mail_emails_sent",
         STRIPE_USAGE_REPORTING_ENABLED:
-          props.stripeUsageReportingEnabled && !props.standby ? "true" : "false",
+          props.stripeUsageReportingEnabled && !standby ? "true" : "false",
       },
       ["DATABASE_URL", "STRIPE_USAGE_SECRET_KEY"],
     );
@@ -288,7 +295,7 @@ export class YodevMailStack extends Stack {
     attachmentBucket.grantRead(scan);
     attachmentKey.grantDecrypt(scan);
     new Rule(this, "AttachmentScanResultRule", {
-      enabled: Boolean(props.malwareProtectionEnabled),
+      enabled: Boolean(props.malwareProtectionEnabled) && !standby,
       eventPattern: { source: ["aws.guardduty"], detailType: ["GuardDuty Malware Protection Object Scan Result"] },
       targets: [new LambdaFunction(scan)],
     });
@@ -299,7 +306,7 @@ export class YodevMailStack extends Stack {
     scheduledWorkerRule("RetentionPurgeSchedule", Schedule.cron({ hour: "2", minute: "30" }), retention);
 
     new Rule(this, "SesEventRule", {
-      enabled: !props.standby,
+      enabled: !standby,
       eventPattern: {
         source: ["aws.ses"],
         detail: {
@@ -366,7 +373,7 @@ export class YodevMailStack extends Stack {
       const unknown = unknownOutcomes.createAlarm(this, "ProviderOutcomeUnknownAlarm", { evaluationPeriods: 1, threshold: 1, treatMissingData: TreatMissingData.NOT_BREACHING });
       const purgeFailure = purgeFailures.createAlarm(this, "AttachmentPurgeFailureAlarm", { evaluationPeriods: 1, threshold: 1, treatMissingData: TreatMissingData.NOT_BREACHING });
       const webhookTerminal = webhookTerminalFailures.createAlarm(this, "CustomerWebhookTerminalFailureAlarm", { evaluationPeriods: 1, threshold: 1, treatMissingData: TreatMissingData.NOT_BREACHING });
-      const billingFailure = stripeUsage.metricErrors().createAlarm(this, "StripeUsageFailureAlarm", { evaluationPeriods: 1, threshold: 1, treatMissingData: TreatMissingData.NOT_BREACHING });
+      const billingFailure = stripeUsage.metricErrors({ period: Duration.minutes(5) }).createAlarm(this, "StripeUsageFailureAlarm", { datapointsToAlarm: 2, evaluationPeriods: 3, threshold: 1, treatMissingData: TreatMissingData.NOT_BREACHING });
       malware.addAlarmAction(new SnsAction(props.alertTopic));
       clientProvisioningFailure.addAlarmAction(new SnsAction(props.alertTopic));
       unknown.addAlarmAction(new SnsAction(props.alertTopic));
@@ -374,9 +381,19 @@ export class YodevMailStack extends Stack {
       webhookTerminal.addAlarmAction(new SnsAction(props.alertTopic));
       billingFailure.addAlarmAction(new SnsAction(props.alertTopic));
       for (const fn of workerFunctions) {
-        const errorAlarm = fn.metricErrors().createAlarm(this, `${fn.node.id}ErrorAlarm`, { evaluationPeriods: 1, threshold: 1, treatMissingData: TreatMissingData.NOT_BREACHING });
-        const throttleAlarm = fn.metricThrottles().createAlarm(this, `${fn.node.id}ThrottleAlarm`, { evaluationPeriods: 1, threshold: 1, treatMissingData: TreatMissingData.NOT_BREACHING });
-        const durationAlarm = fn.metricDuration({ statistic: "p99" }).createAlarm(this, `${fn.node.id}DurationP99Alarm`, { evaluationPeriods: 2, threshold: 48_000, treatMissingData: TreatMissingData.NOT_BREACHING });
+        const period = Duration.minutes(5);
+        const errorRate = new MathExpression({
+          expression: "IF(invocations > 0, 100 * errors / invocations, 0)",
+          label: `${fn.node.id} error rate`,
+          period,
+          usingMetrics: {
+            errors: fn.metricErrors({ period }),
+            invocations: fn.metricInvocations({ period }),
+          },
+        });
+        const errorAlarm = errorRate.createAlarm(this, `${fn.node.id}ErrorRateAlarm`, { datapointsToAlarm: 2, evaluationPeriods: 3, threshold: 1, treatMissingData: TreatMissingData.NOT_BREACHING });
+        const throttleAlarm = fn.metricThrottles({ period }).createAlarm(this, `${fn.node.id}ThrottleAlarm`, { datapointsToAlarm: 2, evaluationPeriods: 3, threshold: 1, treatMissingData: TreatMissingData.NOT_BREACHING });
+        const durationAlarm = fn.metricDuration({ period, statistic: "p99" }).createAlarm(this, `${fn.node.id}DurationP99Alarm`, { datapointsToAlarm: 2, evaluationPeriods: 3, threshold: 48_000, treatMissingData: TreatMissingData.NOT_BREACHING });
         errorAlarm.addAlarmAction(new SnsAction(props.alertTopic));
         throttleAlarm.addAlarmAction(new SnsAction(props.alertTopic));
         durationAlarm.addAlarmAction(new SnsAction(props.alertTopic));
@@ -397,7 +414,8 @@ export class YodevMailStack extends Stack {
     Tags.of(this).add("managed-by", "aws-cdk");
     new CfnOutput(this, "AttachmentsBucket", { value: attachmentBucket.bucketName });
     new CfnOutput(this, "DefaultEventBusArn", { value: `arn:aws:events:${this.region}:${this.account}:event-bus/default` });
-    new CfnOutput(this, "StandbyMode", { value: String(props.standby) });
+    new CfnOutput(this, "OperatingMode", { value: props.operatingMode });
+    new CfnOutput(this, "StandbyMode", { value: String(standby) });
     new CfnOutput(this, "VercelRoleArn", { value: vercelRole.roleArn });
   }
 }

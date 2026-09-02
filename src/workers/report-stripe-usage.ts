@@ -23,32 +23,58 @@ export async function handler() {
   const staleClaim = new Date(now.getTime() - 15 * 60_000);
   const minimumStripeTimestamp = new Date(now.getTime() - 35 * 864e5);
 
-  const stale = await db.update(stripeUsageReportJobs).set({
-    status: "unknown",
-    claimedAt: null,
-    lastErrorCode: "stale_submission_outcome_unknown",
-    updatedAt: now,
-  }).where(and(
+  const staleCandidates = await db.select({
+    id: stripeUsageReportJobs.id,
+    workspaceId: stripeUsageReportJobs.workspaceId,
+  }).from(stripeUsageReportJobs).where(and(
     eq(stripeUsageReportJobs.status, "processing"),
     lt(stripeUsageReportJobs.claimedAt, staleClaim),
-  )).returning({ id: stripeUsageReportJobs.id });
+  )).limit(1_000);
+  let staleCount = 0;
+  for (const candidate of staleCandidates) {
+    const stale = await db.update(stripeUsageReportJobs).set({
+      status: "unknown",
+      claimedAt: null,
+      lastErrorCode: "stale_submission_outcome_unknown",
+      updatedAt: now,
+    }).where(and(
+      eq(stripeUsageReportJobs.id, candidate.id),
+      eq(stripeUsageReportJobs.workspaceId, candidate.workspaceId),
+      eq(stripeUsageReportJobs.status, "processing"),
+      lt(stripeUsageReportJobs.claimedAt, staleClaim),
+    )).returning({ id: stripeUsageReportJobs.id });
+    staleCount += stale.length;
+  }
 
-  const tooOld = await db.update(stripeUsageReportJobs).set({
-    status: "unreportable",
-    claimedAt: null,
-    lastErrorCode: "meter_timestamp_too_old",
-    updatedAt: now,
-  }).where(and(
+  const tooOldCandidates = await db.select({
+    id: stripeUsageReportJobs.id,
+    workspaceId: stripeUsageReportJobs.workspaceId,
+  }).from(stripeUsageReportJobs).where(and(
     inArray(stripeUsageReportJobs.status, ["pending", "failed"]),
     lt(stripeUsageReportJobs.acceptedAt, minimumStripeTimestamp),
-  )).returning({ id: stripeUsageReportJobs.id });
+  )).limit(1_000);
+  let tooOldCount = 0;
+  for (const candidate of tooOldCandidates) {
+    const tooOld = await db.update(stripeUsageReportJobs).set({
+      status: "unreportable",
+      claimedAt: null,
+      lastErrorCode: "meter_timestamp_too_old",
+      updatedAt: now,
+    }).where(and(
+      eq(stripeUsageReportJobs.id, candidate.id),
+      eq(stripeUsageReportJobs.workspaceId, candidate.workspaceId),
+      inArray(stripeUsageReportJobs.status, ["pending", "failed"]),
+      lt(stripeUsageReportJobs.acceptedAt, minimumStripeTimestamp),
+    )).returning({ id: stripeUsageReportJobs.id });
+    tooOldCount += tooOld.length;
+  }
 
   const candidates = await db.select().from(stripeUsageReportJobs).where(
     inArray(stripeUsageReportJobs.status, ["pending", "failed"]),
   ).limit(1_000);
 
   let reported = 0;
-  let unknown = stale.length + tooOld.length;
+  let unknown = staleCount + tooOldCount;
   for (const candidate of candidates) {
     const claimTime = new Date();
     const [claimed] = await db.update(stripeUsageReportJobs).set({

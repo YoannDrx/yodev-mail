@@ -53,12 +53,11 @@ async function cleanDatabase() {
   if (names.length) await pool.query(`truncate table ${names.join(", ")} restart identity cascade`);
 }
 
-async function seedUsageJob() {
+async function seedUsageJob(acceptedAt = new Date()) {
   const workspaceId = randomUUID();
   const domainId = randomUUID();
   const profileId = randomUUID();
   const messageId = randomUUID();
-  const acceptedAt = new Date();
   const month = acceptedAt.toISOString().slice(0, 7);
   await db.insert(workspaces).values({
     id: workspaceId,
@@ -171,6 +170,42 @@ describe("Stripe usage reporting", () => {
     expect(job).toMatchObject({ attemptCount: 1, claimedAt: null, status: "unknown" });
     expect(month.stripeReportedEmails).toBe(0);
     expect(ledger.stripeReportedAt).toBeNull();
+  });
+
+  it("reclassifies a stale processing claim within its workspace", async () => {
+    const context = await seedUsageJob();
+    await db.update(stripeUsageReportJobs).set({
+      status: "processing",
+      claimedAt: new Date(Date.now() - 16 * 60_000),
+    }).where(eq(stripeUsageReportJobs.id, context.job.id));
+
+    await expect(reportStripeUsage()).rejects.toThrow("ambiguous or unreportable");
+
+    const [job] = await db.select().from(stripeUsageReportJobs)
+      .where(eq(stripeUsageReportJobs.id, context.job.id));
+    expect(job).toMatchObject({
+      claimedAt: null,
+      lastErrorCode: "stale_submission_outcome_unknown",
+      status: "unknown",
+      workspaceId: context.workspaceId,
+    });
+    expect(dependencies.createMeterEvent).not.toHaveBeenCalled();
+  });
+
+  it("marks an expired meter event unreportable within its workspace", async () => {
+    const context = await seedUsageJob(new Date(Date.now() - 36 * 864e5));
+
+    await expect(reportStripeUsage()).rejects.toThrow("ambiguous or unreportable");
+
+    const [job] = await db.select().from(stripeUsageReportJobs)
+      .where(eq(stripeUsageReportJobs.id, context.job.id));
+    expect(job).toMatchObject({
+      claimedAt: null,
+      lastErrorCode: "meter_timestamp_too_old",
+      status: "unreportable",
+      workspaceId: context.workspaceId,
+    });
+    expect(dependencies.createMeterEvent).not.toHaveBeenCalled();
   });
 
   it("cannot commit accounting after its claim was reclassified unknown", async () => {

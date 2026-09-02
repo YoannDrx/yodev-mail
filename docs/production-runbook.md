@@ -20,7 +20,7 @@
 ## Deployment
 
 1. Run `npm run check`, `npm run test:e2e` and `npm run infra:synth`.
-2. Run `cdk diff YodevMailProd` with `YODEV_MAIL_AWS_ACTIVE_ENVIRONMENTS=prod` and `YODEV_MAIL_VERCEL_OIDC_PROVIDER_ARN` set to the existing provider, then review replacements and IAM changes. Never deploy a production template synthesized in standby mode.
+2. Run `cdk diff YodevMailProd` with `YODEV_MAIL_AWS_OPERATING_MODE_PROD` set to the intended `standby`, `certification` or `live` state and `YODEV_MAIL_VERCEL_OIDC_PROVIDER_ARN` set to the existing provider, then review replacements and IAM changes. Never activate `certification` or `live` by relying on an implicit default.
 3. Deploy the AWS foundation/workload with SES disabled.
 4. Apply Drizzle migrations to a production clone, verify the existing workspace/subscription, perform a restore exercise, then apply to production.
 5. Deploy Vercel and verify host routing on `mail.yodev.fr` and `api.mail.yodev.fr`.
@@ -72,7 +72,7 @@ Before activation, verify `yodev.fr` DKIM, `pm-bounces.yodev.fr`, DMARC, the sto
 
 In `eu-west-3`, capture `sesv2 get-account`, identities, DKIM/MAIL FROM, configuration sets, tenants, suppression state and quotas; CloudFormation stacks/drift; Lambda functions/event source mappings/concurrency; all queues/DLQs/redrive policies; EventBridge schedules; alarms; IAM/OIDC; CloudTrail and the existing Support case. Confirm production remains `SES_ENABLED=false` and that no passive template was deployed as active.
 
-Do not retrieve or print SecureString values. Use the application’s runtime parameter resolution for functional tests. Run `cdk diff YodevMailProd` only with the existing OIDC provider ARN and `YODEV_MAIL_AWS_ACTIVE_ENVIRONMENTS=prod`.
+Do not retrieve or print SecureString values. Use the application’s runtime parameter resolution for functional tests. Run `cdk diff YodevMailProd` only with the existing OIDC provider ARN and an explicit `YODEV_MAIL_AWS_OPERATING_MODE_PROD`.
 
 ## Gate activation and rollback
 

@@ -4,6 +4,7 @@ import { NextResponse } from "next/server";
 import { requireDb } from "@/db";
 import { domainProviderBindings, workspaceProviderAccounts } from "@/db/schema";
 import { readJsonBody, RequestBodyTooLargeError } from "@/features/api/read-json-body";
+import { withSafeRouteErrors } from "@/features/api/safe-route";
 import { ingestProviderEvent } from "@/features/providers/ingest-event";
 import { normalizePostmarkEvent, parsePostmarkWebhook } from "@/features/providers/postmark-events";
 import { enqueueProviderEvent } from "@/lib/aws";
@@ -18,7 +19,7 @@ function equal(left: string, right: string) {
   return a.length === b.length && timingSafeEqual(a, b);
 }
 
-export async function POST(request: Request, { params }: { params: Promise<{ bindingId: string }> }) {
+async function ingestPostmarkWebhook(request: Request, { params }: { params: Promise<{ bindingId: string }> }) {
   const sourceIp = (request.headers.get("x-vercel-forwarded-for") ?? request.headers.get("x-forwarded-for") ?? "").split(",")[0].trim();
   if (process.env.VERCEL_ENV === "production" && !POSTMARK_WEBHOOK_IPS.has(sourceIp)) return new NextResponse(null, { status: 403 });
   const contentLength = Number(request.headers.get("content-length") ?? 0);
@@ -60,3 +61,5 @@ export async function POST(request: Request, { params }: { params: Promise<{ bin
   }
   return NextResponse.json({ ok: true });
 }
+
+export const POST = withSafeRouteErrors(ingestPostmarkWebhook);
