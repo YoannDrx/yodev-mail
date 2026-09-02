@@ -23,7 +23,7 @@ beforeAll(() => {
     environment: "dev",
     env,
     sesEnabled: true,
-    standby: true,
+    operatingMode: "standby",
     vercelOidcProvider: foundationStack.vercelOidcProvider,
     vercelTeam: "yoanndrxs-projects",
   });
@@ -34,7 +34,7 @@ beforeAll(() => {
     malwareProtectionEnabled: true,
     postmarkEnabled: false,
     stripeUsageReportingEnabled: true,
-    standby: false,
+    operatingMode: "live",
     vercelOidcProvider: foundationStack.vercelOidcProvider,
     vercelTeam: "yoanndrxs-projects",
   });
@@ -43,7 +43,7 @@ beforeAll(() => {
     environment: "dev",
     env,
     sesEnabled: true,
-    standby: false,
+    operatingMode: "certification",
     vercelOidcProvider: foundationStack.vercelOidcProvider,
     vercelTeam: "yoanndrxs-projects",
   });
@@ -289,6 +289,18 @@ describe("Mail by Yodev AWS infrastructure", () => {
     )) {
       expect(rule.Properties.State).toBe("DISABLED");
     }
+    standbyWorkload.hasResourceProperties(
+      "AWS::Lambda::Function",
+      Match.objectLike({
+        Environment: Match.objectLike({
+          Variables: Match.objectLike({
+            OPERATING_MODE: "standby",
+            POSTMARK_ENABLED: "false",
+            SES_ENABLED: "false",
+          }),
+        }),
+      }),
+    );
   });
 
   test("caps active email delivery without reserving scarce account concurrency", () => {
@@ -317,6 +329,18 @@ describe("Mail by Yodev AWS infrastructure", () => {
     );
   });
 
+  test("uses two-out-of-three error-rate alarms for active workers", () => {
+    activeProductionWorkload.hasResourceProperties(
+      "AWS::CloudWatch::Alarm",
+      Match.objectLike({
+        DatapointsToAlarm: 2,
+        EvaluationPeriods: 3,
+        Metrics: Match.anyValue(),
+        Threshold: 1,
+      }),
+    );
+  });
+
   test("reconciles accepted client owner invitations on a disabled-in-standby schedule", () => {
     activeProductionWorkload.hasResourceProperties(
       "AWS::Events::Rule",
@@ -330,6 +354,16 @@ describe("Mail by Yodev AWS infrastructure", () => {
       Match.objectLike({
         MetricName: "ClientProvisioningReconciliationFailed",
         Namespace: "Yodev/Mail",
+      }),
+    );
+    activeProductionWorkload.hasResourceProperties(
+      "AWS::Events::Rule",
+      Match.objectLike({
+        Targets: Match.arrayWith([
+          Match.objectLike({
+            RetryPolicy: { MaximumRetryAttempts: 0 },
+          }),
+        ]),
       }),
     );
   });
@@ -379,7 +413,10 @@ describe("Mail by Yodev AWS infrastructure", () => {
       "AWS::Lambda::Function",
       Match.objectLike({
         Environment: Match.objectLike({
-          Variables: Match.objectLike({ SES_ENABLED: "true" }),
+          Variables: Match.objectLike({
+            OPERATING_MODE: "certification",
+            SES_ENABLED: "true",
+          }),
         }),
       }),
     );

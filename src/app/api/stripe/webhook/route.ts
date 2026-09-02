@@ -5,6 +5,7 @@ import { z } from "zod";
 import { requireDb } from "@/db";
 import { stripeCheckoutAttempts, stripeEvents, subscriptions, workspaces } from "@/db/schema";
 import { readBodyText, RequestBodyTooLargeError } from "@/features/api/read-json-body";
+import { withSafeRouteErrors } from "@/features/api/safe-route";
 import {
   buildStripeSubscriptionSnapshot,
   invoiceSubscriptionId,
@@ -38,7 +39,7 @@ function eventCustomerId(event: Stripe.Event) {
   return typeof customer === "string" ? customer : customer?.id ?? null;
 }
 
-export async function POST(request: Request) {
+async function ingestStripeWebhook(request: Request) {
   if (!env.STRIPE_WEBHOOK_SECRET) {
     return NextResponse.json({ error: "Stripe webhook is not configured" }, { status: 503 });
   }
@@ -220,3 +221,5 @@ export async function POST(request: Request) {
 
   return NextResponse.json({ received: true });
 }
+
+export const POST = withSafeRouteErrors(ingestStripeWebhook);

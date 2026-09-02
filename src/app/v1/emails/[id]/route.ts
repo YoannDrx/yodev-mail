@@ -5,10 +5,11 @@ import { requireDb } from "@/db";
 import { messages, transactionalProfiles } from "@/db/schema";
 import { authenticateApiKey } from "@/features/api/authenticate-api-key";
 import { consumeWorkspaceRateLimit } from "@/features/api/rate-limit";
+import { withSafeRouteErrors } from "@/features/api/safe-route";
 
 const messageIdSchema = z.string().uuid();
 
-export async function GET(request: Request, { params }: { params: Promise<{ id: string }> }) {
+async function getEmail(request: Request, { params }: { params: Promise<{ id: string }> }) {
   const key = await authenticateApiKey(request, "emails:read");
   if (!key) return NextResponse.json({ error: { code: "unauthorized" } }, { status: 401 });
   const rate = await consumeWorkspaceRateLimit(key.workspaceId, key.mode);
@@ -35,3 +36,5 @@ export async function GET(request: Request, { params }: { params: Promise<{ id: 
   )).where(and(eq(messages.id, id), eq(messages.workspaceId, key.workspaceId))).limit(1);
   return message ? NextResponse.json({ data: message }) : NextResponse.json({ error: { code: "not_found" } }, { status: 404 });
 }
+
+export const GET = withSafeRouteErrors(getEmail);

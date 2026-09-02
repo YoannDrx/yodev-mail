@@ -1,7 +1,7 @@
 import { NextResponse } from "next/server";
 
 const mailbox={type:"object",additionalProperties:false,required:["email"],properties:{email:{type:"string",format:"email"},name:{type:"string",maxLength:140}}};
-const errorResponses={"400":{description:"En-tête d’idempotence absent ou invalide"},"401":{description:"Clé invalide ou scope absent"},"403":{description:"Workspace, domaine, profil ou contenu non autorisé"},"413":{description:"Corps de requête trop volumineux"},"415":{description:"Content-Type JSON requis"},"422":{description:"Requête invalide"},"429":{description:"Quota journalier ou limite de débit atteinte"},"503":{description:"Fonctionnalité live ou pièces jointes temporairement fermées par un gate de production"}};
+const errorResponses={"400":{description:"En-tête d’idempotence absent ou invalide"},"401":{description:"Clé invalide ou scope absent"},"403":{description:"Workspace, domaine, profil ou contenu non autorisé"},"413":{description:"Corps de requête trop volumineux"},"415":{description:"Content-Type JSON requis"},"422":{description:"Requête invalide"},"429":{description:"Quota journalier ou limite de débit atteinte"},"500":{description:"Erreur interne expurgée avec identifiant de requête"},"503":{description:"Fonctionnalité fermée par un gate ou dépendance temporairement indisponible ; les erreurs inattendues incluent x-request-id"}};
 
 export async function GET(){return NextResponse.json({
   openapi:"3.1.0",

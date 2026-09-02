@@ -19,6 +19,7 @@ import {
 import { authenticateApiKey } from "@/features/api/authenticate-api-key";
 import { readJsonBody, RequestBodyTooLargeError, UnsupportedMediaTypeError } from "@/features/api/read-json-body";
 import { consumeWorkspaceRateLimit } from "@/features/api/rate-limit";
+import { causalErrorCode, withSafeRouteErrors } from "@/features/api/safe-route";
 import { normalizeEmail } from "@/features/email-address/normalization";
 import { combinedContentSize, estimatedMimeSize, isRawContent, sendEmailSchema } from "@/features/emails/schema";
 import { evaluateStoredMessage, utcDay } from "@/features/sending/eligibility";
@@ -26,18 +27,7 @@ import { renderApprovedTemplate, TemplateVariablesMissingError } from "@/feature
 import { canonicalJson, sha256 } from "@/lib/crypto";
 import { isFeatureEnabled } from "@/lib/env";
 
-function databaseErrorCode(error: unknown) {
-  let current = error;
-  for (let depth = 0; depth < 5; depth += 1) {
-    if (!current || typeof current !== "object") return undefined;
-    const candidate = current as { cause?: unknown; code?: unknown };
-    if (typeof candidate.code === "string") return candidate.code;
-    current = candidate.cause;
-  }
-  return undefined;
-}
-
-export async function POST(request: Request) {
+async function postEmail(request: Request) {
   const key = await authenticateApiKey(request, "emails:send");
   if (!key) {
     return NextResponse.json({ error: { code: "unauthorized", message: "Clé API invalide ou scope manquant." } }, { status: 401 });
@@ -301,7 +291,7 @@ export async function POST(request: Request) {
     if (error instanceof Error && error.message === "daily_limit_reached") {
       return NextResponse.json({ error: { code: "daily_limit_reached" } }, { status: 429 });
     }
-    if (databaseErrorCode(error) === "23505") {
+    if (causalErrorCode(error) === "23505") {
       const [winner] = await db.select().from(idempotencyKeys).where(and(
         eq(idempotencyKeys.workspaceId, key.workspaceId),
         eq(idempotencyKeys.key, idempotencyKey),
@@ -315,3 +305,5 @@ export async function POST(request: Request) {
   }
   return NextResponse.json({ data: { id, status: simulated ? "simulated" : "queued" } }, { status: 202 });
 }
+
+export const POST = withSafeRouteErrors(postEmail);
