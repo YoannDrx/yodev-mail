@@ -2,7 +2,7 @@ import type { SQSBatchResponse, SQSEvent } from "aws-lambda";
 import { and, eq } from "drizzle-orm";
 import { requireDb } from "@/db/runtime";
 import { domainProviderBindings, domains, workspaceProviderAccounts, workspaces } from "@/db/schema";
-import { provisionSesDomain } from "@/features/domains/provision-ses-domain";
+import { provisionSesDomain, SES_REPUTATION_POLICY } from "@/features/domains/provision-ses-domain";
 import { provisionPostmarkDomain } from "@/features/providers/provision-postmark";
 import { loadRuntimeSecrets } from "@/workers/runtime-secrets";
 import { logWorkerResult } from "@/lib/worker-log";
@@ -43,9 +43,9 @@ export async function provisionBinding(bindingId: string) {
       if (process.env.SES_ENABLED !== "true") throw new Error("SES is disabled until AWS production approval");
       const result = await provisionSesDomain({ workspaceId: row.workspace.id, domain: row.domain.name });
       await db.transaction(async (tx) => {
-        await tx.insert(workspaceProviderAccounts).values({ workspaceId: row.workspace.id, provider: "ses", status: "ready", externalAccountId: result.tenantName, reputationPolicy: "strict" }).onConflictDoUpdate({
+        await tx.insert(workspaceProviderAccounts).values({ workspaceId: row.workspace.id, provider: "ses", status: "ready", externalAccountId: result.tenantName, reputationPolicy: SES_REPUTATION_POLICY }).onConflictDoUpdate({
           target: [workspaceProviderAccounts.workspaceId, workspaceProviderAccounts.provider],
-          set: { status: "ready", externalAccountId: result.tenantName, reputationPolicy: "strict", updatedAt: new Date() },
+          set: { status: "ready", externalAccountId: result.tenantName, reputationPolicy: SES_REPUTATION_POLICY, updatedAt: new Date() },
         });
         await tx.update(domainProviderBindings).set({ externalDomainId: `arn:aws:ses:${process.env.AWS_REGION ?? "eu-west-3"}:${process.env.AWS_ACCOUNT_ID ?? ""}:identity/${row.domain.name}`, mailFromDomain: `bounce.${row.domain.name}`, dnsRecords: result.records, status: "dns_pending", updatedAt: new Date() }).where(eq(domainProviderBindings.id, row.binding.id));
       });

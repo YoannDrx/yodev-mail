@@ -14,6 +14,8 @@ import { STSClient, GetCallerIdentityCommand } from "@aws-sdk/client-sts";
 import { awsClients } from "@/lib/aws";
 import { env } from "@/lib/env";
 
+export const SES_REPUTATION_POLICY = "standard" as const;
+
 function safeName(value: string) { return value.toLowerCase().replace(/[^a-z0-9-]/g, "-").replace(/-+/g, "-").slice(0, 55); }
 async function ignoreExisting(operation: () => Promise<unknown>) {
   try { await operation(); } catch (error) { if (!(error instanceof AlreadyExistsException) && (error as { name?: string }).name !== "AlreadyExistsException") throw error; }
@@ -28,7 +30,7 @@ export async function provisionSesDomain(input: { workspaceId: string; domain: s
     await ses.send(new UpdateReputationEntityPolicyCommand({
       ReputationEntityType: "RESOURCE",
       ReputationEntityReference: tenant.Tenant.TenantArn,
-      ReputationEntityPolicy: `arn:aws:ses:${env.AWS_REGION}:aws:reputation-policy/strict`,
+      ReputationEntityPolicy: `arn:aws:ses:${env.AWS_REGION}:aws:reputation-policy/${SES_REPUTATION_POLICY}`,
     }));
   }
   const configurationSets = [`${tenantName}-txn`];
