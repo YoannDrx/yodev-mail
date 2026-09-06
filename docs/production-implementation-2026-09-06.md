@@ -40,11 +40,19 @@ Projet `round-star-39482619`, branche principale `br-sweet-haze-aso0rivg`, forfa
 
 ## Travaux restant à fermer
 
+Le lot de [certification authentifiée](authenticated-certification-2026-09-06.md)
+est vérifié dans la [PR #37](https://github.com/YoannDrx/yodev-mail/pull/37) : huit
+parcours navigateur réels et 13 tests unitaires supplémentaires. Il corrige aussi
+la page d'erreur après perte d'accès au workspace ou première connexion avant
+acceptation d'une invitation. CI entièrement verte sur `117a5c0` ; le nouveau
+contrôle navigateur est obligatoire sur `main`. Les preuves de ce lot ne
+remplacent pas les validations fournisseurs ni les conditions commerciales.
+
 1. Premier lot technique vérifié et publié avec les protections de branche existantes. Poursuivre les volets ci-dessous ; ce jalon ne clôt pas l'objectif global.
 2. Compléter la certification SES dans un périmètre isolé ; configuration, cas négatifs, retours d'événements et comptabilisation. L'approbation production reste une décision AWS.
 3. Certifier la facturation sur le compte/sandbox dédié, préparer le catalogue Live, les webhooks et le portail, puis vérifier le régime fiscal avec le propriétaire avant ouverture.
 4. Exécuter un exercice de restauration isolé, documenter temps de reprise et perte acceptable, valider alertes et reprise/DLQ.
-5. Certifier les parcours authentifiés à deux workspaces, invitations, rôles et révocations ; certifier les pièces jointes si incluses dans l'offre, sinon les conserver fermées.
+5. Certification Chromium locale/CI à deux workspaces, invitations, rôles, révocations et passkeys virtuelles réalisée dans le lot #37. Restent Google OAuth réel, les emails d'authentification et les passkeys physiques/multinavigateurs ; certifier les pièces jointes si incluses dans l'offre, sinon les conserver fermées.
 6. Réactiver le transport de façon coordonnée uniquement après satisfaction des critères, puis observer les canaris contrôlés pendant 72 heures. Aucun suivi récurrent n'est créé par ce document.
 
 Le conteneur PostgreSQL local `yodev-mail-certification-20260906` est dédié aux données synthétiques de cette certification, accessible uniquement sur `127.0.0.1:55441`. Les dix migrations existantes y ont été appliquées ; ce n'est pas une migration de production.

@@ -58,8 +58,28 @@ tests navigateur. Le parcours public vérifie aussi l'onboarding anonyme.
 
 Les 13 tests unitaires ciblés, le lint ciblé et le scénario WebAuthn isolé passent.
 Le scénario de retrait et celui d'invitation passent après correction de la page
-de récupération. La validation globale est en cours ; ne pas utiliser ce document
-comme preuve de publication avant l'ajout des références CI/déploiement.
+de récupération. La [CI 34062395514](https://github.com/YoannDrx/yodev-mail/actions/runs/34062395514)
+du commit `117a5c0`, sur la [PR #37](https://github.com/YoannDrx/yodev-mail/pull/37),
+passe intégralement :
+
+- huit parcours authentifiés en 48,9 secondes, sans retry signalé ;
+- huit parcours publics en 18,6 secondes ;
+- `npm run check` : lint, types, 158 tests unitaires/infrastructure et build ;
+- 222 tests unitaires/intégration PostgreSQL dans 39 fichiers ; couverture de
+  83,92 % des lignes et 71,38 % des branches ;
+- contrôles de secrets et déploiement de prévisualisation réussis.
+
+Le contrôle `authenticated-e2e` est désormais obligatoire sur `main`, lié à
+l'application GitHub Actions (15368). Les cinq contrôles obligatoires précédents,
+leurs applications respectives et le mode strict sont conservés.
+
+Une exécution locale globale sur la machine chargée a dépassé 120 secondes sur
+l'appel de lecture API. Elle n'est pas présentée comme intégralement réussie.
+Le scénario avait passé dans une exécution précédente et passe dans la CI du même
+code. La capture du dashboard authentifié a été inspectée : contenu, navigation
+et contrôles visibles, sans page blanche. La mise en production doit suivre la
+fusion de la PR et ses contrôles obligatoires ; la réussite CI ne prouve pas à
+elle seule le déploiement de production.
 
 Deux problèmes du banc de test ont été corrigés séparément : types SQL des
 identifiants synthétiques et attentes de compilation/hydratation avant interaction.
