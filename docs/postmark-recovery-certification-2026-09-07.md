@@ -132,7 +132,44 @@ Vérifications locales sur le code stabilisé :
   L'outil agent-browser n'est pas installé ; la vérification locale s'appuie
   sur les scénarios Playwright du dépôt, pas sur un contrôle visuel supplémentaire.
 
-Publication en cours de préparation. Les contrôles CI obligatoires, dont les
-parcours authentifiés, restent requis. AWS doit rester en standby, sans mapping
-SQS ni messages de provisioning en attente. Aucun changement de schéma ni de
-dépendances n'est prévu.
+Publication terminée via la [PR #39](https://github.com/YoannDrx/yodev-mail/pull/39),
+fusionnée le 7 septembre à 01:13:38 heure de Paris (6 septembre, 23:13:38 UTC).
+Commit fusionné `bc8a9e0dffc1cc652042b2376c8e06950a343dca`, head testé
+`83e7211148e1950add198b4fd56ebc119dad6635` ; leurs arbres sont identiques.
+
+- [CI de PR](https://github.com/YoannDrx/yodev-mail/actions/runs/34066153965) et
+  [CI de main](https://github.com/YoannDrx/yodev-mail/actions/runs/34066281210)
+  entièrement vertes. Les six contrôles obligatoires sont conservés, y compris
+  les parcours authentifiés ; aucun contournement de protection.
+- Huit parcours authentifiés passent en CI de PR en 58,8 secondes. Les huit
+  parcours publics et les tests PostgreSQL passent aussi dans les deux CI.
+- Vercel Production `dpl_2HjE3AvMGoQH9uSeu9NmnCfZA3pb`, `READY`, framework
+  Next.js, build observé 32,6 secondes. URL technique :
+  `https://yodev-mail-564ku0210-yoanndrxs-projects.vercel.app`.
+- `https://api.mail.yodev.fr/health` répond `status=ok`, `database=ok`,
+  `version=bc8a9e0`. Le health de `mail.yodev.fr` redirige vers cet endpoint ;
+  l'onboarding anonyme redirige en 307 vers `/fr/connexion`.
+  Un premier contrôle sur `app.mail.yodev.fr` a échoué en résolution DNS : ce
+  n'est pas le domaine configuré du produit et il n'a pas été ajouté au DNS.
+- Scan Vercel ciblé sur ce déploiement, niveaux `error` et `fatal` : aucun
+  résultat retourné après publication. La fenêtre est courte et sans charge ;
+  elle ne remplace pas les canaris de 72 heures. Les drains ne sont pas relus
+  dans ce lot ; les lacunes de supervision de l'audit restent ouvertes.
+- Le diff CDK examiné ne modifie que les assets de code des 13 workers par
+  environnement, du fait du module runtime partagé. Aucune permission,
+  variable d'environnement, file, clé ou ressource de stockage ne change ;
+  aucun remplacement et aucune migration. Fondation exclue du déploiement.
+- AWS Dev `UPDATE_COMPLETE` à 23:15:23 UTC ; AWS Prod à 23:16:34 UTC. Au contrôle
+  post-déploiement, 26 workers sur 26 restent `standby`, SES/Postmark faux,
+  aucun mapping SQS ; les quatre files de provisioning/DLQ sont vides selon
+  leurs compteurs approximatifs visible/invisible/différé.
+- Worker de provisioning Prod : `Active`, mise à jour `Successful`, SHA256
+  `Ny+RkL4rA9UOjCB4ZsrjAXPkvpSWsy+6h7I0URLhM8o=`. Son origine webhook réelle
+  reste `https://mail.yodev.fr`, sans modification.
+- SES relu : accès production faux, review `DENIED`, compte sain mais sandbox
+  200/jour et 1/s ; identité `mail.yodev.fr` vérifiée, DKIM RSA 2048 et MAIL FROM
+  `bounce.mail.yodev.fr` en succès. Ce blocage externe reste inchangé.
+
+Ces preuves post-publication sont ajoutées localement après fusion et seront
+committées avec le lot suivant, sans republier les services pour le seul compte
+rendu. L'objectif global reste actif : ce lot ne vaut pas GO commercial.
