@@ -1,5 +1,6 @@
 import { execFileSync } from "node:child_process";
 import { Pool } from "pg";
+import { workspaceReadinessSql } from "../src/features/operations/readiness-query";
 
 const OBSERVATION_HOURS = 72;
 const QUEUE_PREFIX = "yodev-mail-prod";
@@ -57,9 +58,14 @@ async function main() {
   const baseline = process.argv.includes("--baseline");
   const canarySinceValue = option("canary-since");
   const expectedVersion = option("expected-version");
+  const workspaceId = option("workspace-id");
+  if (!workspaceId || !/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(workspaceId)) {
+    throw new Error("An explicit --workspace-id=<UUID> is required.");
+  }
   if (!baseline && !canarySinceValue) {
     throw new Error("Use --baseline or provide --canary-since=<ISO-8601 timestamp>.");
   }
+  if (!baseline && !expectedVersion) throw new Error("--expected-version is required for an INTERNAL_GO check.");
 
   const canarySince = canarySinceValue ? new Date(canarySinceValue) : new Date();
   if (Number.isNaN(canarySince.getTime())) throw new Error("--canary-since must be a valid ISO-8601 timestamp.");
@@ -97,30 +103,21 @@ async function main() {
         approved_workspaces: string;
         unready_providers: string;
         active_verified_bindings: string;
-      }>(`
-        select
-          (select count(*) from messages where send_mode = 'live' and provider_accepted_at is not null) as provider_accepted,
-          (select count(*) from usage_ledger) as ledger_rows,
-          (select coalesce(sum(reserved_emails), 0) from usage_days) as reserved_emails,
-          (select count(*) from messages where status in ('sending', 'unknown')) as ambiguous_messages,
-          (select count(*) from outbox_jobs where status <> 'delivered') as pending_outbox,
-          (select count(*) from webhook_deliveries where delivered_at is null and terminal_at is null) as pending_webhooks,
-          (select count(*) from workspaces where deleted_at is null and status = 'approved') as approved_workspaces,
-          (select count(*) from workspace_provider_accounts where status <> 'ready' or paused_at is not null) as unready_providers,
-          (select count(*) from domain_provider_bindings where is_active = true and status = 'verified') as active_verified_bindings
-      `),
+        ledger_mismatches: string;
+      }>(workspaceReadinessSql, [workspaceId]),
       pool.query<{ recipient_domain: string; status: string; count: string }>(`
         select lower(split_part(to_email, '@', 2)) as recipient_domain, status, count(*) as count
         from messages
-        where send_mode = 'live' and created_at >= $1
+        where workspace_id = $1 and send_mode = 'live' and created_at >= $2
         group by 1, 2
         order by 1, 2
-      `, [canarySince]),
+      `, [workspaceId, canarySince]),
     ]);
     const state = stateResult.rows[0];
     if (!state) throw new Error("Database invariant query returned no row.");
     const databasePassed =
       Number(state.provider_accepted) === Number(state.ledger_rows) &&
+      Number(state.ledger_mismatches) === 0 &&
       Number(state.reserved_emails) === 0 &&
       Number(state.ambiguous_messages) === 0 &&
       Number(state.pending_outbox) === 0 &&
@@ -131,7 +128,7 @@ async function main() {
     checks.push({
       name: "database_invariants",
       passed: databasePassed,
-      detail: `accepted=${state.provider_accepted}, ledger=${state.ledger_rows}, reserved=${state.reserved_emails}, ambiguous=${state.ambiguous_messages}, outbox=${state.pending_outbox}, webhooks=${state.pending_webhooks}, approved=${state.approved_workspaces}, unready_providers=${state.unready_providers}, active_bindings=${state.active_verified_bindings}`,
+      detail: `accepted=${state.provider_accepted}, ledger=${state.ledger_rows}, ledger_mismatches=${state.ledger_mismatches}, reserved=${state.reserved_emails}, ambiguous=${state.ambiguous_messages}, outbox=${state.pending_outbox}, webhooks=${state.pending_webhooks}, approved=${state.approved_workspaces}, unready_providers=${state.unready_providers}, active_bindings=${state.active_verified_bindings}`,
     });
 
     if (!baseline) {
@@ -189,12 +186,41 @@ async function main() {
     detail: `queues=${queues.length}, non_empty=${queueStates.filter((count) => count !== 0).length}`,
   });
 
+  const sender = awsJson<{ Environment?: { Variables?: Record<string, string> } }>([
+    "lambda", "get-function-configuration", "--region", region,
+    "--function-name", `${QUEUE_PREFIX}-sendemail`,
+  ]).Environment?.Variables ?? {};
+  const mappings = awsJson<{ EventSourceMappings?: Array<{ FunctionArn?: string; State?: string }> }>([
+    "lambda", "list-event-source-mappings", "--region", region,
+  ]).EventSourceMappings ?? [];
+  const consumers = ["sendemail", "providerevents", "providerprovisioning", "customerwebhooks"];
+  const enabledConsumers = consumers.filter((name) => mappings.some((mapping) =>
+    mapping.FunctionArn?.endsWith(`:function:${QUEUE_PREFIX}-${name}`) && mapping.State === "Enabled",
+  ));
+  checks.push({
+    name: "aws_transport",
+    passed: ["certification", "live"].includes(sender.OPERATING_MODE)
+      && (sender.SES_ENABLED === "true" || sender.POSTMARK_ENABLED === "true")
+      && enabledConsumers.length === consumers.length,
+    detail: `mode=${["standby", "certification", "live"].includes(sender.OPERATING_MODE) ? sender.OPERATING_MODE : "unknown"}, enabled_consumers=${enabledConsumers.length}/${consumers.length}`,
+  });
+  if (sender.SES_ENABLED === "true") {
+    const account = awsJson<{ ProductionAccessEnabled?: boolean; SendingEnabled?: boolean }>([
+      "sesv2", "get-account", "--region", region,
+    ]);
+    checks.push({
+      name: "ses_production_access",
+      passed: account.ProductionAccessEnabled === true && account.SendingEnabled === true,
+      detail: `production_access=${account.ProductionAccessEnabled === true}, sending_enabled=${account.SendingEnabled === true}`,
+    });
+  }
+
   const alarms = awsJson<{ MetricAlarms?: Array<{ AlarmName?: string; StateValue?: string }> }>([
     "cloudwatch",
     "describe-alarms",
     "--region",
     region,
-  ]).MetricAlarms?.filter((alarm) => alarm.AlarmName?.includes("YodevMail")) ?? [];
+  ]).MetricAlarms?.filter((alarm) => alarm.AlarmName?.startsWith("YodevMailProd-")) ?? [];
   const alarmCount = alarms.filter((alarm) => alarm.StateValue === "ALARM").length;
   const unexpectedInsufficient = alarms.filter(
     (alarm) => alarm.StateValue === "INSUFFICIENT_DATA" && !alarm.AlarmName?.includes("Ses"),
@@ -220,7 +246,7 @@ async function main() {
       canarySince.toISOString(),
     ]).AlarmHistoryItems ?? [];
     const alarmTransitions = history.filter((item) => {
-      if (!item.AlarmName?.includes("YodevMail") || !item.HistoryData) return false;
+      if (!item.AlarmName?.startsWith("YodevMailProd-") || !item.HistoryData) return false;
       const data = JSON.parse(item.HistoryData) as { newState?: { stateValue?: string } };
       return data.newState?.stateValue === "ALARM";
     }).length;
@@ -240,7 +266,7 @@ async function main() {
 }
 
 void main().catch((error: unknown) => {
-  const message = error instanceof Error ? error.message : "Unknown audit failure";
-  console.error(`Internal GO audit failed: ${message}`);
+  // SDK, database and HTTP errors can include credentials or customer data.
+  console.error(`Internal GO audit failed (${error instanceof Error ? "check_failed" : "unknown_failure"}). Verify required arguments, access and configuration.`);
   process.exitCode = 1;
 });

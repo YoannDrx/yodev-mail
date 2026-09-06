@@ -51,9 +51,23 @@ beforeAll(() => {
   standbyWorkload = Template.fromStack(workloadStack);
   activeProductionWorkload = Template.fromStack(productionStack);
   sesCertificationWorkload = Template.fromStack(sesCertificationStack);
-}, 30_000);
+// Four CDK stacks bundle real workers. Allow cold builds on busy developer hosts.
+}, 240_000);
 
 describe("Mail by Yodev AWS infrastructure", () => {
+  test("scopes SES event destination reconciliation to owned transactional configuration sets", () => {
+    const policies = activeProductionWorkload.findResources("AWS::IAM::Policy");
+    const policy = Object.values(policies).find((entry) =>
+      JSON.stringify(entry.Properties.Roles).includes("ProviderProvisioning"),
+    );
+    expect(policy).toBeDefined();
+    const statements = policy!.Properties.PolicyDocument.Statement as Array<{ Action: string | string[]; Resource: unknown }>;
+    const reconciliation = statements.filter((statement) =>
+      [statement.Action].flat().includes("ses:UpdateConfigurationSetEventDestination"),
+    );
+    expect(reconciliation).toHaveLength(1);
+    expect(reconciliation[0].Resource).toBe("arn:aws:ses:eu-west-3:123456789012:configuration-set/ym-*-txn");
+  });
   test("uses the verified team-scoped Vercel OIDC claims", () => {
     foundation.hasResourceProperties("Custom::AWSCDKOpenIdConnectProvider", {
       ClientIDList: ["https://vercel.com/yoanndrxs-projects"],

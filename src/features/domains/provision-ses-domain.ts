@@ -9,6 +9,8 @@ import {
   GetTenantCommand,
   PutEmailIdentityMailFromAttributesCommand,
   UpdateReputationEntityPolicyCommand,
+  UpdateConfigurationSetEventDestinationCommand,
+  type CreateConfigurationSetEventDestinationCommandInput,
 } from "@aws-sdk/client-sesv2";
 import { STSClient, GetCallerIdentityCommand } from "@aws-sdk/client-sts";
 import { awsClients } from "@/lib/aws";
@@ -52,25 +54,28 @@ export async function provisionSesDomain(input: { workspaceId: string; domain: s
   if (!accountId) throw new Error("AWS account ID unavailable");
   const eventBusArn = `arn:aws:events:${env.AWS_REGION}:${accountId}:event-bus/default`;
   for (const name of configurationSets) {
-    await ignoreExisting(() =>
-      ses.send(
-        new CreateConfigurationSetEventDestinationCommand({
-          ConfigurationSetName: name,
-          EventDestinationName: "yodev-mail-eventbridge",
-          EventDestination: {
-            Enabled: true,
-            EventBridgeDestination: { EventBusArn: eventBusArn },
-            MatchingEventTypes: [
-              "DELIVERY",
-              "BOUNCE",
-              "COMPLAINT",
-              "REJECT",
-              "DELIVERY_DELAY",
-            ],
-          },
-        }),
-      ),
-    );
+    const destination: CreateConfigurationSetEventDestinationCommandInput = {
+      ConfigurationSetName: name,
+      EventDestinationName: "yodev-mail-eventbridge",
+      EventDestination: {
+        Enabled: true,
+        EventBridgeDestination: { EventBusArn: eventBusArn },
+        MatchingEventTypes: [
+          "DELIVERY",
+          "BOUNCE",
+          "COMPLAINT",
+          "REJECT",
+          "DELIVERY_DELAY",
+        ],
+      },
+    };
+    try {
+      await ses.send(new CreateConfigurationSetEventDestinationCommand(destination));
+    } catch (error) {
+      if (!(error instanceof AlreadyExistsException) && (error as { name?: string })?.name !== "AlreadyExistsException") throw error;
+      // Reconcile only our named destination; do not touch unrelated destinations.
+      await ses.send(new UpdateConfigurationSetEventDestinationCommand(destination));
+    }
   }
   const identityArn = `arn:aws:ses:${env.AWS_REGION}:${accountId}:identity/${input.domain}`;
   const resources = [identityArn, ...configurationSets.map(name => `arn:aws:ses:${env.AWS_REGION}:${accountId}:configuration-set/${name}`)];

@@ -241,6 +241,10 @@ export class YodevMailStack extends Stack {
     provision.addToRolePolicy(new PolicyStatement({ actions: ["ssm:GetParameter", "ssm:GetParameters", "ssm:PutParameter"], resources: [`arn:aws:ssm:${this.region}:${this.account}:parameter/${prefix}/providers/*`] }));
     providerCredentialsKey.grantEncryptDecrypt(provision);
     provision.addToRolePolicy(new PolicyStatement({ actions: ["ses:CreateConfigurationSet", "ses:CreateConfigurationSetEventDestination", "ses:CreateEmailIdentity", "ses:CreateTenant", "ses:CreateTenantResourceAssociation", "ses:GetEmailIdentity", "ses:GetTenant", "ses:PutEmailIdentityMailFromAttributes", "ses:UpdateReputationEntityPolicy"], resources: ["*"] }));
+    provision.addToRolePolicy(new PolicyStatement({
+      actions: ["ses:UpdateConfigurationSetEventDestination"],
+      resources: [`arn:aws:ses:${this.region}:${this.account}:configuration-set/ym-*-txn`],
+    }));
 
     const deliver = worker(
       "CustomerWebhooks",
