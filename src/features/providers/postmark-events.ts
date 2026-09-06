@@ -1,6 +1,7 @@
 import { createHash } from "node:crypto";
 import { z } from "zod";
 import type { NormalizedProviderEvent } from "@/features/providers/normalize-event";
+import { eventOpaqueId, eventTimestamp, eventWorkspaceId, safeEventReason } from "./event-contract";
 
 type PostmarkWebhook = {
   RecordType?: string;
@@ -17,22 +18,30 @@ type PostmarkWebhook = {
 
 const webhookSchema = z.object({
   RecordType: z.enum(["Delivery", "Bounce", "SpamComplaint"]),
-  MessageID: z.string().min(8).max(180),
+  MessageID: eventOpaqueId,
   ServerID: z.number().int().positive(),
-  ID: z.number().int().optional(),
+  ID: z.number().int().positive().safe().optional(),
   Type: z.string().max(120).optional(),
   TypeCode: z.number().int().optional(),
-  DeliveredAt: z.string().datetime({ offset: true }).optional(),
-  BouncedAt: z.string().datetime({ offset: true }).optional(),
-  ReceivedAt: z.string().datetime({ offset: true }).optional(),
-  Metadata: z.record(z.string(), z.string().max(180)).optional(),
-}).passthrough();
+  DeliveredAt: eventTimestamp.optional(),
+  BouncedAt: eventTimestamp.optional(),
+  ReceivedAt: eventTimestamp.optional(),
+  Metadata: z.object({
+    ym_message_id: eventWorkspaceId.optional(),
+    ym_workspace_id: eventWorkspaceId.optional(),
+  }).optional(),
+}).refine((payload) => Boolean(payload.RecordType === "Delivery"
+  ? payload.DeliveredAt : payload.BouncedAt),
+{ message: "Missing lifecycle timestamp" });
 
 export function parsePostmarkWebhook(value: unknown): PostmarkWebhook {
   return webhookSchema.parse(value);
 }
 
-export function normalizePostmarkEvent(payload: PostmarkWebhook): NormalizedProviderEvent | null {
+export function normalizePostmarkEvent(value: PostmarkWebhook): NormalizedProviderEvent | null {
+  const parsed = webhookSchema.safeParse(value);
+  if (!parsed.success) return null;
+  const payload = parsed.data;
   if (!payload.MessageID || !payload.RecordType) return null;
   const recordType = payload.RecordType.toLowerCase();
   const type = recordType === "delivery"
@@ -43,7 +52,10 @@ export function normalizePostmarkEvent(payload: PostmarkWebhook): NormalizedProv
         ? payload.TypeCode === 1 || payload.Type === "HardBounce" ? "hard_bounced" : "soft_bounced"
         : null;
   if (!type) return null;
-  const occurredAt = new Date(payload.DeliveredAt ?? payload.BouncedAt ?? payload.ReceivedAt ?? Date.now());
+  // Postmark complaints, like bounces, use BouncedAt (not ReceivedAt).
+  const timestamp = payload.RecordType === "Delivery" ? payload.DeliveredAt : payload.BouncedAt;
+  if (!timestamp) return null;
+  const occurredAt = new Date(timestamp);
   const externalEventId = payload.ID
     ? `${recordType}:${payload.ID}`
     : createHash("sha256").update(`${payload.MessageID}:${recordType}:${occurredAt.toISOString()}`).digest("hex");
@@ -55,6 +67,6 @@ export function normalizePostmarkEvent(payload: PostmarkWebhook): NormalizedProv
     workspaceId: payload.Metadata?.ym_workspace_id,
     type,
     occurredAt,
-    reasonCode: payload.Type,
+    reasonCode: safeEventReason(payload.Type),
   };
 }

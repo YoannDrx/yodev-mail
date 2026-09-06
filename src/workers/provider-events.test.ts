@@ -3,7 +3,7 @@ import { normalizeQueuedProviderEvent, normalizeSanitizedSesEvent } from "./ses-
 
 describe("sanitized provider queue events", () => {
   it.each([["Permanent", "hard_bounced"], ["Transient", "soft_bounced"], ["Undetermined", "soft_bounced"], [undefined, "soft_bounced"]])("classifies bounce %s as %s", (bounceType, type) => {
-    expect(normalizeSanitizedSesEvent({ eventType: "Bounce", bounceType, providerMessageId: "provider-1", workspaceId: "workspace-1" })?.type).toBe(type);
+    expect(normalizeSanitizedSesEvent({ eventType: "Bounce", bounceType, providerMessageId: "provider-1", workspaceId: "00000000-0000-0000-0000-000000000002", occurredAt: "2026-08-12T12:00:00.000Z" })?.type).toBe(type);
   });
 
   it("normalizes SES lifecycle fields and drops unexpected personal data", () => {
