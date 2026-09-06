@@ -64,8 +64,6 @@ Les preuves sont suivies dans le compte rendu dédié. Cette certification DB
 ne remplace pas le transport SES réel de bout en bout ; l'accès production
 SES reste `DENIED` lors de la nouvelle lecture.
 
-### Stripe
-
 ### Mise à jour technique du 7 septembre : contrat des callbacks et files
 
 Le [lot de validation des événements](provider-event-contract-2026-09-07.md)
