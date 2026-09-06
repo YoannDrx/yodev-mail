@@ -2,6 +2,10 @@ import { describe, expect, it } from "vitest";
 import { normalizeQueuedProviderEvent, normalizeSanitizedSesEvent } from "./ses-events";
 
 describe("sanitized provider queue events", () => {
+  it.each([["Permanent", "hard_bounced"], ["Transient", "soft_bounced"], ["Undetermined", "soft_bounced"], [undefined, "soft_bounced"]])("classifies bounce %s as %s", (bounceType, type) => {
+    expect(normalizeSanitizedSesEvent({ eventType: "Bounce", bounceType, providerMessageId: "provider-1", workspaceId: "workspace-1" })?.type).toBe(type);
+  });
+
   it("normalizes SES lifecycle fields and drops unexpected personal data", () => {
     const event = normalizeSanitizedSesEvent({
       eventId: "event-1",

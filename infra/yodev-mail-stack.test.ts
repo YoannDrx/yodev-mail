@@ -94,6 +94,12 @@ describe("Mail by Yodev AWS infrastructure", () => {
       Array.isArray(statement.Action) ? statement.Action : [statement.Action],
     );
     expect(actions).toContain("s3:PutObject");
+    expect(actions).toContain("ses:GetEmailIdentity");
+    expect(actions).not.toContain("ses:SendEmail");
+    const identityRead = statements.find((statement) =>
+      (Array.isArray(statement.Action) ? statement.Action : [statement.Action]).includes("ses:GetEmailIdentity"),
+    );
+    expect(identityRead?.Resource).toBe("arn:aws:ses:eu-west-3:123456789012:identity/*");
     expect(actions).not.toContain("s3:GetObject");
     const decryptStatements = statements.filter((statement) =>
       (Array.isArray(statement.Action) ? statement.Action : [statement.Action]).includes("kms:Decrypt"),
@@ -445,6 +451,11 @@ describe("Mail by Yodev AWS infrastructure", () => {
       EventPattern: Match.objectLike({ source: ["aws.ses"] }),
       Targets: Match.arrayWith([Match.objectLike({ InputTransformer: Match.anyValue() })]),
     }));
+    const rule = Object.values(activeProductionWorkload.findResources("AWS::Events::Rule"))
+      .find((resource) => resource.Properties.EventPattern?.source?.includes("aws.ses"));
+    const paths = Object.values(rule!.Properties.Targets[0].InputTransformer.InputPathsMap);
+    expect(paths).toContain("$.time");
+    expect(paths).not.toContain("$.detail.mail.timestamp");
   });
 
   test("opens Stripe usage only on an explicitly active workload", () => {

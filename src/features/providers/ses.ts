@@ -41,6 +41,7 @@ export class SesDeliveryProvider implements DeliveryProvider {
             { Name: "ym_workspace_id", Value: input.workspaceId },
           ],
         }),
+        { abortSignal: AbortSignal.timeout(15_000) },
       );
       if (!response.MessageId) {
         throw new ProviderSendError("SES did not return a message identifier.", "ambiguous", "provider_outcome_unknown");
@@ -48,17 +49,15 @@ export class SesDeliveryProvider implements DeliveryProvider {
       return { providerMessageId: response.MessageId, acceptedAt: new Date() };
     } catch (error) {
       if (error instanceof ProviderSendError) throw error;
-      const name = (error as { name?: string }).name ?? "unknown";
-      const transient = [
-        "AccountSuspendedException",
-        "InternalServiceErrorException",
-        "ServiceUnavailableException",
-        "ThrottlingException",
-        "TooManyRequestsException",
-      ].includes(name);
-      const definitive = ["BadRequestException", "MessageRejected", "MailFromDomainNotVerifiedException"].includes(name);
+      const rejected = ["AccountSuspendedException", "SendingPausedException", "NotFoundException", "AccessDeniedException", "BadRequestException", "MessageRejected", "MailFromDomainNotVerifiedException"];
+      const throttled = ["ThrottlingException", "TooManyRequestsException"];
+      const uncertain = ["InternalServiceErrorException", "ServiceUnavailableException", "TimeoutError", "AbortError"];
+      const rawName = error && typeof error === "object" && "name" in error ? error.name : undefined;
+      const name = typeof rawName === "string" && [...rejected, ...throttled, ...uncertain].includes(rawName) ? rawName : "unknown";
+      const definitive = rejected.includes(name);
+      const transient = throttled.includes(name);
       throw new ProviderSendError(
-        error instanceof Error ? error.message : "SES delivery failed.",
+        `SES delivery failed (${name}).`,
         definitive ? "definitive" : transient ? "transient" : "ambiguous",
         `ses_${name}`,
       );

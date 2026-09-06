@@ -321,7 +321,8 @@ export class YodevMailStack extends Stack {
           providerMessageId: EventField.fromPath("$.detail.mail.messageId"),
           messageId: EventField.fromPath("$.detail.mail.tags.ym_message_id[0]"),
           workspaceId: EventField.fromPath("$.detail.mail.tags.ym_workspace_id[0]"),
-          occurredAt: EventField.fromPath("$.detail.mail.timestamp"),
+          // mail.timestamp is the original send time, not the lifecycle event time.
+          occurredAt: EventField.time,
           bounceType: EventField.fromPath("$.detail.bounce.bounceType"),
         }),
       })],
@@ -338,6 +339,11 @@ export class YodevMailStack extends Stack {
     });
     providerEvents.main.grantSendMessages(vercelRole);
     providerProvisioning.main.grantSendMessages(vercelRole);
+    // The authenticated domain refresh action checks SES directly from Vercel.
+    vercelRole.addToPolicy(new PolicyStatement({
+      actions: ["ses:GetEmailIdentity"],
+      resources: [`arn:aws:ses:${this.region}:${this.account}:identity/*`],
+    }));
     vercelRole.addToPolicy(new PolicyStatement({
       actions: ["s3:PutObject"],
       resources: [attachmentBucket.arnForObjects("pending/*")],

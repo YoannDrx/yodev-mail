@@ -18,13 +18,13 @@ type SanitizedSesEvent = {
   reasonCode?: string;
 };
 
-function normalizeType(value: string | undefined): NormalizedProviderEvent["type"] | null {
+function normalizeType(value: string | undefined, bounceType?: string): NormalizedProviderEvent["type"] | null {
   switch (value?.trim().toUpperCase().replace(/[ -]+/g, "_")) {
     case "SEND": return "sent";
     case "DELIVERY": return "delivered";
     case "DELIVERY_DELAY":
     case "DELIVERYDELAY": return "soft_bounced";
-    case "BOUNCE": return "hard_bounced";
+    case "BOUNCE": return bounceType?.toUpperCase() === "PERMANENT" ? "hard_bounced" : "soft_bounced";
     case "COMPLAINT": return "complained";
     case "REJECT": return "failed";
     default: return null;
@@ -32,7 +32,7 @@ function normalizeType(value: string | undefined): NormalizedProviderEvent["type
 }
 
 export function normalizeSanitizedSesEvent(input: SanitizedSesEvent): NormalizedProviderEvent | null {
-  const type = normalizeType(input.eventType);
+  const type = normalizeType(input.eventType, input.bounceType);
   if (!type || !input.providerMessageId || !input.workspaceId) return null;
   const occurredAt = new Date(input.occurredAt ?? Date.now());
   if (Number.isNaN(occurredAt.getTime())) return null;

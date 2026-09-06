@@ -72,11 +72,12 @@ export async function provisionSesDomain(input: { workspaceId: string; domain: s
       ),
     );
   }
-  const resources = [`arn:aws:ses:${env.AWS_REGION}:${accountId}:identity/${input.domain}`, ...configurationSets.map(name => `arn:aws:ses:${env.AWS_REGION}:${accountId}:configuration-set/${name}`)];
+  const identityArn = `arn:aws:ses:${env.AWS_REGION}:${accountId}:identity/${input.domain}`;
+  const resources = [identityArn, ...configurationSets.map(name => `arn:aws:ses:${env.AWS_REGION}:${accountId}:configuration-set/${name}`)];
   for (const arn of resources) await ignoreExisting(() => ses.send(new CreateTenantResourceAssociationCommand({ TenantName: tenantName, ResourceArn: arn })));
   const tokens = identity.DkimAttributes?.Tokens ?? [];
   return {
-    tenantName, configurationSets, tokens,
+    tenantName, configurationSets, tokens, identityArn,
     records: [
       ...tokens.map(token => ({ type: "CNAME", name: `${token}._domainkey.${input.domain}`, value: `${token}.dkim.amazonses.com` })),
       { type: "MX", name: `bounce.${input.domain}`, value: `10 feedback-smtp.${env.AWS_REGION}.amazonses.com` },

@@ -47,7 +47,7 @@ export async function provisionBinding(bindingId: string) {
           target: [workspaceProviderAccounts.workspaceId, workspaceProviderAccounts.provider],
           set: { status: "ready", externalAccountId: result.tenantName, reputationPolicy: SES_REPUTATION_POLICY, updatedAt: new Date() },
         });
-        await tx.update(domainProviderBindings).set({ externalDomainId: `arn:aws:ses:${process.env.AWS_REGION ?? "eu-west-3"}:${process.env.AWS_ACCOUNT_ID ?? ""}:identity/${row.domain.name}`, mailFromDomain: `bounce.${row.domain.name}`, dnsRecords: result.records, status: "dns_pending", updatedAt: new Date() }).where(eq(domainProviderBindings.id, row.binding.id));
+        await tx.update(domainProviderBindings).set({ externalDomainId: result.identityArn, mailFromDomain: `bounce.${row.domain.name}`, dnsRecords: result.records, status: "dns_pending", updatedAt: new Date() }).where(and(eq(domainProviderBindings.id, row.binding.id), eq(domainProviderBindings.workspaceId, row.workspace.id)));
       });
     }
   } catch (error) {
