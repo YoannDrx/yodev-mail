@@ -78,9 +78,17 @@ PR [#35](https://github.com/YoannDrx/yodev-mail/pull/35), branche `codex/ses-pro
 | Événement SES daté à l'heure d'envoi initiale | Livraison/plaintes tardives comptées à une date incorrecte | Utiliser l'heure de génération de l'événement EventBridge, pas `mail.timestamp` |
 | Dépendances transitives `fast-uri` et `qs` vulnérables | Vulnérabilités connues dans la chaîne de dépendances | Mise à jour du lockfile ; `npm audit` : zéro vulnérabilité connue. Aucune exploitation de l'application démontrée |
 
-Tests locaux : `npm run check` (lint, TypeScript, 140 tests et build) et les 8 tests Playwright publics réussis. Les tests de régression ont d'abord reproduit 23 échecs avant les corrections. La suite PostgreSQL isolée doit être confirmée par CI ; Docker local n'était pas démarré. Les parcours authentifiés réels ne sont pas couverts par les huit tests publics.
+Tests locaux : `npm run check` (lint, TypeScript, 140 tests et build) et les 8 tests Playwright publics réussis. Les tests de régression ont d'abord reproduit 23 échecs avant les corrections. La [CI du code `ef2d917`](https://github.com/YoannDrx/yodev-mail/actions/runs/34056238239) est entièrement verte : qualité, navigateur, secrets et **198 tests unitaires/intégration** avec PostgreSQL 17 isolé. Couverture globale mesurée : 83,57 % des lignes et 71,04 % des branches ; ce n'est pas une preuve de couverture exhaustive. Docker local n'était pas démarré ; l'intégration a été exécutée en CI. Les parcours authentifiés réels ne sont pas couverts par les huit tests publics.
 
-Publication et contrôle de drift : à compléter avec les résultats finaux de cette intervention. Aucun changement à la checklist utilisateur non commitée n'est inclus.
+### Publication et contrôles d'infrastructure
+
+- Avant publication, `YodevMailFoundation`, `YodevMailDev` et `YodevMailProd` étaient `IN_SYNC`, zéro ressource en dérive. Development était donc conforme à son **ancien** template, pas au code actuel.
+- Le `cdk diff` a été examiné avant déploiement. Aucun bucket, clé KMS ou file n'a été supprimé ou remplacé. Les délais de visibilité Dev ont été alignés sur 360/420 secondes et deux workers de récupération/réconciliation déjà présents en Production ont été ajoutés en Dev.
+- AWS Dev : `UPDATE_COMPLETE` à **19:55:35 UTC**. Treize workers en `standby`, gates SES/Postmark `false`, dix règles désactivées.
+- AWS Prod : `UPDATE_COMPLETE` à **19:57:14 UTC**. Code des treize workers, lecture IAM limitée et horodatage de la règle SES mis à jour ; mode `standby` conservé. Foundation n'a pas été redéployée.
+- Simulation IAM après déploiement Production : `ses:GetEmailIdentity=allowed` sur l'identité contrôlée, `ses:SendEmail=implicitDeny` pour Vercel. Seul le worker d'envoi peut envoyer.
+- Preview Vercel `dpl_QmBSLon5ebMHvBB7hXRKYW8rN4YF` : `READY`, health application/DB `ok`, version `ef2d917`. La publication web Production suit la fusion contrôlée de la PR #35 et doit être vérifiée par son health check, sans promouvoir les variables Preview en Production.
+- Aucune migration, suppression de données, activation d'envoi, ouverture commerciale ou modification de la checklist utilisateur non commitée n'est incluse.
 
 ## Conditions restantes pour une commercialisation
 
