@@ -111,3 +111,41 @@ Les huit parcours Playwright publics passent localement en une minute.
 locale, sans contrôle visuel supplémentaire. La CI obligatoire, dont les
 parcours authentifiés, reste requise avant fusion. Aucun GO commercial ne sera
 déduit de ce lot seul.
+
+### Publication vérifiée le 7 septembre à 01 h 37 (Paris)
+
+- [PR #40](https://github.com/YoannDrx/yodev-mail/pull/40) fusionnée à
+  01 h 34 min 20 s, sans contournement des protections ; tête testée
+  `e698737bdac8196935440046b08b1a6e795de0cc`, commit de fusion
+  `192ddabd56b43b2f5d1f4ea335293ae14f2d0094`. Arbres identiques.
+- CI de PR `34067025366` et CI de `main` `34067264562` entièrement vertes,
+  y compris les huit parcours authentifiés ; GitGuardian et Vercel verts.
+- AWS Dev `UPDATE_COMPLETE` à 01 h 35 min 35 s, puis Prod à
+  01 h 36 min 26 s. Seul le code de `ProviderEvents` est actualisé dans chaque
+  environnement. Hash Lambda Prod : `lDjDJ7/SyIdjulNHXdha1tP3I8X6i2Kw7ztQaPXmCQ0=`.
+- Vercel Production `dpl_A6moRRZxz3aPZCdixdEQsYffka3X` est `READY` sur le
+  commit de fusion. `https://api.mail.yodev.fr/health` retourne
+  `status=ok`, `database=ok`, `version=192ddab`. Le health de
+  `https://mail.yodev.fr` redirige vers cette API ; l'onboarding anonyme
+  redirige vers `/fr/connexion`.
+- Les 26 workers restent en standby, SES et Postmark désactivés ; aucun
+  mapping Lambda/SQS. Les files `provider-events` Dev/Prod et leurs DLQ ont
+  chacune zéro message visible, en cours ou différé. Aucun message envoyé,
+  rejoué, purgé ou consommé pour cette publication.
+- Aucun log Vercel `error`/`fatal` retourné pour ce déploiement sur la courte
+  fenêtre postpublication. Ce contrôle n'est pas une observation de 72 heures.
+
+Lecture Neon ciblée, sans mutation ni contenu d'email : le workspace interne
+`15734662-27a7-4bd8-b4bf-e6caed86a17a` est `approved`, sans motif de pause.
+Le regroupement de tous ses types d'événements ne contient ni
+`email.complained` ni `email.hard_bounced` ; ses compteurs correspondants sur
+sept jours et ses audits de suspension automatique sont nuls. Aucune réparation
+de suspension n'est donc justifiée par ces données. Ce constat ne porte pas
+sur d'autres workspaces. La première requête ayant omis le préfixe `email.`
+des types, le contrôle a été confirmé par le regroupement exhaustif des types.
+
+SES relu dans `eu-west-3` : accès production `false`, revue `DENIED`, compte
+`HEALTHY`, sandbox 200/jour et 1/seconde, zéro envoi sur 24 heures. Identité
+`mail.yodev.fr` vérifiée, DKIM RSA 2048 `SUCCESS`, MAIL FROM
+`bounce.mail.yodev.fr` `SUCCESS` avec `REJECT_MESSAGE`. L'approbation AWS et
+la certification complète du transport restent ouvertes ; aucun GO commercial.

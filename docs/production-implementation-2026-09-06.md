@@ -56,8 +56,24 @@ rend la suspension de réputation atomique avec la plainte, les compteurs et son
 audit. Il refuse les identifiants fournisseur contradictoires et protège les
 simulations test. Trois défauts reproduits avant correction ; dix nouveaux
 scénarios PostgreSQL, 298 tests globaux et `npm run check` verts localement.
-La publication et ses preuves sont suivies dans le compte rendu dédié. Cette
-certification DB ne remplace pas le transport SES réel de bout en bout.
+Publié dans la PR #40, commit `192ddabd56b43b2f5d1f4ea335293ae14f2d0094` :
+CI de PR et de `main` vertes, Vercel READY, AWS Dev/Prod UPDATE_COMPLETE.
+Les 26 workers restent en standby, les files d'événements et DLQ sont vides.
+La lecture de l'historique interne ne justifie aucune réparation de suspension.
+Les preuves sont suivies dans le compte rendu dédié. Cette certification DB
+ne remplace pas le transport SES réel de bout en bout ; l'accès production
+SES reste `DENIED` lors de la nouvelle lecture.
+
+### Stripe
+
+### Mise à jour technique du 7 septembre : contrat des callbacks et files
+
+Le [lot de validation des événements](provider-event-contract-2026-09-07.md)
+ajoute des validations runtime aux entrées SES/Postmark, impose leur date réelle,
+filtre les diagnostics libres avant publication et signale les messages SQS
+malformés pour reprise au lieu de les acquitter silencieusement. 22 nouveaux
+tests unitaires et un scénario de route authentifiée sont ajoutés. Les preuves
+locales sont vertes ; CI et publication restent à confirmer dans le rapport.
 
 ### Stripe
 

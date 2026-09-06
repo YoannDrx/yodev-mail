@@ -41,7 +41,7 @@ beforeEach(async () => {
   vi.stubEnv("POSTMARK_ENABLED", "true");
   vi.stubEnv("DEPLOYMENT_ENVIRONMENT", "prod");
   vi.stubEnv("VERCEL_ENV", "production");
-  vi.stubEnv("POSTMARK_WEBHOOK_BASE_URL", "https://api.mail.yodev.fr");
+  vi.stubEnv("POSTMARK_WEBHOOK_BASE_URL", "https://mail.yodev.fr");
   vi.stubEnv("PROVIDER_CREDENTIALS_KMS_KEY_ARN", "arn:aws:kms:eu-west-3:123456789012:key/synthetic");
   dependencies.values.clear();
   dependencies.send.mockReset().mockImplementation(async (command) => { dependencies.values.set(command.input.Name, command.input.Value); return {}; });
@@ -53,7 +53,7 @@ beforeEach(async () => {
   fetchMock.mockReset().mockImplementation(async (url, init) => {
     const path = new URL(String(url)).pathname;
     const server = { ID: 42, Name: `yodev-mail-prod-${workspaceId}`, DeliveryType: "Live", ApiTokens: ["synthetic-server-token"] };
-    const webhook = { ID: 44, Url: `https://api.mail.yodev.fr/api/providers/postmark/${bindingId}`, Status: "verified" };
+    const webhook = { ID: 44, Url: `https://mail.yodev.fr/api/providers/postmark/${bindingId}`, Status: "verified" };
     if (path === "/servers" && init?.method === "POST") return response(server);
     if (path === "/servers") return response({ TotalCount: 0, Servers: [] });
     if (path === "/servers/42") return response(server);
@@ -67,7 +67,7 @@ beforeEach(async () => {
         const reply = await POST(new Request(webhook.Url, {
           method: "POST",
           headers: { "content-type": "application/json", "x-vercel-forwarded-for": "3.134.147.250", authorization: `Basic ${Buffer.from(`${body.HttpAuth.Username}:${body.HttpAuth.Password}`).toString("base64")}` },
-          body: JSON.stringify({ RecordType, ServerID: 42, MessageID: "synthetic-verification-message", Type: "HardBounce", DeliveredAt: "2026-09-07T00:00:00Z", Metadata: { ym_workspace_id: workspaceId } }),
+          body: JSON.stringify({ RecordType, ServerID: 42, MessageID: "synthetic-verification-message", Type: RecordType === "SpamComplaint" ? "SpamComplaint" : "HardBounce", [RecordType === "Delivery" ? "DeliveredAt" : "BouncedAt"]: "2026-09-07T00:00:00Z", Metadata: { ym_workspace_id: workspaceId } }),
         }), { params: Promise.resolve({ bindingId }) });
         verificationStatuses.push(reply.status);
         expect(reply.status).toBe(200);
@@ -103,4 +103,27 @@ it("recovers a lost create response by updating the same webhook without rotatin
   expect(fetchMock.mock.calls.filter(([url, init]) => new URL(String(url)).pathname === "/webhooks/44" && init?.method === "PUT")).toHaveLength(1);
   expect(dependencies.send).toHaveBeenCalledTimes(2);
   expect(verificationStatuses).toHaveLength(6);
+});
+
+it("rejects malformed authenticated callbacks before queue publication", async () => {
+  await provisionBinding(workspaceId, bindingId);
+  dependencies.queue.mockClear();
+  const password = [...dependencies.values].find(([name]) => name.endsWith("/webhook-password"))?.[1];
+  expect(password).toBeDefined();
+  const base = { RecordType: "Delivery", ServerID: 42, MessageID: "synthetic-verification-message", DeliveredAt: "2026-09-07T00:00:00Z", Metadata: { ym_workspace_id: workspaceId } };
+  for (const payload of [
+    { ...base, DeliveredAt: undefined },
+    { ...base, DeliveredAt: "2026-02-30T00:00:00Z" },
+    { ...base, MessageID: "private@example.net" },
+    { ...base, Metadata: { ym_workspace_id: workspaceId, ym_message_id: "not-a-uuid" } },
+  ]) {
+    const reply = await POST(new Request(`https://mail.yodev.fr/api/providers/postmark/${bindingId}`, {
+      method: "POST",
+      headers: { "content-type": "application/json", "x-vercel-forwarded-for": "3.134.147.250", authorization: `Basic ${Buffer.from(`yodev-mail:${password}`).toString("base64")}` },
+      body: JSON.stringify(payload),
+    }), { params: Promise.resolve({ bindingId }) });
+    expect(reply.status).toBe(400);
+    expect(await reply.text()).not.toContain("private");
+  }
+  expect(dependencies.queue).not.toHaveBeenCalled();
 });

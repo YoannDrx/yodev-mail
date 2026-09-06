@@ -1,22 +1,32 @@
 import { createHash } from "node:crypto";
+import { z } from "zod";
 import type { SQSBatchResponse, SQSEvent } from "aws-lambda";
 import { ingestProviderEvent } from "@/features/providers/ingest-event";
 import type { NormalizedProviderEvent } from "@/features/providers/normalize-event";
 import { loadRuntimeSecrets } from "@/workers/runtime-secrets";
 import { logWorkerResult } from "@/lib/worker-log";
+import { eventOpaqueId, eventTimestamp, eventWorkspaceId, safeEventReason } from "@/features/providers/event-contract";
 
-type SanitizedSesEvent = {
-  provider?: "ses" | "postmark";
-  externalEventId?: string;
-  eventId?: string;
-  eventType?: string;
-  providerMessageId?: string;
-  messageId?: string;
-  workspaceId?: string;
-  occurredAt?: string;
-  bounceType?: string;
-  reasonCode?: string;
+const correlationFields = {
+  providerMessageId: eventOpaqueId,
+  messageId: eventWorkspaceId.optional(),
+  workspaceId: eventWorkspaceId,
+  occurredAt: eventTimestamp,
+  reasonCode: z.unknown().optional(),
 };
+const sesSchema = z.object({
+  ...correlationFields,
+  provider: z.literal("ses").optional(),
+  eventId: eventOpaqueId.optional(),
+  eventType: z.string().min(1).max(48),
+  bounceType: z.enum(["Permanent", "Transient", "Undetermined"]).optional(),
+});
+const postmarkSchema = z.object({
+  ...correlationFields,
+  provider: z.literal("postmark"),
+  externalEventId: eventOpaqueId,
+  type: z.enum(["sent", "delivered", "soft_bounced", "hard_bounced", "complained", "failed"]),
+});
 
 function normalizeType(value: string | undefined, bounceType?: string): NormalizedProviderEvent["type"] | null {
   switch (value?.trim().toUpperCase().replace(/[ -]+/g, "_")) {
@@ -31,10 +41,13 @@ function normalizeType(value: string | undefined, bounceType?: string): Normaliz
   }
 }
 
-export function normalizeSanitizedSesEvent(input: SanitizedSesEvent): NormalizedProviderEvent | null {
+export function normalizeSanitizedSesEvent(value: unknown): NormalizedProviderEvent | null {
+  const parsed = sesSchema.safeParse(value);
+  if (!parsed.success) return null;
+  const input = parsed.data;
   const type = normalizeType(input.eventType, input.bounceType);
   if (!type || !input.providerMessageId || !input.workspaceId) return null;
-  const occurredAt = new Date(input.occurredAt ?? Date.now());
+  const occurredAt = new Date(input.occurredAt);
   if (Number.isNaN(occurredAt.getTime())) return null;
   return {
     provider: "ses",
@@ -46,16 +59,15 @@ export function normalizeSanitizedSesEvent(input: SanitizedSesEvent): Normalized
     workspaceId: input.workspaceId,
     type,
     occurredAt,
-    reasonCode: input.reasonCode ?? input.bounceType,
+    reasonCode: safeEventReason(input.reasonCode) ?? safeEventReason(input.bounceType),
   };
 }
 
-export function normalizeQueuedProviderEvent(input: SanitizedSesEvent & {
-  type?: NormalizedProviderEvent["type"];
-}): NormalizedProviderEvent | null {
-  if (input.provider !== "postmark") return normalizeSanitizedSesEvent(input);
-  if (!input.externalEventId || !input.providerMessageId || !input.type) return null;
-  const occurredAt = new Date(input.occurredAt ?? Date.now());
+export function normalizeQueuedProviderEvent(value: unknown): NormalizedProviderEvent | null {
+  const parsed = postmarkSchema.safeParse(value);
+  if (!parsed.success) return normalizeSanitizedSesEvent(value);
+  const input = parsed.data;
+  const occurredAt = new Date(input.occurredAt);
   if (Number.isNaN(occurredAt.getTime())) return null;
   return {
     provider: "postmark",
@@ -65,7 +77,7 @@ export function normalizeQueuedProviderEvent(input: SanitizedSesEvent & {
     workspaceId: input.workspaceId,
     type: input.type,
     occurredAt,
-    reasonCode: input.reasonCode ?? input.bounceType,
+    reasonCode: safeEventReason(input.reasonCode),
   };
 }
 
@@ -75,8 +87,13 @@ export async function handler(event: SQSEvent): Promise<SQSBatchResponse> {
   for (const record of event.Records) {
     try {
       const normalized = normalizeQueuedProviderEvent(JSON.parse(record.body));
-      if (normalized) await ingestProviderEvent(normalized);
-      logWorkerResult({ worker: "provider-events", correlationId: record.messageId, outcome: normalized ? "completed" : "skipped" });
+      if (!normalized) {
+        logWorkerResult({ worker: "provider-events", correlationId: record.messageId, outcome: "failed", code: "invalid_event" });
+        batchItemFailures.push({ itemIdentifier: record.messageId });
+        continue;
+      }
+      const result = await ingestProviderEvent(normalized);
+      logWorkerResult({ worker: "provider-events", correlationId: record.messageId, outcome: result.skipped ? "skipped" : "completed" });
     } catch {
       logWorkerResult({ worker: "provider-events", correlationId: record.messageId, outcome: "failed", code: "technical_failure" });
       batchItemFailures.push({ itemIdentifier: record.messageId });
