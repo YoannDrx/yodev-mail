@@ -70,8 +70,21 @@ Le [lot de validation des événements](provider-event-contract-2026-09-07.md)
 ajoute des validations runtime aux entrées SES/Postmark, impose leur date réelle,
 filtre les diagnostics libres avant publication et signale les messages SQS
 malformés pour reprise au lieu de les acquitter silencieusement. 22 nouveaux
-tests unitaires et un scénario de route authentifiée sont ajoutés. Les preuves
-locales sont vertes ; CI et publication restent à confirmer dans le rapport.
+tests unitaires et un scénario de route authentifiée sont ajoutés. Publié dans
+la PR #41, commit `d8c717d2ae245eb64cf4db563c5eff46f6526017` : 321 tests
+en CI, CI de PR et de main vertes, Vercel READY, AWS Dev/Prod UPDATE_COMPLETE.
+Le health répond sur cette version ; les 26 workers restent en standby.
+Les preuves et limites sont détaillées dans le rapport.
+
+### Mise à jour technique du 7 septembre : isolation des événements SES
+
+Le [lot d'isolation Dev/Prod](ses-environment-isolation-2026-09-07.md) corrige
+un filtre réellement commun aux deux règles déployées : test AWS reproduit,
+règles actuellement désactivées. Le tag d'environnement est imposé à l'envoi,
+filtré par EventBridge et revérifié par le consommateur. 332 tests, les huit
+parcours publics et les 16 tests de patterns exécutés par AWS passent.
+Publication suivie dans le rapport ; cela ne prouve pas l'isolation complète
+des tenants/identités fournisseur ni la chaîne d'envoi réelle.
 
 ### Stripe
 

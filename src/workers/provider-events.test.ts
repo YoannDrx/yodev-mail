@@ -1,13 +1,16 @@
-import { describe, expect, it } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { normalizeQueuedProviderEvent, normalizeSanitizedSesEvent } from "./ses-events";
 
 describe("sanitized provider queue events", () => {
+  beforeEach(() => vi.stubEnv("DEPLOYMENT_ENVIRONMENT", "prod"));
+  afterEach(() => vi.unstubAllEnvs());
   it.each([["Permanent", "hard_bounced"], ["Transient", "soft_bounced"], ["Undetermined", "soft_bounced"], [undefined, "soft_bounced"]])("classifies bounce %s as %s", (bounceType, type) => {
-    expect(normalizeSanitizedSesEvent({ eventType: "Bounce", bounceType, providerMessageId: "provider-1", workspaceId: "00000000-0000-0000-0000-000000000002", occurredAt: "2026-08-12T12:00:00.000Z" })?.type).toBe(type);
+    expect(normalizeSanitizedSesEvent({ environment: "prod", eventType: "Bounce", bounceType, providerMessageId: "provider-1", workspaceId: "00000000-0000-0000-0000-000000000002", occurredAt: "2026-08-12T12:00:00.000Z" })?.type).toBe(type);
   });
 
   it("normalizes SES lifecycle fields and drops unexpected personal data", () => {
     const event = normalizeSanitizedSesEvent({
+      environment: "prod",
       eventId: "event-1",
       eventType: "Delivery",
       providerMessageId: "provider-1",

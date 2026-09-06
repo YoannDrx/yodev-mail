@@ -55,6 +55,17 @@ beforeAll(() => {
 }, 240_000);
 
 describe("Mail by Yodev AWS infrastructure", () => {
+  test("scopes SES event routing to each deployment environment, account and region", () => {
+    for (const [template, environment] of [[standbyWorkload, "dev"], [sesCertificationWorkload, "dev"], [activeProductionWorkload, "prod"]] as const) {
+      const rule = Object.values(template.findResources("AWS::Events::Rule")).find((entry) => entry.Properties.EventPattern?.source?.includes("aws.ses"));
+      expect(rule?.Properties.EventPattern).toMatchObject({
+        account: ["123456789012"], region: ["eu-west-3"],
+        detail: { mail: { tags: { ym_environment: [environment] } } },
+      });
+      expect(Object.values(rule!.Properties.Targets[0].InputTransformer.InputPathsMap)).toContain("$.detail.mail.tags.ym_environment[0]");
+      expect(rule!.Properties.Targets[0].InputTransformer.InputTemplate).toContain('"environment":');
+    }
+  });
   test("scopes SES event destination reconciliation to owned transactional configuration sets", () => {
     const policies = activeProductionWorkload.findResources("AWS::IAM::Policy");
     const policy = Object.values(policies).find((entry) =>
