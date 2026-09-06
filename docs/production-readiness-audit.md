@@ -1,5 +1,7 @@
 # Audit de préparation à la production
 
+> État actuel : voir l'[audit du 6 septembre 2026](production-readiness-audit-2026-09-06.md). Les observations ci-dessous sont historiques et ne doivent pas servir de feu vert commercial.
+
 > Addendum du 21 août 2026 : la PR `#26` est fusionnée et la production Vercel
 > sert `4df89d8`. `npm run check` couvre 102 tests, les 5 scénarios Playwright
 > publics sont verts et la CI PostgreSQL 17 est verte. Les stacks
