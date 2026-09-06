@@ -35,7 +35,7 @@ export async function checkSesDomain(domain: string) {
     dmarcStatus: await dmarcStatus(domain),
     mailFromStatus,
     status:
-      identity.VerifiedForSendingStatus && dkimStatus === "verified"
+      identity.VerifiedForSendingStatus && dkimStatus === "verified" && mailFromStatus === "verified"
         ? ("verified" as const)
         : ("pending" as const),
   };

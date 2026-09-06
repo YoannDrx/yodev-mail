@@ -19,7 +19,9 @@ export async function awsClients() {
   const shared = { region: env.AWS_REGION, credentials: credentials() };
   return {
     s3: new S3Client(shared),
-    ses: new SESv2Client(shared),
+    // SendEmail has no idempotency token. Retrying an uncertain response can duplicate mail.
+    // Explicit rejections are retried by the worker, never by the SDK transport.
+    ses: new SESv2Client({ ...shared, maxAttempts: 1 }),
     sqs: new SQSClient(shared),
     scheduler: new SchedulerClient(shared),
     ssm: new SSMClient(shared),

@@ -94,6 +94,12 @@ describe("Mail by Yodev AWS infrastructure", () => {
       Array.isArray(statement.Action) ? statement.Action : [statement.Action],
     );
     expect(actions).toContain("s3:PutObject");
+    expect(actions).toContain("ses:GetEmailIdentity");
+    expect(actions).not.toContain("ses:SendEmail");
+    const identityRead = statements.find((statement) =>
+      (Array.isArray(statement.Action) ? statement.Action : [statement.Action]).includes("ses:GetEmailIdentity"),
+    );
+    expect(identityRead?.Resource).toBe("arn:aws:ses:eu-west-3:123456789012:identity/*");
     expect(actions).not.toContain("s3:GetObject");
     const decryptStatements = statements.filter((statement) =>
       (Array.isArray(statement.Action) ? statement.Action : [statement.Action]).includes("kms:Decrypt"),

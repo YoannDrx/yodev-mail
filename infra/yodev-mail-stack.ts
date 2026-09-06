@@ -338,6 +338,11 @@ export class YodevMailStack extends Stack {
     });
     providerEvents.main.grantSendMessages(vercelRole);
     providerProvisioning.main.grantSendMessages(vercelRole);
+    // The authenticated domain refresh action checks SES directly from Vercel.
+    vercelRole.addToPolicy(new PolicyStatement({
+      actions: ["ses:GetEmailIdentity"],
+      resources: [`arn:aws:ses:${this.region}:${this.account}:identity/*`],
+    }));
     vercelRole.addToPolicy(new PolicyStatement({
       actions: ["s3:PutObject"],
       resources: [attachmentBucket.arnForObjects("pending/*")],
