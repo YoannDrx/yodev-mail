@@ -22,6 +22,18 @@ afterEach(() => {
 });
 
 describe("worker runtime parameters", () => {
+  test("does not access a credential with an expired worker deadline", async () => {
+    await expect(getSecureParameter("/integration/providers/expired", AbortSignal.abort())).rejects.toThrow();
+    await expect(loadRuntimeSecrets(["DATABASE_URL"], AbortSignal.abort())).rejects.toThrow();
+    expect(dependencies.ssmSend).not.toHaveBeenCalled();
+  });
+
+  test("passes the deadline to the encrypted parameter request", async () => {
+    const signal = new AbortController().signal;
+    dependencies.ssmSend.mockResolvedValue({ Parameters: [{ Value: "synthetic-value" }] });
+    await getSecureParameter("/integration/providers/bounded", signal);
+    expect(dependencies.ssmSend.mock.calls[0][1]).toEqual({ abortSignal: signal });
+  });
   test("maps every encrypted parameter without exposing names in logs", () => {
     expect(
       mapRuntimeParameters("/yodev-mail-dev/runtime", [

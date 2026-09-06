@@ -48,6 +48,26 @@ async function readBinding(id: string) {
 }
 
 describe("domain health scheduling and workspace isolation", () => {
+  it.each(["pending", "failed"] as const)("does not bypass %s provisioning even if an old external identity exists", async (status) => {
+    const binding = await seedBinding(0);
+    const marker = "postmark_webhook_creation_requires_reconciliation";
+    await db.update(domainProviderBindings).set({ status, lastCheckError: marker }).where(and(eq(domainProviderBindings.workspaceId, workspaceId), eq(domainProviderBindings.id, binding.id)));
+    await expect(checkBinding(workspaceId, binding.id)).rejects.toThrow("unavailable");
+    await expect(handler()).resolves.toEqual({ checked: 0 });
+    expect(dependencies.ses).not.toHaveBeenCalled();
+    expect(await readBinding(binding.id)).toMatchObject({ status, lastCheckError: marker });
+  });
+
+  it("does not clear a provisioning marker with a late DNS result", async () => {
+    const binding = await seedBinding(0);
+    const marker = "postmark_webhook_creation_requires_reconciliation";
+    dependencies.ses.mockImplementationOnce(async () => {
+      await db.update(domainProviderBindings).set({ status: "failed", lastCheckError: marker }).where(and(eq(domainProviderBindings.workspaceId, workspaceId), eq(domainProviderBindings.id, binding.id)));
+      return { dkimStatus: "verified", mailFromStatus: "verified", dmarcStatus: "verified", status: "verified" };
+    });
+    await checkBinding(workspaceId, binding.id);
+    expect(await readBinding(binding.id)).toMatchObject({ status: "failed", lastCheckError: marker });
+  });
   it("does not verify an identity before provisioning has stored its provider binding", async () => {
     const binding = await seedBinding(0);
     await db.update(domainProviderBindings).set({ externalDomainId: null, status: "pending" }).where(and(

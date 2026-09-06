@@ -14,6 +14,17 @@ beforeEach(() => {
 });
 
 describe("SES tenant reputation policy", () => {
+  it("shares one abort budget across SES and STS requests", async () => {
+    const signal = new AbortController().signal;
+    await provisionSesDomain({ workspaceId: "workspace-1", domain: "example.test", signal });
+    expect(send.mock.calls.every(([, options]) => options.abortSignal === signal)).toBe(true);
+    expect(stsSend.mock.calls.every(([, options]) => options.abortSignal === signal)).toBe(true);
+  });
+  it("does not start with an expired provisioning budget", async () => {
+    await expect(provisionSesDomain({ workspaceId: "workspace-1", domain: "example.test", signal: AbortSignal.abort() })).rejects.toThrow();
+    expect(send).not.toHaveBeenCalled();
+    expect(stsSend).not.toHaveBeenCalled();
+  });
   it("uses the AWS-recommended standard policy for new tenants", () => {
     expect(SES_REPUTATION_POLICY).toBe("standard");
   });

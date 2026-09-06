@@ -27,6 +27,7 @@ import { requireAdmin } from "@/lib/page-auth";
 import { reconcileOwnerProvisioningRun } from "@/features/onboarding/reconcile-owner";
 import { inviteWorkspaceMember } from "@/features/members/service";
 import { provisionBinding } from "@/workers/provider-provisioning";
+import { POSTMARK_WEBHOOK_CREATE_UNCERTAIN } from "@/features/providers/provision-postmark";
 
 const idSchema = z.string().uuid();
 const pilotDaysSchema = z.union([z.literal(30), z.literal(60), z.literal(90), z.null()]);
@@ -377,7 +378,7 @@ export async function provisionDomainAction(domainId: string, provider: "postmar
   if (provider === "postmark" && process.env.POSTMARK_ENABLED !== "true") throw new Error("Postmark is not enabled");
   const [binding] = await db.insert(domainProviderBindings).values({ workspaceId: workspace.id, domainId: domain.id, provider, status: "pending" }).onConflictDoUpdate({
     target: [domainProviderBindings.domainId, domainProviderBindings.provider],
-    set: { status: "pending", lastCheckError: null, updatedAt: new Date() },
+    set: { status: "pending", lastCheckError: sql`case when ${domainProviderBindings.lastCheckError} = ${POSTMARK_WEBHOOK_CREATE_UNCERTAIN} then ${POSTMARK_WEBHOOK_CREATE_UNCERTAIN} else null end`, updatedAt: new Date() },
     setWhere: and(eq(domainProviderBindings.workspaceId, workspace.id), inArray(domainProviderBindings.status, ["pending", "failed"]), eq(domainProviderBindings.isActive, false)),
   }).returning();
   if (!binding) throw new Error("Binding already provisioned or disabled; it cannot be reset by a provisioning retry");

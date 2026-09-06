@@ -63,4 +63,12 @@ describe("administrator provider provisioning request", () => {
     expect(calls.queue).not.toHaveBeenCalled();
     expect(await db.select().from(domainProviderBindings).where(eq(domainProviderBindings.workspaceId, workspaceId))).toHaveLength(0);
   });
+
+  it("keeps the uncertain webhook marker on an administrator retry", async () => {
+    const marker = "postmark_webhook_creation_requires_reconciliation";
+    const [binding] = await db.insert(domainProviderBindings).values({ workspaceId, domainId, provider: "postmark", status: "failed", lastCheckError: marker }).returning();
+    await provisionDomainAction(domainId, "postmark");
+    const [saved] = await db.select().from(domainProviderBindings).where(and(eq(domainProviderBindings.workspaceId, workspaceId), eq(domainProviderBindings.id, binding.id)));
+    expect(saved).toMatchObject({ status: "pending", lastCheckError: marker });
+  });
 });
