@@ -60,6 +60,31 @@ npm run env:normalize
 Never use `drizzle-kit push` against production. Create and verify a Neon
 restore branch before every production migration.
 
+### Authenticated browser certification
+
+`npm run test:e2e:auth` exercises real Better Auth sessions, tenant isolation,
+workspace switching, invitation acceptance, API-key authorization/revocation and
+WebAuthn with Chromium's virtual authenticator. It does not mock authentication.
+Create a **disposable local PostgreSQL database named `yodev_mail_auth_e2e`**,
+apply the committed migrations, then run:
+
+```bash
+TEST_DATABASE_URL=postgres://postgres@127.0.0.1:55441/yodev_mail_auth_e2e npm run test:e2e:auth
+```
+
+Use the actual local port and credentials for your disposable database. The
+runner rejects remote hosts, other database names and connection query options.
+It never falls back to `.env.local` for its database. The dedicated CI job
+provisions PostgreSQL and applies migrations automatically.
+
+The suite runs serially on `http://localhost:3918`, creates synthetic verified
+accounts and resets only its local authentication rate-limit table between cases.
+It generates ephemeral authentication secrets, disables providers, payments and
+live sending, and blocks browser requests to other origins. It never sends an
+invitation email: the pending invitation is seeded before exercising acceptance.
+These tests do not certify real Google OAuth, email delivery, physical passkey
+devices or production billing. Traces contain synthetic accounts only.
+
 Run the expurgated production baseline without displaying addresses, content or
 secrets:
 
