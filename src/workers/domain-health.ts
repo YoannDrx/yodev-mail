@@ -1,4 +1,4 @@
-import { and, asc, eq, inArray, ne, sql } from "drizzle-orm";
+import { and, asc, eq, inArray, isNotNull, ne, sql } from "drizzle-orm";
 import type { Context } from "aws-lambda";
 import { requireDb } from "@/db/runtime";
 import { domainProviderBindings, domains } from "@/db/schema";
@@ -12,7 +12,10 @@ export async function handler(_event?: unknown, context?: Pick<Context, "getRema
   const candidates = await db.select({ binding: domainProviderBindings, domain: domains }).from(domainProviderBindings).innerJoin(domains, and(
     eq(domains.id, domainProviderBindings.domainId),
     eq(domains.workspaceId, domainProviderBindings.workspaceId),
-  )).where(inArray(domainProviderBindings.status, ["pending", "dns_pending", "verified", "failed"]))
+  )).where(and(
+    inArray(domainProviderBindings.status, ["pending", "dns_pending", "verified", "failed"]),
+    isNotNull(domainProviderBindings.externalDomainId),
+  ))
     .orderBy(sql`${domainProviderBindings.lastCheckedAt} asc nulls first`, asc(domainProviderBindings.id))
     .limit(50);
   let checked = 0;
@@ -38,7 +41,7 @@ export async function checkBinding(workspaceId: string, bindingId: string) {
     ))
     .where(and(eq(domainProviderBindings.id, bindingId), eq(domainProviderBindings.workspaceId, workspaceId)))
     .limit(1);
-  if (!row || row.binding.status === "disabled") throw new Error("Domain binding is unavailable");
+  if (!row || row.binding.status === "disabled" || !row.binding.externalDomainId) throw new Error("Domain binding is unavailable");
   try {
     const result = row.binding.provider === "postmark"
       ? await checkPostmarkDomain(row.binding.externalDomainId ?? "")

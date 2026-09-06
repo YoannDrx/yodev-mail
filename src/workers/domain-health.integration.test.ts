@@ -21,6 +21,7 @@ async function seedBinding(index: number, lastCheckedAt: Date | null = null) {
   }).returning();
   const [binding] = await db.insert(domainProviderBindings).values({
     workspaceId, domainId: domain.id, provider: "ses", status: "verified", lastCheckedAt,
+    externalDomainId: `arn:aws:ses:eu-west-3:123456789012:identity/${domain.name}`,
   }).returning();
   return binding;
 }
@@ -47,6 +48,16 @@ async function readBinding(id: string) {
 }
 
 describe("domain health scheduling and workspace isolation", () => {
+  it("does not verify an identity before provisioning has stored its provider binding", async () => {
+    const binding = await seedBinding(0);
+    await db.update(domainProviderBindings).set({ externalDomainId: null, status: "pending" }).where(and(
+      eq(domainProviderBindings.workspaceId, workspaceId), eq(domainProviderBindings.id, binding.id),
+    ));
+    await expect(checkBinding(workspaceId, binding.id)).rejects.toThrow("unavailable");
+    await expect(handler()).resolves.toEqual({ checked: 0 });
+    expect(dependencies.ses).not.toHaveBeenCalled();
+    expect((await readBinding(binding.id)).status).toBe("pending");
+  });
   it("detects a mismatched message ledger even when totals match, and scopes the audit", async () => {
     const binding = await seedBinding(0);
     const [profile] = await db.insert(transactionalProfiles).values({
