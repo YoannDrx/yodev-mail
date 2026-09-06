@@ -59,6 +59,6 @@ export async function refreshDomainAction(domainId: string) {
     entityType: "domain",
     entityId: id,
   });
-  await checkBinding(binding.id);
+  await checkBinding(workspace.id, binding.id);
   revalidatePath("/dashboard/domaines");
 }

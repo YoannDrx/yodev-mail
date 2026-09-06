@@ -64,16 +64,17 @@ Run the expurgated production baseline without displaying addresses, content or
 secrets:
 
 ```bash
-npm run internal-go:audit -- --baseline --expected-version=abc1234
+npm run internal-go:audit -- --baseline --workspace-id=<workspace-uuid> --expected-version=abc1234
 ```
 
 After the controlled Gmail, Microsoft and Apple canaries, start the final
 72-hour verification from their ISO-8601 start timestamp:
 
 ```bash
-npm run internal-go:audit -- --canary-since=2026-08-18T18:00:00+02:00 --expected-version=abc1234
+npm run internal-go:audit -- --workspace-id=<workspace-uuid> --canary-since=2026-08-18T18:00:00+02:00 --expected-version=abc1234
 ```
 
+Replace `<workspace-uuid>` with the explicitly approved workspace ID (without angle brackets).
 Replace the example timestamp and short SHA with the controlled canary start and
 the version returned by both production health endpoints.
 
