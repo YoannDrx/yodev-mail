@@ -28,7 +28,8 @@ export async function ingestProviderEvent(event: NormalizedProviderEvent) {
       eq(messages.provider, event.provider),
     )).limit(1);
   }
-  if (!locatedMessage && event.workspaceId) {
+  // A provider-id fallback is only for absent metadata, never conflicting tags.
+  if (!event.messageId && event.workspaceId) {
     [locatedMessage] = await db.select().from(messages).where(and(
       eq(messages.workspaceId, event.workspaceId),
       eq(messages.provider, event.provider),
@@ -38,6 +39,13 @@ export async function ingestProviderEvent(event: NormalizedProviderEvent) {
   if (!locatedMessage) return { skipped: true };
 
   const ingested = await db.transaction(async (tx) => {
+    // Serialize reputation decisions across messages/days in this workspace.
+    // NO KEY UPDATE remains compatible with foreign-key key-share checks.
+    await tx.execute(sql`
+      select ${workspaces.id} from ${workspaces}
+      where ${workspaces.id} = ${locatedMessage.workspaceId}
+      for no key update
+    `);
     await tx.execute(sql`
       select ${messages.id}
       from ${messages}
@@ -49,7 +57,8 @@ export async function ingestProviderEvent(event: NormalizedProviderEvent) {
       eq(messages.id, locatedMessage.id),
       eq(messages.workspaceId, locatedMessage.workspaceId),
     )).limit(1);
-    if (!message) return null;
+    if (!message || message.provider !== event.provider || message.sendMode !== "live"
+      || (message.providerMessageId && message.providerMessageId !== event.providerMessageId)) return null;
     const [inserted] = await tx.insert(emailEvents).values({
       workspaceId: message.workspaceId,
       messageId: message.id,
@@ -122,20 +131,16 @@ export async function ingestProviderEvent(event: NormalizedProviderEvent) {
       }).onConflictDoNothing().returning();
       if (delivery) await tx.insert(outboxJobs).values({ workspaceId: message.workspaceId, aggregateId: delivery.id, kind: "webhook" });
     }
-    return { inserted: true, message };
-  });
-
-  if (!ingested) return { skipped: true };
-  const { message } = ingested;
-  if (ingested.inserted && (event.type === "hard_bounced" || event.type === "complained")) {
-    const since = utcDay(new Date(Date.now() - 7 * 864e5));
-    const [reputation] = await db.select({
-      complaints: sql<number>`coalesce(sum(${usageDays.complaints}), 0)::int`,
-      hardBounces: sql<number>`coalesce(sum(${usageDays.hardBounces}), 0)::int`,
-      sent: sql<number>`coalesce(sum(${usageDays.acceptedEmails}), 0)::int`,
-    }).from(usageDays).where(and(eq(usageDays.workspaceId, message.workspaceId), gte(usageDays.day, since)));
-    if (reputation && shouldAutoPause(reputation)) {
-      await db.transaction(async (tx) => {
+    // Suspension and its audit must commit with the event. Otherwise a failed
+    // suspension followed by a duplicate retry would permanently skip safety.
+    if (safetyEvent) {
+      const since = utcDay(new Date(Date.now() - 7 * 864e5));
+      const [reputation] = await tx.select({
+        complaints: sql<number>`coalesce(sum(${usageDays.complaints}), 0)::int`,
+        hardBounces: sql<number>`coalesce(sum(${usageDays.hardBounces}), 0)::int`,
+        sent: sql<number>`coalesce(sum(${usageDays.acceptedEmails}), 0)::int`,
+      }).from(usageDays).where(and(eq(usageDays.workspaceId, message.workspaceId), gte(usageDays.day, since)));
+      if (reputation && shouldAutoPause(reputation)) {
         const [paused] = await tx.update(workspaces)
           .set({ status: "paused", pauseReason: "reputation", pausedAt: new Date(), updatedAt: new Date() })
           .where(and(eq(workspaces.id, message.workspaceId), eq(workspaces.status, "approved")))
@@ -156,8 +161,11 @@ export async function ingestProviderEvent(event: NormalizedProviderEvent) {
             },
           });
         }
-      });
+      }
     }
-  }
+    return { inserted: true, message };
+  });
+
+  if (!ingested) return { skipped: true };
   return { skipped: false, duplicate: !ingested.inserted };
 }
