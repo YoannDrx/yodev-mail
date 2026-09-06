@@ -55,6 +55,8 @@ describe("Postmark webhook base URL", () => {
       workspaceName: "Integration",
       bindingId: "00000000-0000-4000-8000-000000000002",
       domain: "example.com",
+      checkpoint: async () => {},
+      beforeWebhookCreate: async () => {},
     })).rejects.toThrow("POSTMARK_WEBHOOK_BASE_URL");
   });
 
@@ -68,6 +70,8 @@ describe("Postmark webhook base URL", () => {
       workspaceName: "Integration",
       bindingId: "00000000-0000-4000-8000-000000000002",
       domain: "example.com",
+      checkpoint: async () => {},
+      beforeWebhookCreate: async () => {},
     })).rejects.toThrow("PROVIDER_CREDENTIALS_KMS_KEY_ARN");
   });
 });

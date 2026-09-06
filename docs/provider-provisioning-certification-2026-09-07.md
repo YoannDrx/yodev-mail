@@ -87,6 +87,12 @@ ne change ; aucun remplacement. La fondation n'est pas incluse dans ce lot.
 
 ## Provisioning Postmark : travaux encore ouverts
 
+Mise à jour : les sept constats ci-dessous sont traités techniquement dans le
+[lot de reprise Postmark du 7 septembre](postmark-recovery-certification-2026-09-07.md).
+Cette liste conserve le constat au moment de la publication #38 ; les preuves
+de tests, limites de réconciliation et étapes fournisseur réelles sont dans le
+nouveau compte rendu. Elle ne doit plus être lue comme l'état du code courant.
+
 L'inspection de `provision-postmark.ts` identifie une suite distincte à corriger
 et certifier avant ouverture :
 
@@ -117,3 +123,34 @@ Références officielles consultées : [webhooks Postmark](https://postmarkapp.c
 Ces constats ne signifient pas que le webhook Postmark existant a cessé de
 fonctionner ; son état réel de vérification reste à relire. Aucun secret ni
 webhook fournisseur n'est modifié dans ce lot.
+
+## Publication et contrôle post-déploiement
+
+La [PR #38](https://github.com/YoannDrx/yodev-mail/pull/38) est fusionnée à
+00:32:11 heure de Paris (6 septembre, 22:32:11 UTC), commit
+`86cb30af56bf78edbc2522acda3239ac12eef273`. Les six contrôles obligatoires de
+branche ont passé, sans contournement ni modification de protection.
+
+- [CI de PR](https://github.com/YoannDrx/yodev-mail/actions/runs/34064173358) : tous
+  les jobs verts ; huit parcours publics (18,6 s) et huit authentifiés (1,1 min).
+- [CI de main](https://github.com/YoannDrx/yodev-mail/actions/runs/34064303135) :
+  tous les jobs verts, dont les parcours authentifiés et la couverture complète.
+- Vercel Production `dpl_3XW9M1GzxHyH3X8H7oGWP91CWGnd` : `READY`, URL technique
+  `https://yodev-mail-l72ngmemo-yoanndrxs-projects.vercel.app`.
+- API health : `status=ok`, `database=ok`, `version=86cb30a`. Le health de
+  l'application redirige vers ce même endpoint canonique, qui répond aussi après
+  suivi. L'onboarding anonyme redirige en 307 vers `/fr/connexion`.
+- Scan `error`/`fatal` explicitement limité à ce déploiement Vercel : zéro entrée,
+  effectué après publication. Fenêtre courte, sans charge : ce n'est pas la
+  période d'observation de 72 heures.
+- AWS Dev `UPDATE_COMPLETE` à 22:33:21 UTC ; AWS Prod à 22:34:34 UTC. Les 26
+  workers ont leur code mis à jour et restent en `standby`, SES/Postmark faux.
+  Aucun mapping SQS ; files de provisioning et DLQ toujours vides au contrôle.
+- Worker de provisioning Prod : `Active`, dernière mise à jour `Successful`,
+  code SHA256 `fgLH116iKJ0P0FqFL5Xm7Mt69EmIoD9TacRrhVSnuxI=`.
+- SES relu dans `eu-west-3` : production false, review `DENIED`, sandbox
+  200/jour et 1/s ; identité `mail.yodev.fr` vérifiée, DKIM RSA 2048 et MAIL FROM
+  `bounce.mail.yodev.fr` en succès. L'absence d'accès production reste bloquante.
+
+Les ajouts de cette section sont un compte rendu local après publication, à
+committer avec le lot suivant. Ils ne déclenchent pas une publication séparée.

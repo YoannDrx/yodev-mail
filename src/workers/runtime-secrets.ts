@@ -38,7 +38,9 @@ const loadingByName = new Map<RuntimeSecretName, Promise<void>>();
 
 export async function loadRuntimeSecrets(
   required: RuntimeSecretName[] = ["DATABASE_URL"],
+  signal?: AbortSignal,
 ) {
+  signal?.throwIfAborted();
   const prefix = process.env.RUNTIME_PARAMETER_PREFIX;
   if (!prefix) return;
   const missing = required.filter((name) => !process.env[name]);
@@ -52,6 +54,7 @@ export async function loadRuntimeSecrets(
       const { ssm: client } = await awsClients();
       const response = await client.send(
         new GetParametersCommand({ Names: [parameterName], WithDecryption: true }),
+        { abortSignal: signal },
       );
       if (response.InvalidParameters?.length) {
         throw new Error("One or more required runtime parameters are invalid.");
@@ -72,12 +75,14 @@ export async function loadRuntimeSecrets(
 
 const secureParameterCache = new Map<string, string>();
 
-export async function getSecureParameter(name: string) {
+export async function getSecureParameter(name: string, signal?: AbortSignal) {
+  signal?.throwIfAborted();
   const cached = secureParameterCache.get(name);
   if (cached) return cached;
   const { ssm: client } = await awsClients();
   const response = await client.send(
     new GetParametersCommand({ Names: [name], WithDecryption: true }),
+    { abortSignal: signal },
   );
   const value = response.Parameters?.[0]?.Value;
   if (!value) throw new Error("Required provider credential is unavailable.");

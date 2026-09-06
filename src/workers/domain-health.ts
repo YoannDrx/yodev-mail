@@ -1,4 +1,4 @@
-import { and, asc, eq, inArray, isNotNull, ne, sql } from "drizzle-orm";
+import { and, asc, eq, inArray, isNotNull, sql } from "drizzle-orm";
 import type { Context } from "aws-lambda";
 import { requireDb } from "@/db/runtime";
 import { domainProviderBindings, domains } from "@/db/schema";
@@ -13,7 +13,7 @@ export async function handler(_event?: unknown, context?: Pick<Context, "getRema
     eq(domains.id, domainProviderBindings.domainId),
     eq(domains.workspaceId, domainProviderBindings.workspaceId),
   )).where(and(
-    inArray(domainProviderBindings.status, ["pending", "dns_pending", "verified", "failed"]),
+    inArray(domainProviderBindings.status, ["dns_pending", "verified"]),
     isNotNull(domainProviderBindings.externalDomainId),
   ))
     .orderBy(sql`${domainProviderBindings.lastCheckedAt} asc nulls first`, asc(domainProviderBindings.id))
@@ -41,7 +41,7 @@ export async function checkBinding(workspaceId: string, bindingId: string) {
     ))
     .where(and(eq(domainProviderBindings.id, bindingId), eq(domainProviderBindings.workspaceId, workspaceId)))
     .limit(1);
-  if (!row || row.binding.status === "disabled" || !row.binding.externalDomainId) throw new Error("Domain binding is unavailable");
+  if (!row || !["dns_pending", "verified"].includes(row.binding.status) || !row.binding.externalDomainId) throw new Error("Domain binding is unavailable");
   try {
     const result = row.binding.provider === "postmark"
       ? await checkPostmarkDomain(row.binding.externalDomainId ?? "")
@@ -58,12 +58,12 @@ export async function checkBinding(workspaceId: string, bindingId: string) {
       lastCheckedAt: now,
       updatedAt: now,
       verifiedAt: result.status === "verified" ? row.binding.verifiedAt ?? now : null,
-    }).where(and(eq(domainProviderBindings.id, row.binding.id), eq(domainProviderBindings.workspaceId, workspaceId), ne(domainProviderBindings.status, "disabled")));
+    }).where(and(eq(domainProviderBindings.id, row.binding.id), eq(domainProviderBindings.workspaceId, workspaceId), inArray(domainProviderBindings.status, ["dns_pending", "verified"])));
     return result;
   } catch {
     // Provider diagnostics may contain addresses or content. Persist only a fixed code.
     const code = "domain_check_failed";
-    await db.update(domainProviderBindings).set({ lastCheckError: code, lastCheckedAt: new Date(), updatedAt: new Date() }).where(and(eq(domainProviderBindings.id, row.binding.id), eq(domainProviderBindings.workspaceId, workspaceId), ne(domainProviderBindings.status, "disabled")));
+    await db.update(domainProviderBindings).set({ lastCheckError: code, lastCheckedAt: new Date(), updatedAt: new Date() }).where(and(eq(domainProviderBindings.id, row.binding.id), eq(domainProviderBindings.workspaceId, workspaceId), inArray(domainProviderBindings.status, ["dns_pending", "verified"])));
     throw new Error(code);
   }
 }

@@ -22,6 +22,28 @@ Audit réel du workspace interne après renforcement, avant publication web : ap
 
 ## Dépendances externes revérifiées
 
+### Mise à jour technique du 7 septembre : provisioning
+
+Le [lot #38](https://github.com/YoannDrx/yodev-mail/pull/38) est publié sur Vercel
+et AWS Dev/Prod, sous gates fermées, commit `86cb30a`. Il transmet explicitement
+le workspace dans les jobs, préserve les suspensions/désactivations et les états
+déjà provisionnés, assainit les erreurs fournisseur et empêche le contrôle DNS
+avant la disponibilité de l'identité externe. `npm run check` local passe avec
+167 tests ; 255 tests de couverture complète passent ; CI de PR et main vertes,
+dont huit parcours publics et huit authentifiés. Les
+[preuves et limites](provider-provisioning-certification-2026-09-07.md) incluent
+les préconditions de bascule SQS et les travaux Postmark encore ouverts : identité
+stable du serveur, pagination, reprise après échec partiel, vérification webhook,
+créations concurrentes et budget global de provisioning. Ce lot ne clôt pas ces
+travaux et ne vaut pas GO commercial.
+
+La suite [reprise Postmark du 7 septembre](postmark-recovery-certification-2026-09-07.md)
+implémente l'identité stable, la pagination, les checkpoints durables, la
+vérification webhook, la sérialisation par workspace et le budget commun des
+appels externes. Sa certification locale ne remplace pas la vérification réelle
+du fournisseur ni la réconciliation opérateur des créations incertaines. Voir
+ce compte rendu pour son état de publication et ses preuves propres.
+
 ### Stripe
 
 Le connecteur est à nouveau accessible. Le compte Live sélectionné pour ce produit est `acct_1U6Sh495MZhNiINX` (Mail by Yodev). Les autres comptes ne sont pas modifiés.

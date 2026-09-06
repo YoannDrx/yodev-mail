@@ -7,7 +7,7 @@ const providers = vi.hoisted(() => ({ ses: vi.fn(), postmark: vi.fn(), log: vi.f
 vi.mock("@/lib/worker-log", () => ({ logWorkerResult: providers.log }));
 vi.mock("@/workers/runtime-secrets", () => ({ loadRuntimeSecrets: async () => {} }));
 vi.mock("@/features/domains/provision-ses-domain", () => ({ provisionSesDomain: providers.ses, SES_REPUTATION_POLICY: "standard" }));
-vi.mock("@/features/providers/provision-postmark", () => ({ provisionPostmarkDomain: providers.postmark }));
+vi.mock("@/features/providers/provision-postmark", () => ({ provisionPostmarkDomain: providers.postmark, POSTMARK_WEBHOOK_CREATE_UNCERTAIN: "postmark_webhook_creation_requires_reconciliation" }));
 
 import { databasePool, requireDb } from "@/db/runtime";
 import { domainProviderBindings, domains, workspaceProviderAccounts, workspaces } from "@/db/schema";
@@ -41,6 +41,85 @@ async function read(id: string) {
 }
 
 describe("provider provisioning state safety", () => {
+  it("serializes concurrent domains in a workspace and releases the lock after completion", async () => {
+    const first = await seed("postmark");
+    const second = await seed("postmark");
+    let announce!: () => void;
+    let release!: () => void;
+    const entered = new Promise<void>(resolve => { announce = resolve; });
+    const blocked = new Promise<void>(resolve => { release = resolve; });
+    providers.postmark.mockImplementationOnce(async () => {
+      announce();
+      await blocked;
+      return { externalAccountId: "42", externalDomainId: "43", credentialParameterName: `/synthetic/${workspaceId}/server-token`, records: [] };
+    });
+    const active = provisionBinding(workspaceId, first.id);
+    try {
+      await entered;
+      await expect(provisionBinding(workspaceId, second.id)).rejects.toThrow("provider_provisioning_busy");
+      expect(providers.postmark).toHaveBeenCalledOnce();
+    } finally { release(); await active; }
+    await expect(provisionBinding(workspaceId, second.id)).resolves.toBe("provisioned");
+    expect(providers.postmark).toHaveBeenCalledTimes(2);
+  });
+
+  it("commits account checkpoints before the callback and preserves them after failure", async () => {
+    const binding = await seed("postmark");
+    const credentialParameterName = `/synthetic/${workspaceId}/server-token`;
+    providers.postmark.mockImplementationOnce(async (input) => {
+      await input.checkpoint({});
+      await input.checkpoint({ externalAccountId: "42" });
+      await input.checkpoint({ externalAccountId: "42", credentialParameterName });
+      const [saved] = await db.select().from(workspaceProviderAccounts).where(and(eq(workspaceProviderAccounts.workspaceId, workspaceId), eq(workspaceProviderAccounts.provider, "postmark")));
+      expect(saved).toMatchObject({ status: "pending", externalAccountId: "42", credentialParameterName });
+      expect((await read(binding.id)).externalDomainId).toBeNull();
+      await input.beforeWebhookCreate();
+      throw new Error("synthetic uncertain webhook result");
+    });
+    await expect(provisionBinding(workspaceId, binding.id)).rejects.toThrow("provider_provisioning_failed");
+    expect(await read(binding.id)).toMatchObject({ status: "failed", lastCheckError: "postmark_webhook_creation_requires_reconciliation" });
+    await provisionBinding(workspaceId, binding.id);
+    expect(providers.postmark.mock.calls[1][0]).toMatchObject({ existingAccount: { externalAccountId: "42", credentialParameterName }, webhookCreationAttempted: true });
+  });
+
+  it("persists uncertain server intent without credentials on failure", async () => {
+    const binding = await seed("postmark");
+    providers.postmark.mockImplementationOnce(async (input) => { await input.checkpoint({}); throw new Error("synthetic uncertain server result"); });
+    await expect(provisionBinding(workspaceId, binding.id)).rejects.toThrow("provider_provisioning_failed");
+    await provisionBinding(workspaceId, binding.id);
+    expect(providers.postmark.mock.calls[1][0].existingAccount).toEqual({ externalAccountId: null, credentialParameterName: null });
+  });
+
+  it("preserves an already ready account during another domain checkpoint", async () => {
+    const binding = await seed("postmark");
+    await db.insert(workspaceProviderAccounts).values({ workspaceId, provider: "postmark", status: "ready", externalAccountId: "42", credentialParameterName: "/synthetic/server-token" });
+    providers.postmark.mockImplementationOnce(async (input) => {
+      await input.checkpoint({ externalAccountId: "42" });
+      const [saved] = await db.select().from(workspaceProviderAccounts).where(eq(workspaceProviderAccounts.workspaceId, workspaceId));
+      expect(saved).toMatchObject({ status: "ready", credentialParameterName: "/synthetic/server-token" });
+      throw new Error("synthetic later failure");
+    });
+    await expect(provisionBinding(workspaceId, binding.id)).rejects.toThrow("provider_provisioning_failed");
+  });
+
+  it("does not checkpoint after a concurrent workspace suspension", async () => {
+    const binding = await seed("postmark");
+    providers.postmark.mockImplementationOnce(async (input) => {
+      await db.update(workspaces).set({ status: "paused" }).where(eq(workspaces.id, workspaceId));
+      await input.checkpoint({ externalAccountId: "42" });
+      throw new Error("checkpoint_should_have_refused");
+    });
+    await expect(provisionBinding(workspaceId, binding.id)).resolves.toBe("skipped");
+    expect(await db.select().from(workspaceProviderAccounts).where(eq(workspaceProviderAccounts.workspaceId, workspaceId))).toHaveLength(0);
+  });
+
+  it("does not start provider work near the Lambda deadline", async () => {
+    const binding = await seed();
+    const event = { Records: [{ messageId: "deadline", body: JSON.stringify({ workspaceId, bindingId: binding.id }) }] } as SQSEvent;
+    await expect(handler(event, { getRemainingTimeInMillis: () => 10_500 })).resolves.toEqual({ batchItemFailures: [{ itemIdentifier: "deadline" }] });
+    expect(providers.ses).not.toHaveBeenCalled();
+  });
+
   it.each(["ses", "postmark"] as const)("provisions %s once and does not downgrade a completed replay", async (provider) => {
     const binding = await seed(provider);
     await db.update(domainProviderBindings).set({ status: "failed", lastCheckError: "previous_failure" }).where(and(eq(domainProviderBindings.workspaceId, workspaceId), eq(domainProviderBindings.id, binding.id)));
