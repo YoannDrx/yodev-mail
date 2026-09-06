@@ -13,8 +13,8 @@ Périmètre : dépôt, tests, Vercel Production, Neon principal, AWS eu-west-3 a
 | Domaine | Observation du 6 septembre | Conclusion |
 |---|---|---|
 | Web/API | `mail.yodev.fr/api/health` et `api.mail.yodev.fr/health` : HTTP 200, application et DB `ok`, version initiale `7f80353` | Accessibles ; pas une preuve d'envoi |
-| Vercel | `POSTMARK_ENABLED`, `SES_ENABLED`, `LIVE_EMAIL_ACCEPTANCE_ENABLED`, `COMMERCIAL_ONBOARDING_ENABLED`, `LIVE_CHECKOUT_ENABLED`, `STRIPE_USAGE_REPORTING_ENABLED`, `CUSTOMER_WEBHOOKS_ENABLED`, `ATTACHMENTS_ENABLED`, `RAW_EMAIL_ENABLED` : `false` | Service fermé à l'exploitation commerciale |
-| Fiscalité | `STRIPE_TAX_MODE=unconfigured` | Checkout à conserver fermé |
+| Vercel | Neuf gates fonctionnels explicitement écrits à `false` pendant l'audit : fournisseurs, acceptation live, onboarding, checkout, usage Stripe, webhooks clients, pièces jointes et raw | Écriture acquittée par Vercel ; prise en compte lors du nouveau déploiement |
+| Fiscalité | Variable distante sensible non relisible ; copie locale `STRIPE_TAX_MODE=unconfigured` | Configuration fiscale réelle non certifiée ; aucun changement effectué, checkout maintenu fermé |
 | Neon principal | Projet `yodev-mail-db`, branche principale `br-sweet-haze-aso0rivg`, PostgreSQL 17, dix migrations journalisées | DB accessible et journal cohérent avec `0000` à `0009` ; aucune migration appliquée ici |
 | Données internes | 35 messages acceptés, 35 lignes de ledger, zéro réservation restante, zéro `sending`/`unknown`, 149 outbox livrées | Pas d'écart de comptabilisation constaté sur ce workspace |
 | Historique des messages | Postmark : 26 `delivered`, 9 `soft_bounced`, 1 `failed`, 3 `simulated` | Ne pas présenter cet historique comme une campagne de certification ou 35 livraisons réussies |
@@ -88,6 +88,8 @@ Tests locaux : `npm run check` (lint, TypeScript, 140 tests et build) et les 8 t
 - AWS Prod : `UPDATE_COMPLETE` à **19:57:14 UTC**. Code des treize workers, lecture IAM limitée et horodatage de la règle SES mis à jour ; mode `standby` conservé. Foundation n'a pas été redéployée.
 - Simulation IAM après déploiement Production : `ses:GetEmailIdentity=allowed` sur l'identité contrôlée, `ses:SendEmail=implicitDeny` pour Vercel. Seul le worker d'envoi peut envoyer.
 - Preview Vercel `dpl_QmBSLon5ebMHvBB7hXRKYW8rN4YF` : `READY`, health application/DB `ok`, version `ef2d917`. La publication web Production suit la fusion contrôlée de la PR #35 et doit être vérifiée par son health check, sans promouvoir les variables Preview en Production.
+- Attention à la preuve des variables Vercel : `env run` dans le dépôt utilisait la copie locale pour les variables sensibles, alors qu'une exécution isolée et l'API ne pouvaient pas relire leurs valeurs. Cette première lecture **n'est pas** retenue comme preuve de la valeur distante. Les neuf gates non secrets ont ensuite été explicitement écrits à `false` avec acquittement API ; les secrets et le mode fiscal n'ont pas été modifiés. Les sept gates partagés Production/Preview restent partagés et fermés. Un doublon de portée `SES_ENABLED` a été corrigé en limitant sa variable Production à Production, tout en conservant la variable Preview distincte.
+- Les contrôles de drift après les deux déploiements sont également `IN_SYNC`, zéro ressource en dérive. Les 26 workers Dev/Prod sont en standby et aucun mapping SQS n'est actif.
 - Aucune migration, suppression de données, activation d'envoi, ouverture commerciale ou modification de la checklist utilisateur non commitée n'est incluse.
 
 ## Conditions restantes pour une commercialisation
