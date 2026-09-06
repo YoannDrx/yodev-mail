@@ -68,6 +68,9 @@ test("private dashboard redirects anonymous visitors to Better Auth", async ({ p
   await page.goto("/fr/dashboard");
   await expect(page).toHaveURL(/\/connexion\?configuration=requise/);
   await expect(page.getByRole("heading", { name: "Console en cours de configuration" })).toBeVisible();
+  await page.goto("/fr/onboarding");
+  await expect(page).toHaveURL(/\/connexion\?configuration=requise/);
+  await expect(page.getByRole("heading", { name: "Console en cours de configuration" })).toBeVisible();
   const retiredContacts = await page.goto("/dashboard/contacts");
   expect(retiredContacts?.status()).toBe(404);
 });

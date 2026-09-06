@@ -3,7 +3,7 @@ import "server-only";
 import { headers } from "next/headers";
 import { notFound, redirect } from "next/navigation";
 import { getAuth } from "@/lib/auth";
-import { currentWorkspace } from "@/lib/current-workspace";
+import { currentWorkspace, WorkspaceAccessError } from "@/lib/current-workspace";
 import { isBetterAuthConfigured } from "@/lib/env";
 import { localizedPath } from "@/i18n/config";
 import { getLocale } from "@/i18n/server";
@@ -21,8 +21,9 @@ export async function requirePageWorkspace() {
   await requirePageUser();
   try {
     return await currentWorkspace();
-  } catch {
-    redirect(localizedPath(locale, "/onboarding"));
+  } catch (error) {
+    if (error instanceof WorkspaceAccessError) redirect(localizedPath(locale, "/onboarding"));
+    throw error;
   }
 }
 

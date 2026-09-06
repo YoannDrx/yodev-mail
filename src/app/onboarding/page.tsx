@@ -1,6 +1,7 @@
 import { Check } from "lucide-react";
 import { redirect } from "next/navigation";
 import { BrandMark } from "@/components/brand-mark";
+import { AccountMenu } from "@/components/auth/account-menu";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -8,13 +9,32 @@ import { Textarea } from "@/components/ui/textarea";
 import { completeOnboardingAction } from "@/features/onboarding/actions";
 import { localized, localizedPath } from "@/i18n/config";
 import { getLocale } from "@/i18n/server";
-import { currentWorkspace } from "@/lib/current-workspace";
+import { currentWorkspace, WorkspaceAccessError } from "@/lib/current-workspace";
+import { requirePageUser } from "@/lib/page-auth";
 
 export const dynamic = "force-dynamic";
 
 export default async function Page() {
   const locale = await getLocale();
-  const { workspace } = await currentWorkspace();
+  await requirePageUser();
+  let context;
+  try {
+    context = await currentWorkspace();
+  } catch (error) {
+    if (!(error instanceof WorkspaceAccessError)) throw error;
+    const accessCopy = localized(locale, {
+      fr: { title: "Aucun workspace accessible", text: "Votre compte est connecté, mais vous n’avez pas accès au workspace demandé. Choisissez un autre workspace, acceptez le lien d’invitation reçu ou contactez son propriétaire." },
+      en: { title: "No accessible workspace", text: "You are signed in, but cannot access the requested workspace. Choose another workspace, open your invitation link, or contact its owner." },
+    });
+    return <main className="mx-auto min-h-screen max-w-3xl p-6 py-12">
+      <div className="flex flex-wrap items-center justify-between gap-4"><BrandMark /><AccountMenu locale={locale} /></div>
+      <section className="mt-10 rounded-3xl border bg-white p-8 shadow-xl">
+        <h1 className="text-3xl font-semibold">{accessCopy.title}</h1>
+        <p className="mt-3 text-muted-foreground">{accessCopy.text}</p>
+      </section>
+    </main>;
+  }
+  const { workspace } = context;
   if (workspace.status !== "sandbox") redirect(localizedPath(locale, "/dashboard"));
   const copy = localized(locale, {
     fr: {

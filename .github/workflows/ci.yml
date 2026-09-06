@@ -69,3 +69,39 @@ jobs:
       - run: npm ci
       - run: npx drizzle-kit migrate
       - run: npm run test:coverage:full
+  authenticated-e2e:
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:17
+        env:
+          POSTGRES_DB: yodev_mail_auth_e2e
+          POSTGRES_PASSWORD: ${{ github.run_id }}
+          POSTGRES_USER: postgres
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U postgres -d yodev_mail_auth_e2e"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+    env:
+      DATABASE_URL: postgres://postgres:${{ github.run_id }}@127.0.0.1:5432/yodev_mail_auth_e2e
+      DATABASE_URL_UNPOOLED: postgres://postgres:${{ github.run_id }}@127.0.0.1:5432/yodev_mail_auth_e2e
+      TEST_DATABASE_URL: postgres://postgres:${{ github.run_id }}@127.0.0.1:5432/yodev_mail_auth_e2e
+    steps:
+      - uses: actions/checkout@v6
+      - uses: actions/setup-node@v6
+        with:
+          node-version: 24
+          cache: npm
+      - run: npm ci
+      - run: npx drizzle-kit migrate
+      - run: npx playwright install --with-deps chromium
+      - run: npm run test:e2e:auth
+      - uses: actions/upload-artifact@v4
+        if: failure()
+        with:
+          name: authenticated-browser-failures
+          path: test-results/authenticated
+          retention-days: 3

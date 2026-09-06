@@ -26,6 +26,14 @@ type AuthSession = {
   };
 };
 
+/** An authenticated user has no usable workspace; not an infrastructure failure. */
+export class WorkspaceAccessError extends Error {
+  constructor(message: string) {
+    super(message);
+    this.name = "WorkspaceAccessError";
+  }
+}
+
 async function bootstrapOwner(session: AuthSession) {
   if (session.user.email.toLowerCase() !== env.AUTH_BOOTSTRAP_EMAIL.toLowerCase()) {
     return null;
@@ -123,7 +131,7 @@ export async function currentWorkspace(options: { admin?: boolean } = {}) {
   if (!session?.user.id) throw new Error("Authentication is required.");
 
   const organizationId = await activeOrganization(session);
-  if (!organizationId) throw new Error("Sélectionnez une organisation Mail by Yodev.");
+  if (!organizationId) throw new WorkspaceAccessError("Sélectionnez une organisation Mail by Yodev.");
 
   const db = requireDb();
   const [membership] = await db
@@ -136,7 +144,7 @@ export async function currentWorkspace(options: { admin?: boolean } = {}) {
       ),
     )
     .limit(1);
-  if (!membership) throw new Error("You are not a member of this workspace.");
+  if (!membership) throw new WorkspaceAccessError("You are not a member of this workspace.");
   if (options.admin && !["owner", "admin"].includes(membership.role)) {
     throw new Error("Workspace administrator role required.");
   }
@@ -151,7 +159,7 @@ export async function currentWorkspace(options: { admin?: boolean } = {}) {
       ),
     )
     .limit(1);
-  if (!workspace) throw new Error("Workspace has not been provisioned yet.");
+  if (!workspace) throw new WorkspaceAccessError("Workspace has not been provisioned yet.");
   return {
     workspace,
     userId: session.user.id,

@@ -13,6 +13,7 @@
     "test:coverage": "vitest run --coverage",
     "test:coverage:full": "vitest run --config vitest.full.config.ts --coverage",
     "test:e2e": "playwright test",
+    "test:e2e:auth": "playwright test --config playwright.auth.config.ts",
     "check": "npm run lint && npm run typecheck && npm run test && npm run build",
     "env:normalize": "node scripts/normalize-env-local.mjs",
     "internal-go:audit": "dotenv -e .env.local -- tsx scripts/audit-internal-go.ts",
