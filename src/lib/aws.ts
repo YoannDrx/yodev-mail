@@ -5,6 +5,7 @@ import { SchedulerClient } from "@aws-sdk/client-scheduler";
 import { SSMClient } from "@aws-sdk/client-ssm";
 import { awsCredentialsProvider } from "@vercel/oidc-aws-credentials-provider";
 import { env } from "@/lib/env";
+import { parseProvisioningJob } from "@/features/providers/provisioning-job";
 
 function credentials() {
   if (!env.AWS_ROLE_ARN) return undefined;
@@ -54,12 +55,13 @@ export async function enqueueProviderEvent(event: unknown) {
   return { local: false as const };
 }
 
-export async function enqueueProviderProvisioning(bindingId: string) {
+export async function enqueueProviderProvisioning(workspaceId: string, bindingId: string) {
+  const job = parseProvisioningJob({ workspaceId, bindingId });
   if (!env.AWS_PROVIDER_PROVISIONING_QUEUE_URL) return { local: true as const };
   const { sqs } = await awsClients();
   await sqs.send(new SendMessageCommand({
     QueueUrl: env.AWS_PROVIDER_PROVISIONING_QUEUE_URL,
-    MessageBody: JSON.stringify({ bindingId }),
+    MessageBody: JSON.stringify(job),
   }));
   return { local: false as const };
 }

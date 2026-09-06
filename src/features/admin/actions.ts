@@ -366,21 +366,24 @@ export async function reviewTemplateAction(templateId: string, decision: "approv
 
 export async function provisionDomainAction(domainId: string, provider: "postmark" | "ses") {
   const id = idSchema.parse(domainId);
+  provider = z.enum(["postmark", "ses"]).parse(provider);
   const { userId } = await requireAdmin();
   const db = requireDb();
   const [domain] = await db.select().from(domains).where(eq(domains.id, id)).limit(1);
   if (!domain) throw new Error("Domain not found");
   const [workspace] = await db.select().from(workspaces).where(eq(workspaces.id, domain.workspaceId)).limit(1);
-  if (!workspace || workspace.status !== "approved") throw new Error("Workspace must be approved first");
+  if (!workspace || workspace.status !== "approved" || workspace.deletedAt || domain.status === "disabled") throw new Error("Workspace and domain must be available for provisioning");
   if (provider === "ses" && process.env.SES_ENABLED !== "true") throw new Error("SES is disabled until AWS production approval");
   if (provider === "postmark" && process.env.POSTMARK_ENABLED !== "true") throw new Error("Postmark is not enabled");
   const [binding] = await db.insert(domainProviderBindings).values({ workspaceId: workspace.id, domainId: domain.id, provider, status: "pending" }).onConflictDoUpdate({
     target: [domainProviderBindings.domainId, domainProviderBindings.provider],
     set: { status: "pending", lastCheckError: null, updatedAt: new Date() },
+    setWhere: and(eq(domainProviderBindings.workspaceId, workspace.id), inArray(domainProviderBindings.status, ["pending", "failed"]), eq(domainProviderBindings.isActive, false)),
   }).returning();
+  if (!binding) throw new Error("Binding already provisioned or disabled; it cannot be reset by a provisioning retry");
   await db.insert(auditEvents).values({ workspaceId: workspace.id, actorUserId: userId, action: "domain.provider_provisioning_requested", entityType: "domain", entityId: domain.id, metadata: { provider } });
-  const queued = await enqueueProviderProvisioning(binding.id);
-  if (queued.local) await provisionBinding(binding.id);
+  const queued = await enqueueProviderProvisioning(workspace.id, binding.id);
+  if (queued.local) await provisionBinding(workspace.id, binding.id);
   revalidatePath("/admin");
   revalidatePath("/dashboard/domaines");
 }
