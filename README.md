@@ -167,6 +167,12 @@ accounts are never silently replaced by provisioning; reconcile legacy bindings
 explicitly before enabling SES. These application checks do not create separate
 AWS accounts or make a shared sending identity environment-specific.
 
+The proposed additional SES IAM restrictions are **not deployed or certified**.
+See the [IAM certification report](docs/ses-iam-certification-2026-09-07.md)
+before applying that change. Local tests and policy validation are insufficient:
+the IAM simulator currently disagrees with six expected positive cases, and
+legacy identities require an explicit ownership decision before activation.
+
 `STRIPE_TAX_MODE` defaults to `unconfigured` and blocks Checkout. Set it to
 `franchise_base` only after confirming that no active Stripe Tax registration
 exists and that the business is legally eligible for the franchise en base. Set

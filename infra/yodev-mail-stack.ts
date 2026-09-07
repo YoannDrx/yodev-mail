@@ -29,6 +29,7 @@ import { type ITopic } from "aws-cdk-lib/aws-sns";
 import { Queue, QueueEncryption } from "aws-cdk-lib/aws-sqs";
 import { StringParameter } from "aws-cdk-lib/aws-ssm";
 import type { Construct } from "constructs";
+import { SES_ENVIRONMENT_TAG } from "../src/features/providers/ses-resources";
 
 export interface YodevMailStackProps extends StackProps {
   alertTopic: ITopic;
@@ -227,7 +228,20 @@ export class YodevMailStack extends Stack {
     }));
     attachmentBucket.grantDelete(send);
     attachmentKey.grantDecrypt(send);
-    send.addToRolePolicy(new PolicyStatement({ actions: ["ses:SendEmail"], resources: ["*"] }));
+    const sesArnPrefix = `arn:aws:ses:${this.region}:${this.account}`;
+    const sesIdentityArn = `${sesArnPrefix}:identity/*`;
+    const sesConfigurationArn = `${sesArnPrefix}:configuration-set/ym-${props.environment}-*-txn`;
+    const sesTenantArn = `${sesArnPrefix}:tenant/ym-${props.environment}-*/*`;
+    const sesIdentityOwnership = { [`aws:ResourceTag/${SES_ENVIRONMENT_TAG}`]: props.environment };
+    const sesTenantCondition = { "ses:TenantName": `ym-${props.environment}-*` };
+    send.addToRolePolicy(new PolicyStatement({
+      actions: ["ses:SendEmail"], resources: [sesIdentityArn],
+      conditions: { StringEquals: sesIdentityOwnership, StringLike: sesTenantCondition },
+    }));
+    send.addToRolePolicy(new PolicyStatement({
+      actions: ["ses:SendEmail"], resources: [sesConfigurationArn],
+      conditions: { StringLike: sesTenantCondition },
+    }));
     send.addToRolePolicy(new PolicyStatement({ actions: ["ssm:GetParameter", "ssm:GetParameters"], resources: [`arn:aws:ssm:${this.region}:${this.account}:parameter/${prefix}/providers/*`] }));
     providerCredentialsKey.grantDecrypt(send);
 
@@ -240,10 +254,40 @@ export class YodevMailStack extends Stack {
     providerProvisioning.main.grantConsumeMessages(provision);
     provision.addToRolePolicy(new PolicyStatement({ actions: ["ssm:GetParameter", "ssm:GetParameters", "ssm:PutParameter"], resources: [`arn:aws:ssm:${this.region}:${this.account}:parameter/${prefix}/providers/*`] }));
     providerCredentialsKey.grantEncryptDecrypt(provision);
-    provision.addToRolePolicy(new PolicyStatement({ actions: ["ses:CreateConfigurationSet", "ses:CreateConfigurationSetEventDestination", "ses:CreateEmailIdentity", "ses:CreateTenant", "ses:CreateTenantResourceAssociation", "ses:GetEmailIdentity", "ses:GetTenant", "ses:PutEmailIdentityMailFromAttributes", "ses:UpdateReputationEntityPolicy"], resources: ["*"] }));
     provision.addToRolePolicy(new PolicyStatement({
-      actions: ["ses:UpdateConfigurationSetEventDestination"],
-      resources: [`arn:aws:ses:${this.region}:${this.account}:configuration-set/ym-*-txn`],
+      actions: ["ses:CreateConfigurationSet", "ses:CreateConfigurationSetEventDestination", "ses:UpdateConfigurationSetEventDestination"],
+      resources: [sesConfigurationArn],
+    }));
+    provision.addToRolePolicy(new PolicyStatement({
+      actions: ["ses:CreateTenant", "ses:GetTenant"], resources: [sesTenantArn],
+    }));
+    provision.addToRolePolicy(new PolicyStatement({
+      actions: ["ses:CreateTenantResourceAssociation"], resources: [sesTenantArn, sesConfigurationArn],
+    }));
+    provision.addToRolePolicy(new PolicyStatement({
+      actions: ["ses:CreateTenantResourceAssociation", "ses:PutEmailIdentityMailFromAttributes"], resources: [sesIdentityArn],
+      conditions: { StringEquals: sesIdentityOwnership },
+    }));
+    provision.addToRolePolicy(new PolicyStatement({ actions: ["ses:GetEmailIdentity"], resources: [sesIdentityArn] }));
+    provision.addToRolePolicy(new PolicyStatement({
+      actions: ["ses:CreateEmailIdentity"], resources: [sesIdentityArn],
+      conditions: { StringEquals: { [`aws:RequestTag/${SES_ENVIRONMENT_TAG}`]: props.environment } },
+    }));
+    // Allow tagging at creation, but never replace another environment's tag or
+    // grant unrelated tagging/untagging privileges to a workload role.
+    // IAM cannot distinguish creation from adopting an existing untagged identity
+    // here. Classify legacy identities explicitly before activating these roles.
+    provision.addToRolePolicy(new PolicyStatement({
+      actions: ["ses:TagResource"], resources: [sesIdentityArn],
+      conditions: {
+        StringEquals: { [`aws:RequestTag/${SES_ENVIRONMENT_TAG}`]: props.environment },
+        StringEqualsIfExists: sesIdentityOwnership,
+        "ForAllValues:StringEquals": { "aws:TagKeys": [SES_ENVIRONMENT_TAG] },
+      },
+    }));
+    provision.addToRolePolicy(new PolicyStatement({
+      actions: ["ses:UpdateReputationEntityPolicy"],
+      resources: [sesTenantArn, `arn:aws:ses:${this.region}:aws:reputation-policy/standard`],
     }));
 
     const deliver = worker(

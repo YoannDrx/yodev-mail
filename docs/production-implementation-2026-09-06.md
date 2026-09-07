@@ -97,6 +97,23 @@ l'isolation des événements par des noms de tenant/configuration Dev/Prod
 distincts et un contrôle du compte stocké avant provisionnement et envoi.
 L'inventaire du workspace interne est vide pour SES dans les deux branches
 Neon ; aucune référence historique n'est migrée implicitement.
+Publié dans la PR #43, commit `7436dd392d13ec138ed730be94f12b872e8b5c04` :
+353 tests, CI PR/main vertes, huit parcours authentifiés et huit publics.
+Vercel READY, health `7436dd3`, AWS Dev/Prod UPDATE_COMPLETE ; 26 workers
+toujours en standby. Les permissions IAM et la chaîne d'envoi réelle restent
+à certifier séparément ; aucun tenant partagé n'a été modifié.
+
+### Correctif IAM SES en préparation, non publié
+
+Le [rapport IAM SES](ses-iam-certification-2026-09-07.md) documente une permission
+Dev trop large confirmée par le simulateur AWS et le correctif proposé :
+restriction des tenants/configurations par environnement, propriété explicite
+des identités et refus applicatif des identités historiques non attribuées.
+Les tests locaux passent, mais six cas positifs restent refusés par le simulateur
+IAM. Le correctif n'est donc pas déployé. La procédure CDK impose un compte hors
+production pour les essais d'intégration réels ; aucun compte de test distinct
+n'est identifié à ce stade. Pas de sonde créée, pas de domaine retagué, pas de
+message envoyé. Cette étape ne permet pas de clôturer la certification SES.
 
 ### Stripe
 

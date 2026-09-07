@@ -1,3 +1,5 @@
+export const SES_ENVIRONMENT_TAG = "yodev:environment";
+
 // Deterministic names isolate a workspace even when its database is cloned.
 // Do not truncate or sanitize arbitrary input into another workspace's name.
 export function sesResourceNames(workspaceId: string, environment: string | undefined) {

@@ -15,7 +15,7 @@ import {
 import { STSClient, GetCallerIdentityCommand } from "@aws-sdk/client-sts";
 import { awsClients } from "@/lib/aws";
 import { env } from "@/lib/env";
-import { sesResourceNames } from "@/features/providers/ses-resources";
+import { SES_ENVIRONMENT_TAG, sesResourceNames } from "@/features/providers/ses-resources";
 
 export const SES_REPUTATION_POLICY = "standard" as const;
 
@@ -26,7 +26,8 @@ async function ignoreExisting(operation: () => Promise<unknown>) {
 export async function provisionSesDomain(input: { workspaceId: string; domain: string; existingAccountId?: string | null; signal?: AbortSignal }) {
   const signal = input.signal ?? AbortSignal.timeout(35_000);
   signal.throwIfAborted();
-  const resources = sesResourceNames(input.workspaceId, process.env.DEPLOYMENT_ENVIRONMENT);
+  const environment = process.env.DEPLOYMENT_ENVIRONMENT;
+  const resources = sesResourceNames(input.workspaceId, environment);
   if (!resources) throw new Error("ses_resource_configuration_invalid");
   // A legacy or cloned account requires explicit reconciliation, not a silent
   // change of tenant while other domains still reference the existing account.
@@ -36,6 +37,17 @@ export async function provisionSesDomain(input: { workspaceId: string; domain: s
   const options = { abortSignal: signal };
   const { ses } = await awsClients();
   const { tenantName, configurationSetName } = resources;
+  await ignoreExisting(() => ses.send(new CreateEmailIdentityCommand({
+    DkimSigningAttributes: { NextSigningKeyLength: "RSA_2048_BIT" },
+    EmailIdentity: input.domain,
+    Tags: [{ Key: SES_ENVIRONMENT_TAG, Value: environment }],
+  }), options));
+  const identity = await ses.send(new GetEmailIdentityCommand({ EmailIdentity: input.domain }), options);
+  // Never adopt, retag or modify a shared/legacy identity implicitly. IAM also
+  // enforces this ownership on sending, MAIL FROM writes and associations.
+  if (identity.Tags?.find(tag => tag.Key === SES_ENVIRONMENT_TAG)?.Value !== environment) {
+    throw new Error("ses_identity_environment_mismatch");
+  }
   await ignoreExisting(() => ses.send(new CreateTenantCommand({ TenantName: tenantName, SuppressionAttributes: { SuppressedReasons: ["BOUNCE", "COMPLAINT"], SuppressionScope: "TENANT" } }), options));
   const tenant = await ses.send(new GetTenantCommand({ TenantName: tenantName }), options);
   if (tenant.Tenant?.TenantArn) {
@@ -47,19 +59,6 @@ export async function provisionSesDomain(input: { workspaceId: string; domain: s
   }
   const configurationSets = [configurationSetName];
   for (const name of configurationSets) await ignoreExisting(() => ses.send(new CreateConfigurationSetCommand({ ConfigurationSetName: name, SendingOptions: { SendingEnabled: true }, ReputationOptions: { ReputationMetricsEnabled: true } }), options));
-  await ignoreExisting(() =>
-    ses.send(
-      new CreateEmailIdentityCommand({
-        DkimSigningAttributes: { NextSigningKeyLength: "RSA_2048_BIT" },
-        EmailIdentity: input.domain,
-      }),
-      options,
-    ),
-  );
-  const identity = await ses.send(
-    new GetEmailIdentityCommand({ EmailIdentity: input.domain }),
-    options,
-  );
   await ses.send(new PutEmailIdentityMailFromAttributesCommand({ EmailIdentity: input.domain, MailFromDomain: `bounce.${input.domain}`, BehaviorOnMxFailure: "REJECT_MESSAGE" }), options);
   let accountId = env.AWS_ACCOUNT_ID;
   if (!accountId) accountId = (await new STSClient({ region: env.AWS_REGION }).send(new GetCallerIdentityCommand({}), options)).Account;
