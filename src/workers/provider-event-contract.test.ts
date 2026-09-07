@@ -11,13 +11,30 @@ vi.mock("@/lib/worker-log", () => ({ logWorkerResult: mocks.log }));
 const workspaceId = "00000000-0000-0000-0000-000000000002";
 const messageId = "00000000-0000-0000-0000-000000000001";
 const occurredAt = "2026-09-07T00:00:00.000Z";
-const ses = { eventType: "Delivery", providerMessageId: "provider-1", workspaceId, messageId, occurredAt };
+const ses = { eventType: "Delivery", environment: "prod", providerMessageId: "provider-1", workspaceId, messageId, occurredAt };
 const postmark = { provider: "postmark", externalEventId: "delivery:123", providerMessageId: "provider-1", workspaceId, messageId, occurredAt, type: "delivered" };
 
-beforeEach(() => { vi.resetAllMocks(); mocks.ingest.mockResolvedValue({ skipped: false }); });
-afterEach(() => vi.useRealTimers());
+beforeEach(() => { vi.resetAllMocks(); vi.stubEnv("DEPLOYMENT_ENVIRONMENT", "prod"); mocks.ingest.mockResolvedValue({ skipped: false }); });
+afterEach(() => { vi.useRealTimers(); vi.unstubAllEnvs(); });
 
 describe("provider event runtime contract", () => {
+  it.each(["dev", undefined, "production"])("does not ingest SES events from another or unknown environment: %s", async (environment) => {
+    const body = JSON.stringify({ ...ses, environment });
+    expect(await handler({ Records: [{ messageId: "cross-env", body }] } as SQSEvent)).toEqual({ batchItemFailures: [{ itemIdentifier: "cross-env" }] });
+    expect(mocks.ingest).not.toHaveBeenCalled();
+  });
+
+  it("fails closed for SES when the worker environment is not configured", async () => {
+    vi.stubEnv("DEPLOYMENT_ENVIRONMENT", undefined);
+    expect(await handler({ Records: [{ messageId: "no-env", body: JSON.stringify(ses) }] } as SQSEvent)).toEqual({ batchItemFailures: [{ itemIdentifier: "no-env" }] });
+    expect(mocks.ingest).not.toHaveBeenCalled();
+  });
+
+  it("accepts a development event only in the development consumer", async () => {
+    vi.stubEnv("DEPLOYMENT_ENVIRONMENT", "dev");
+    expect(await handler({ Records: [{ messageId: "dev-env", body: JSON.stringify({ ...ses, environment: "dev" }) }] } as SQSEvent)).toEqual({ batchItemFailures: [] });
+    expect(mocks.ingest).toHaveBeenCalledOnce();
+  });
   it.each([null, [], true, 42, "event", { ...ses, eventType: 1 }, { ...ses, bounceType: {} }])("rejects malformed values without throwing: %j", (value) => {
     expect(normalizeQueuedProviderEvent(value as never)).toBeNull();
   });

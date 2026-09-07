@@ -313,9 +313,11 @@ export class YodevMailStack extends Stack {
       enabled: !standby,
       eventPattern: {
         source: ["aws.ses"],
+        account: [this.account],
+        region: [this.region],
         detail: {
           eventType: ["Delivery", "Bounce", "Complaint", "Reject", "DeliveryDelay"],
-          mail: { tags: { ym_workspace_id: [{ exists: true }], ym_message_id: [{ exists: true }] } },
+          mail: { tags: { ym_workspace_id: [{ exists: true }], ym_message_id: [{ exists: true }], ym_environment: [props.environment] } },
         },
       },
       targets: [new SqsQueue(providerEvents.main, {
@@ -325,6 +327,7 @@ export class YodevMailStack extends Stack {
           providerMessageId: EventField.fromPath("$.detail.mail.messageId"),
           messageId: EventField.fromPath("$.detail.mail.tags.ym_message_id[0]"),
           workspaceId: EventField.fromPath("$.detail.mail.tags.ym_workspace_id[0]"),
+          environment: EventField.fromPath("$.detail.mail.tags.ym_environment[0]"),
           // mail.timestamp is the original send time, not the lifecycle event time.
           occurredAt: EventField.time,
           bounceType: EventField.fromPath("$.detail.bounce.bounceType"),

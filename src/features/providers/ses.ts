@@ -12,6 +12,10 @@ export class SesDeliveryProvider implements DeliveryProvider {
     if (process.env.SES_ENABLED !== "true") {
       throw new ProviderSendError("Amazon SES is not enabled for production delivery.", "definitive", "ses_disabled");
     }
+    const environment = process.env.DEPLOYMENT_ENVIRONMENT;
+    if (environment !== "dev" && environment !== "prod") {
+      throw new ProviderSendError("SES deployment environment is not configured.", "definitive", "ses_environment_invalid");
+    }
     const { ses } = await awsClients();
     try {
       const response = await ses.send(
@@ -39,6 +43,7 @@ export class SesDeliveryProvider implements DeliveryProvider {
           EmailTags: [
             { Name: "ym_message_id", Value: input.messageId },
             { Name: "ym_workspace_id", Value: input.workspaceId },
+            { Name: "ym_environment", Value: environment },
           ],
         }),
         { abortSignal: AbortSignal.timeout(15_000) },

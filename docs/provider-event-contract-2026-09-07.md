@@ -60,12 +60,39 @@ une purge. Aucun contenu de file réel n'a été lu ou modifié pour ces tests.
   `agent-browser` absent : vérification effectuée par Playwright, sans contrôle
   visuel supplémentaire. Aucune interface n'est modifiée dans ce lot.
 
-La CI et le déploiement de ce lot sont à confirmer
-avant de le déclarer publié. Le code commercialement servi reste le commit
-`192ddabd56b43b2f5d1f4ea335293ae14f2d0094` tant que cette publication n'est
-pas constatée. Aucun secret ni schéma de production n'est modifié.
+Ces vérifications locales précèdent les preuves de publication ci-dessous.
+Aucun secret ni schéma de production n'est modifié.
 
-## Limites restantes
+## Publication
+
+La [PR #41](https://github.com/YoannDrx/yodev-mail/pull/41) est fusionnée le
+7 septembre à 01 h 48 min 36 s (Paris), sans contournement des protections.
+Tête validée : `0df9a17a777ca0e10ffd8acdeae1a948314572bd` ; commit de fusion :
+`d8c717d2ae245eb64cf4db563c5eff46f6526017`, arbre identique. La CI de PR
+`34067798426` est entièrement verte ; son exécution complète confirme **321
+tests**, dont le dernier scénario d'intégration. Les huit parcours authentifiés,
+les parcours publics, la qualité, GitGuardian et Vercel sont verts.
+La CI post-fusion `34067920364` est également entièrement verte, dont les
+huit parcours authentifiés (57,5 secondes).
+
+Diff CDK relu : uniquement l'asset `ProviderEvents` dans Dev/Prod
+(`ef8711eca465f79b0ab8b91def27def49b87e20a5aca580bb27cc353a30ce747.zip`).
+Aucune permission, variable, file, base ou fondation modifiée. Dev est
+`UPDATE_COMPLETE` à 01 h 49 min 18 s, puis Prod à 01 h 50 min 25 s.
+Le worker Prod est `Active`/`Successful`, avec le hash de code
+`Vz/MGCkVCREiFOtS9ZFIUjrpxnXQOTkor0i3565vKIs=`.
+
+Vercel Production `dpl_6E2LwwoJ18pSayNWBvQmJkftQb5F` est `READY` sur le
+commit de fusion (build environ 29 secondes). Le health API retourne
+`status=ok`, `database=ok`, `version=d8c717d`. Le health de `mail.yodev.fr`
+redirige vers `api.mail.yodev.fr` ; l'onboarding anonyme vers `/fr/connexion`.
+Les 26 workers restent en standby avec SES/Postmark désactivés et zéro mapping
+Lambda/SQS. Les quatre files d'événements et DLQ contrôlées avant publication
+étaient vides (visible, en cours et différé), sans lecture ni purge de contenu.
+Aucun log Vercel `error`/`fatal` retourné pour ce déploiement sur la courte
+fenêtre contrôlée. Ce n'est pas une validation de 72 heures ni de délivrabilité.
+
+## Conditions encore ouvertes
 
 Le validateur ne remplace pas l'authentification des producteurs, la politique
 IAM, ni la corrélation DB renforcée dans la PR #40. Le transport SES complet,

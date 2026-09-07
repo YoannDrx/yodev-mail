@@ -151,6 +151,14 @@ Lambda runtime `SES_ENABLED=true`. It defaults to `false`, and a standby stack
 stays closed even when the input is accidentally enabled. Keep it false outside
 an explicitly approved SES certification window.
 
+SES workers also require `DEPLOYMENT_ENVIRONMENT=dev` or `prod`, set by their
+CDK stack. Each send includes the technical `ym_environment` tag. EventBridge
+filters by environment, account and region; the consumer rechecks the envelope
+environment before ingestion. Missing or mismatched SES environments fail
+closed. Deploy sender, transformer and consumer together in standby before
+activation. Historical untagged events need explicit operator reconciliation,
+not an environment inferred from copied workspace identifiers.
+
 `STRIPE_TAX_MODE` defaults to `unconfigured` and blocks Checkout. Set it to
 `franchise_base` only after confirming that no active Stripe Tax registration
 exists and that the business is legally eligible for the franchise en base. Set

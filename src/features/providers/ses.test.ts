@@ -14,7 +14,7 @@ const input = {
 };
 
 describe("SES delivery contract", () => {
-  beforeEach(() => { vi.stubEnv("SES_ENABLED", "true"); send.mockReset(); });
+  beforeEach(() => { vi.stubEnv("SES_ENABLED", "true"); vi.stubEnv("DEPLOYMENT_ENVIRONMENT", "prod"); send.mockReset(); });
   afterEach(() => vi.unstubAllEnvs());
 
   it("uses the tenant, transactional configuration and only opaque tags with a bounded request", async () => {
@@ -23,7 +23,7 @@ describe("SES delivery contract", () => {
     const [command, options] = send.mock.calls[0];
     expect(command.input).toMatchObject({
       TenantName: "ym-test", ConfigurationSetName: "ym-test-txn",
-      EmailTags: [{ Name: "ym_message_id", Value: input.messageId }, { Name: "ym_workspace_id", Value: input.workspaceId }],
+      EmailTags: [{ Name: "ym_message_id", Value: input.messageId }, { Name: "ym_workspace_id", Value: input.workspaceId }, { Name: "ym_environment", Value: "prod" }],
     });
     expect(options?.abortSignal).toBeInstanceOf(AbortSignal);
   });
@@ -32,6 +32,19 @@ describe("SES delivery contract", () => {
     vi.stubEnv("SES_ENABLED", "false");
     await expect(new SesDeliveryProvider().send(input)).rejects.toMatchObject({ kind: "definitive", code: "ses_disabled" });
     expect(send).not.toHaveBeenCalled();
+  });
+
+  it.each([undefined, "", "production", "preview"])("refuses an ambiguous deployment environment: %s", async (environment) => {
+    vi.stubEnv("DEPLOYMENT_ENVIRONMENT", environment);
+    await expect(new SesDeliveryProvider().send(input)).rejects.toMatchObject({ kind: "definitive", code: "ses_environment_invalid" });
+    expect(send).not.toHaveBeenCalled();
+  });
+
+  it("tags development explicitly without deriving it from a workspace or tenant name", async () => {
+    vi.stubEnv("DEPLOYMENT_ENVIRONMENT", "dev");
+    send.mockResolvedValue({ MessageId: "ses-dev" });
+    await new SesDeliveryProvider().send(input);
+    expect(send.mock.calls[0][0].input.EmailTags).toContainEqual({ Name: "ym_environment", Value: "dev" });
   });
 
   it.each([

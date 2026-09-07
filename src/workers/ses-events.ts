@@ -16,6 +16,7 @@ const correlationFields = {
 };
 const sesSchema = z.object({
   ...correlationFields,
+  environment: z.enum(["dev", "prod"]),
   provider: z.literal("ses").optional(),
   eventId: eventOpaqueId.optional(),
   eventType: z.string().min(1).max(48),
@@ -45,6 +46,9 @@ export function normalizeSanitizedSesEvent(value: unknown): NormalizedProviderEv
   const parsed = sesSchema.safeParse(value);
   if (!parsed.success) return null;
   const input = parsed.data;
+  // Also defend against direct queue publication or a misconfigured rule.
+  // Never infer an environment from a copied workspace UUID or default to prod.
+  if (input.environment !== process.env.DEPLOYMENT_ENVIRONMENT) return null;
   const type = normalizeType(input.eventType, input.bounceType);
   if (!type || !input.providerMessageId || !input.workspaceId) return null;
   const occurredAt = new Date(input.occurredAt);
