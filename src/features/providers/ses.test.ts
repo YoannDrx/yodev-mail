@@ -7,7 +7,7 @@ import { SesDeliveryProvider } from "./ses";
 const input = {
   messageId: "00000000-0000-4000-8000-000000000001",
   workspaceId: "00000000-0000-4000-8000-000000000002",
-  externalAccountId: "ym-test",
+  externalAccountId: "ym-prod-00000000-0000-4000-8000-000000000002",
   from: { email: "sender@example.test", name: "Sender" },
   to: { email: "recipient@example.test" },
   subject: "Subject", html: "<p>Hello</p>", text: "Hello", attachments: [],
@@ -22,7 +22,7 @@ describe("SES delivery contract", () => {
     await expect(new SesDeliveryProvider().send(input)).resolves.toMatchObject({ providerMessageId: "ses-1" });
     const [command, options] = send.mock.calls[0];
     expect(command.input).toMatchObject({
-      TenantName: "ym-test", ConfigurationSetName: "ym-test-txn",
+      TenantName: input.externalAccountId, ConfigurationSetName: `${input.externalAccountId}-txn`,
       EmailTags: [{ Name: "ym_message_id", Value: input.messageId }, { Name: "ym_workspace_id", Value: input.workspaceId }, { Name: "ym_environment", Value: "prod" }],
     });
     expect(options?.abortSignal).toBeInstanceOf(AbortSignal);
@@ -43,8 +43,28 @@ describe("SES delivery contract", () => {
   it("tags development explicitly without deriving it from a workspace or tenant name", async () => {
     vi.stubEnv("DEPLOYMENT_ENVIRONMENT", "dev");
     send.mockResolvedValue({ MessageId: "ses-dev" });
-    await new SesDeliveryProvider().send(input);
+    await new SesDeliveryProvider().send({ ...input, externalAccountId: `ym-dev-${input.workspaceId}` });
     expect(send.mock.calls[0][0].input.EmailTags).toContainEqual({ Name: "ym_environment", Value: "dev" });
+  });
+
+  it.each([
+    `ym-dev-${input.workspaceId}`,
+    "ym-prod-00000000-0000-4000-8000-000000000003",
+    `ym-${input.workspaceId}`,
+    "ym-sandbox-cert",
+    "",
+  ])("refuses a mismatched or legacy account before sending: %s", async (externalAccountId) => {
+    await expect(new SesDeliveryProvider().send({ ...input, externalAccountId })).rejects.toMatchObject({
+      kind: "definitive", code: "ses_account_mismatch",
+    });
+    expect(send).not.toHaveBeenCalled();
+  });
+
+  it("does not sanitize an arbitrary workspace into a sendable tenant name", async () => {
+    await expect(new SesDeliveryProvider().send({ ...input, workspaceId: "not-a-uuid", externalAccountId: "ym-prod-not-a-uuid" })).rejects.toMatchObject({
+      kind: "definitive", code: "ses_account_mismatch",
+    });
+    expect(send).not.toHaveBeenCalled();
   });
 
   it.each([

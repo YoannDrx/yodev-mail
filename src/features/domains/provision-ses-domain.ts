@@ -15,20 +15,27 @@ import {
 import { STSClient, GetCallerIdentityCommand } from "@aws-sdk/client-sts";
 import { awsClients } from "@/lib/aws";
 import { env } from "@/lib/env";
+import { sesResourceNames } from "@/features/providers/ses-resources";
 
 export const SES_REPUTATION_POLICY = "standard" as const;
 
-function safeName(value: string) { return value.toLowerCase().replace(/[^a-z0-9-]/g, "-").replace(/-+/g, "-").slice(0, 55); }
 async function ignoreExisting(operation: () => Promise<unknown>) {
   try { await operation(); } catch (error) { if (!(error instanceof AlreadyExistsException) && (error as { name?: string }).name !== "AlreadyExistsException") throw error; }
 }
 
-export async function provisionSesDomain(input: { workspaceId: string; domain: string; signal?: AbortSignal }) {
+export async function provisionSesDomain(input: { workspaceId: string; domain: string; existingAccountId?: string | null; signal?: AbortSignal }) {
   const signal = input.signal ?? AbortSignal.timeout(35_000);
   signal.throwIfAborted();
+  const resources = sesResourceNames(input.workspaceId, process.env.DEPLOYMENT_ENVIRONMENT);
+  if (!resources) throw new Error("ses_resource_configuration_invalid");
+  // A legacy or cloned account requires explicit reconciliation, not a silent
+  // change of tenant while other domains still reference the existing account.
+  if (input.existingAccountId != null && input.existingAccountId !== resources.tenantName) {
+    throw new Error("ses_account_mismatch");
+  }
   const options = { abortSignal: signal };
   const { ses } = await awsClients();
-  const tenantName = safeName(`ym-${input.workspaceId}`);
+  const { tenantName, configurationSetName } = resources;
   await ignoreExisting(() => ses.send(new CreateTenantCommand({ TenantName: tenantName, SuppressionAttributes: { SuppressedReasons: ["BOUNCE", "COMPLAINT"], SuppressionScope: "TENANT" } }), options));
   const tenant = await ses.send(new GetTenantCommand({ TenantName: tenantName }), options);
   if (tenant.Tenant?.TenantArn) {
@@ -38,7 +45,7 @@ export async function provisionSesDomain(input: { workspaceId: string; domain: s
       ReputationEntityPolicy: `arn:aws:ses:${env.AWS_REGION}:aws:reputation-policy/${SES_REPUTATION_POLICY}`,
     }), options);
   }
-  const configurationSets = [`${tenantName}-txn`];
+  const configurationSets = [configurationSetName];
   for (const name of configurationSets) await ignoreExisting(() => ses.send(new CreateConfigurationSetCommand({ ConfigurationSetName: name, SendingOptions: { SendingEnabled: true }, ReputationOptions: { ReputationMetricsEnabled: true } }), options));
   await ignoreExisting(() =>
     ses.send(
@@ -83,8 +90,8 @@ export async function provisionSesDomain(input: { workspaceId: string; domain: s
     }
   }
   const identityArn = `arn:aws:ses:${env.AWS_REGION}:${accountId}:identity/${input.domain}`;
-  const resources = [identityArn, ...configurationSets.map(name => `arn:aws:ses:${env.AWS_REGION}:${accountId}:configuration-set/${name}`)];
-  for (const arn of resources) await ignoreExisting(() => ses.send(new CreateTenantResourceAssociationCommand({ TenantName: tenantName, ResourceArn: arn }), options));
+  const resourceArns = [identityArn, ...configurationSets.map(name => `arn:aws:ses:${env.AWS_REGION}:${accountId}:configuration-set/${name}`)];
+  for (const arn of resourceArns) await ignoreExisting(() => ses.send(new CreateTenantResourceAssociationCommand({ TenantName: tenantName, ResourceArn: arn }), options));
   const tokens = identity.DkimAttributes?.Tokens ?? [];
   return {
     tenantName, configurationSets, tokens, identityArn,

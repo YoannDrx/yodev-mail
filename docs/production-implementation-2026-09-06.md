@@ -83,8 +83,20 @@ un filtre réellement commun aux deux règles déployées : test AWS reproduit,
 règles actuellement désactivées. Le tag d'environnement est imposé à l'envoi,
 filtré par EventBridge et revérifié par le consommateur. 332 tests, les huit
 parcours publics et les 16 tests de patterns exécutés par AWS passent.
-Publication suivie dans le rapport ; cela ne prouve pas l'isolation complète
-des tenants/identités fournisseur ni la chaîne d'envoi réelle.
+Publié dans la PR #42, commit `eb9160e6b4a11195264d5b293d639087d5e07d5c` :
+CI PR/main vertes, Vercel READY et AWS Dev/Prod UPDATE_COMPLETE. Les 16 cas
+repassent sur les règles déployées ; quatre événements mal routés/non tagués
+sont refusés lors de deux invocations Lambda synchrones contrôlées. Les règles
+et envois restent fermés. Cela ne prouve pas l'isolation complète des
+tenants/identités fournisseur ni la chaîne d'envoi réelle.
+
+### Mise à jour technique du 7 septembre : rattachements SES
+
+Le [lot de rattachements SES](ses-resource-bindings-2026-09-07.md) complète
+l'isolation des événements par des noms de tenant/configuration Dev/Prod
+distincts et un contrôle du compte stocké avant provisionnement et envoi.
+L'inventaire du workspace interne est vide pour SES dans les deux branches
+Neon ; aucune référence historique n'est migrée implicitement.
 
 ### Stripe
 

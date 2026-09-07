@@ -159,6 +159,14 @@ closed. Deploy sender, transformer and consumer together in standby before
 activation. Historical untagged events need explicit operator reconciliation,
 not an environment inferred from copied workspace identifiers.
 
+SES tenant names are `ym-{environment}-{workspaceId}`, with a transactional
+configuration set named `{tenantName}-txn`. Provisioning and sending use the same
+UUID-validated naming contract. A stored account from another workspace or
+environment, or an older unscoped tenant, is rejected before AWS access. Existing
+accounts are never silently replaced by provisioning; reconcile legacy bindings
+explicitly before enabling SES. These application checks do not create separate
+AWS accounts or make a shared sending identity environment-specific.
+
 `STRIPE_TAX_MODE` defaults to `unconfigured` and blocks Checkout. Set it to
 `franchise_base` only after confirming that no active Stripe Tax registration
 exists and that the business is legally eligible for the franchise en base. Set

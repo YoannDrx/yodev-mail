@@ -22,7 +22,7 @@ beforeEach(async () => {
   vi.stubEnv("POSTMARK_ENABLED", "true");
   vi.stubEnv("DEPLOYMENT_ENVIRONMENT", "prod");
   providers.log.mockReset();
-  providers.ses.mockReset().mockResolvedValue({ tenantName: `ym-${workspaceId}`, identityArn: "arn:aws:ses:eu-west-3:123456789012:identity/example.test", records: [] });
+  providers.ses.mockReset().mockResolvedValue({ tenantName: `ym-prod-${workspaceId}`, identityArn: "arn:aws:ses:eu-west-3:123456789012:identity/example.test", records: [] });
   providers.postmark.mockReset().mockResolvedValue({ externalAccountId: "42", externalDomainId: "43", credentialParameterName: `/synthetic/${workspaceId}/server-token`, records: [] });
 });
 afterEach(async () => {
@@ -41,6 +41,32 @@ async function read(id: string) {
 }
 
 describe("provider provisioning state safety", () => {
+  it("passes the existing SES account to the environment preflight without replacing it on rejection", async () => {
+    const binding = await seed();
+    const externalAccountId = `ym-dev-${workspaceId}`;
+    await db.insert(workspaceProviderAccounts).values({ workspaceId, provider: "ses", status: "ready", externalAccountId });
+    providers.ses.mockRejectedValueOnce(new Error("ses_account_mismatch"));
+    await expect(provisionBinding(workspaceId, binding.id)).rejects.toThrow("provider_provisioning_failed");
+    expect(providers.ses.mock.calls[0][0]).toMatchObject({ workspaceId, existingAccountId: externalAccountId });
+    const [saved] = await db.select().from(workspaceProviderAccounts).where(and(eq(workspaceProviderAccounts.workspaceId, workspaceId), eq(workspaceProviderAccounts.provider, "ses")));
+    expect(saved).toMatchObject({ externalAccountId, status: "ready" });
+    expect(await read(binding.id)).toMatchObject({ status: "failed", externalDomainId: null });
+  });
+
+  it.each(["ses", "postmark"] as const)("does not overwrite a concurrently changed %s account or persist a mixed binding", async (provider) => {
+    const binding = await seed(provider);
+    providers[provider].mockImplementationOnce(async () => {
+      await db.insert(workspaceProviderAccounts).values({ workspaceId, provider, status: "ready", externalAccountId: "concurrent-account" });
+      return provider === "ses"
+        ? { tenantName: `ym-prod-${workspaceId}`, identityArn: "synthetic-identity", records: [] }
+        : { externalAccountId: "42", externalDomainId: "43", credentialParameterName: "/synthetic/server-token", records: [] };
+    });
+    await expect(provisionBinding(workspaceId, binding.id)).resolves.toBe("skipped");
+    expect(await read(binding.id)).toMatchObject({ status: "pending", externalDomainId: null });
+    const [saved] = await db.select().from(workspaceProviderAccounts).where(and(eq(workspaceProviderAccounts.workspaceId, workspaceId), eq(workspaceProviderAccounts.provider, provider)));
+    expect(saved).toMatchObject({ externalAccountId: "concurrent-account", status: "ready" });
+  });
+
   it("serializes concurrent domains in a workspace and releases the lock after completion", async () => {
     const first = await seed("postmark");
     const second = await seed("postmark");
@@ -186,7 +212,7 @@ describe("provider provisioning state safety", () => {
       if (change === "workspace_deleted") await db.update(workspaces).set({ deletedAt: new Date() }).where(eq(workspaces.id, workspaceId));
       if (change === "domain_disabled") await db.update(domains).set({ status: "disabled" }).where(and(eq(domains.workspaceId, workspaceId), eq(domains.id, binding.domainId)));
       if (change === "account_paused") await db.insert(workspaceProviderAccounts).values({ workspaceId, provider: "ses", status: "paused", externalAccountId: "original" });
-      return { tenantName: `ym-${workspaceId}`, identityArn: "synthetic-identity", records: [] };
+      return { tenantName: `ym-prod-${workspaceId}`, identityArn: "synthetic-identity", records: [] };
     });
     await expect(provisionBinding(workspaceId, binding.id)).resolves.toBe("skipped");
     expect((await read(binding.id)).externalDomainId).toBeNull();
