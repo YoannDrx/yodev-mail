@@ -2,6 +2,7 @@ import { SendEmailCommand } from "@aws-sdk/client-sesv2";
 import { awsClients } from "@/lib/aws";
 import type { DeliveryProvider, ProviderSendInput } from "@/features/providers/types";
 import { ProviderSendError } from "@/features/providers/types";
+import { sesResourceNames } from "@/features/providers/ses-resources";
 
 function mailbox(value: { email: string; name?: string | null }) {
   return value.name ? `${value.name.replace(/[<>]/g, "")} <${value.email}>` : value.email;
@@ -16,12 +17,16 @@ export class SesDeliveryProvider implements DeliveryProvider {
     if (environment !== "dev" && environment !== "prod") {
       throw new ProviderSendError("SES deployment environment is not configured.", "definitive", "ses_environment_invalid");
     }
+    const resources = sesResourceNames(input.workspaceId, environment);
+    if (!resources || input.externalAccountId !== resources.tenantName) {
+      throw new ProviderSendError("SES account does not match the workspace and environment.", "definitive", "ses_account_mismatch");
+    }
     const { ses } = await awsClients();
     try {
       const response = await ses.send(
         new SendEmailCommand({
-          TenantName: input.externalAccountId,
-          ConfigurationSetName: `${input.externalAccountId}-txn`,
+          TenantName: resources.tenantName,
+          ConfigurationSetName: resources.configurationSetName,
           FromEmailAddress: mailbox(input.from),
           Destination: { ToAddresses: [mailbox(input.to)] },
           ReplyToAddresses: input.replyTo ? [input.replyTo] : undefined,

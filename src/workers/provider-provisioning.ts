@@ -87,7 +87,7 @@ async function provisionLockedBinding(workspaceId: string, bindingId: string, si
           });
         },
       }).then((value) => ({ ...value, mailFromDomain: `pm-bounces.${row.domain.name}`, reputationPolicy: null }))
-      : await provisionSesDomain({ workspaceId, domain: row.domain.name, signal }).then((value) => ({
+      : await provisionSesDomain({ workspaceId, domain: row.domain.name, existingAccountId: account?.externalAccountId, signal }).then((value) => ({
         externalAccountId: value.tenantName, externalDomainId: value.identityArn, credentialParameterName: null,
         records: value.records, mailFromDomain: `bounce.${row.domain.name}`, reputationPolicy: SES_REPUTATION_POLICY,
       }));
@@ -109,7 +109,10 @@ async function provisionLockedBinding(workspaceId: string, bindingId: string, si
       }).onConflictDoUpdate({
         target: [workspaceProviderAccounts.workspaceId, workspaceProviderAccounts.provider],
         set: accountValues,
-        setWhere: and(eq(workspaceProviderAccounts.workspaceId, workspaceId), inArray(workspaceProviderAccounts.status, ["pending", "failed", "ready"])),
+        setWhere: and(
+          eq(workspaceProviderAccounts.workspaceId, workspaceId), inArray(workspaceProviderAccounts.status, ["pending", "failed", "ready"]),
+          or(isNull(workspaceProviderAccounts.externalAccountId), eq(workspaceProviderAccounts.externalAccountId, result.externalAccountId)),
+        ),
       }).returning({ id: workspaceProviderAccounts.id });
       if (!saved.length) throw new ProvisioningSuperseded();
       return "provisioned";
