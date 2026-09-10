@@ -29,6 +29,11 @@ jobs:
       - run: npx drizzle-kit check
       - run: npm run infra:synth
       - run: npm run infra:test:synth
+        # Offline runners have no AWS profile; CDK otherwise defaults to us-east-1.
+        # Keep the account/region guard intact and synthesize the pinned test region.
+        env:
+          AWS_REGION: eu-west-3
+          AWS_DEFAULT_REGION: eu-west-3
       - run: npm run check
   e2e:
     runs-on: ubuntu-latest

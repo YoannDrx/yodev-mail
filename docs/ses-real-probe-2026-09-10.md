@@ -34,6 +34,13 @@ stricte de test. Les empreintes SHA-256 des seuls statements SES des templates
 Dev et Prod sont identiques avant/après extraction vers le module partagé :
 aucune modification de ces permissions n'est cachée dans cette extraction.
 
+Le premier passage CI après ajout de cette synthèse s'arrête sur le garde-fou
+de région : sans profil AWS, CDK choisit `us-east-1` par défaut. Reproduction
+locale avec fichiers de configuration AWS vides : même région par défaut.
+La CI fixe désormais `AWS_REGION` et `AWS_DEFAULT_REGION` à `eu-west-3` pour
+cette seule étape, sans identifiant AWS. Le garde-fou n'est ni supprimé ni
+assoupli et aucun contrôle en échec n'est ignoré.
+
 ## Appels réels
 
 Exécution `20260910a`, script `scripts/certify-ses-test.mts`. Assertions STS avant
