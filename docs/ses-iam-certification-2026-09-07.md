@@ -118,8 +118,10 @@ AWS documente lui-même des différences possibles avec les appels réels.
 **Mise à jour du 10 septembre** : le compte de test `764858776290` existe,
 son accès et sa journalisation sont vérifiés. Une sonde privée à quatre rôles
 réutilise les politiques candidates ; 44 appels réels de provisioning ont les
-résultats attendus. SendEmail reste non testé en attente de validation DNS, le
-Mac étant verrouillé lors de l'accès OVH. Voir le
+résultats attendus. Après déverrouillage du Mac, les dix DNS sont publiés et
+vérifiés sur les deux serveurs autoritatifs OVH. SendEmail reste non testé :
+AWS affiche les identités `PENDING` et le précontrôle du nouveau script d'envoi
+au simulateur bloque toute tentative avant validation. Voir le
 [rapport de certification réelle](ses-real-probe-2026-09-10.md).
 La production web est désormais `c5b91e4` (correctif de sécurité #47 uniquement).
 La PR #44 reste non fusionnée et les permissions applicatives AWS inchangées.

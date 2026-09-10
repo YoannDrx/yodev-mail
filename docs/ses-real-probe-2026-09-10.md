@@ -1,6 +1,6 @@
 # Sonde IAM SES réelle - 10 septembre 2026
 
-Statut : **44 contrôles de provisioning réussis ; SendEmail non testé**.
+Statut : **44 contrôles de provisioning réussis ; DNS publiés ; SendEmail non testé**.
 Ce résultat ne certifie ni la livraison ni la chaîne applicative et ne vaut pas
 autorisation commerciale AWS. Les stacks applicatives Dev/Prod restent en standby.
 
@@ -90,13 +90,19 @@ Ces ressources synthétiques ne sont pas des workspaces clients et n'ont aucune
 liaison avec la base applicative. Elles devront être nettoyées explicitement
 après la certification ; les journaux d'audit restent conservés.
 
-## Prochaine étape : DNS, puis envoi au simulateur
+## DNS publiés après déverrouillage du Mac
 
-À la lecture de 14:08, les deux identités sont `PENDING`, DKIM RSA 2048. L'accès
-UI OVH a échoué car le Mac est verrouillé et le déverrouillage automatique
-indisponible. Aucune modification DNS n'a été effectuée pendant cette reprise.
-Déverrouiller le Mac, relire la zone, puis ajouter uniquement les enregistrements
-ci-dessous s'ils sont absents, sans remplacer les entrées existantes.
+Après déverrouillage, les dix enregistrements ci-dessous sont ajoutés à la zone
+OVH existante, sans modification ni suppression des cinquante entrées initiales.
+La liste OVH affiche ensuite 60/60 résultats. TTL : 3600 secondes.
+
+Chaque valeur est relue directement sur **les deux serveurs autoritatifs**,
+`dns200.anycast.me` et `ns200.anycast.me`. Les vingt réponses correspondent aux
+valeurs attendues. Des contrôles complémentaires via les résolveurs Cloudflare
+et Google retrouvent également les CNAME et MX des deux environnements.
+L'avertissement OVH « zone non autoritaire » ne correspond pas aux observations :
+la délégation publique nomme ces mêmes serveurs et leurs réponses portent le
+drapeau `aa`. Aucun changement de délégation, DNSSEC, MX principal ou DMARC.
 
 Noms relatifs à la zone `yodev.fr` ; cibles CNAME/MX absolues :
 
@@ -113,11 +119,47 @@ Noms relatifs à la zone `yodev.fr` ; cibles CNAME/MX absolues :
 | MX | bounce.prod.ses-probe-20260910a | 10 feedback-smtp.eu-west-3.amazonses.com. |
 | TXT | bounce.prod.ses-probe-20260910a | v=spf1 include:amazonses.com -all |
 
-Ensuite : vérifier les DNS autoritatifs, DKIM et MAIL FROM `SUCCESS`, puis tester
-SendEmail sous les deux rôles sender exclusivement vers le mailbox simulator.
-Le script actuel couvre seulement `--provision` et `--bindings` ; il n'envoie
-aucun message. L'étape d'envoi reste à implémenter et à vérifier. Ne pas compter
-un rejet d'identité non vérifiée comme un test d'envoi réussi.
+## Sonde d'envoi implémentée, validation SES encore attendue
+
+À la relecture après publication DNS, AWS retourne encore, pour les deux
+identités, `VerifiedForSendingStatus=false`, DKIM `PENDING`, MAIL FROM `PENDING`.
+Le précontrôle réel du nouveau script s'arrête sur `ProbeIdentityNotReady` avant
+tout SendEmail : zéro tentative, zéro message accepté. Il ne faut pas relancer
+la création des identités pour accélérer la validation.
+
+La phase d'envoi est séparée du provisioning afin de ne pas recréer ou modifier
+les ressources existantes :
+
+```bash
+npx tsx scripts/certify-ses-send.mts --send-to-simulator 20260910a
+```
+
+Le script exige le compte de test, l'opérateur SSO exact et un sandbox sain.
+Avant tout envoi, il vérifie les deux identités : propriété, vérification,
+signature DKIM active, MAIL FROM `SUCCESS` avec `REJECT_MESSAGE`, tenant associé
+aux deux seules ressources attendues, configuration active et destinations
+d'événements désactivées. Il assume ensuite uniquement les rôles sender de test.
+
+Douze scénarios prévus : pour chaque rôle, envoi propre attendu autorisé ;
+absence de tenant, tenant opposé, configuration opposée, identité opposée et
+ensemble opposé attendus refusés par IAM. L'unique destinataire est codé en dur :
+le simulateur SES de succès, non configurable par argument ou environnement.
+Contenu entièrement synthétique, aucun tag contenant une adresse ou du contenu.
+Les credentials STS restent en mémoire ; aucun identifiant root ou clé statique.
+
+`maxAttempts=1`, délai de 1100 ms entre essais, arrêt sur succès inattendu ou
+résultat non interprétable. Un HTTP 200 doit avoir un `MessageId` pour compter
+comme acceptation ; seuls les vrais refus IAM 403 comptent pour l'isolation.
+Les sorties excluent messages d'erreur bruts, adresses et contenu. Un identifiant
+SES prouvera l'acceptation, **pas la livraison**, les événements de la sonde
+restant volontairement désactivés. Ne pas relancer après un résultat incertain
+sans réconciliation opérateur.
+
+Vérifications locales de cette reprise : neuf tests ciblés des sondes, puis
+`npm run check` complet (259 tests, 40 fichiers, lint, types et build), ainsi que
+`npm run test:e2e` (8/8). Le typage initial des fixtures MAIL FROM a été corrigé
+avant la validation complète. Aucun changement de politique IAM ou déploiement
+applicatif dans cette reprise.
 
 Ne pas fusionner la PR #44 avant ces preuves et la relecture des permissions.
 Une sonde IAM réussie ne certifiera toujours pas EventBridge/SQS, l'ingestion,
@@ -127,3 +169,5 @@ L'identité historique `mail.yodev.fr` du compte existant est intacte.
 ## Référence
 
 [AWS SES CreateEmailIdentity : vérification DKIM du domaine](https://docs.aws.amazon.com/ses/latest/APIReference-V2/API_CreateEmailIdentity.html).
+[AWS SES SendEmail : associations tenant et acceptation](https://docs.aws.amazon.com/ses/latest/APIReference-V2/API_SendEmail.html).
+[AWS SES mailbox simulator](https://docs.aws.amazon.com/ses/latest/dg/send-an-email-from-console.html).

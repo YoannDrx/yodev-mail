@@ -161,8 +161,11 @@ avec ce SHA. La CI de PR et celle de `main` sont vertes. Aucun gate ouvert.
 
 La stack de rôles privés `YodevMailSesProbe` est ensuite créée à 14:06 dans le
 seul compte de test. Les 44 contrôles réels de provisioning passent ; aucun
-envoi n'a été effectué. Les DNS attendent l'accès OVH, bloqué par le Mac
-verrouillé. Voir le [rapport des sondes réelles](ses-real-probe-2026-09-10.md).
+envoi n'a été effectué. Après déverrouillage du Mac, les dix entrées DNS de test
+sont ajoutées et vérifiées sur les deux serveurs autoritatifs OVH. AWS affiche
+encore DKIM et MAIL FROM `PENDING`. La nouvelle sonde d'envoi au simulateur est
+implémentée et testée ; son précontrôle bloque tout envoi tant que les identités
+ne sont pas validées. Voir le [rapport des sondes réelles](ses-real-probe-2026-09-10.md).
 
 ## État SES relu le 10 septembre (inchangé par la journalisation)
 
