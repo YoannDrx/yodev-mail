@@ -44,7 +44,8 @@ export async function provisionSesDomain(input: { workspaceId: string; domain: s
   }), options));
   const identity = await ses.send(new GetEmailIdentityCommand({ EmailIdentity: input.domain }), options);
   // Never adopt, retag or modify a shared/legacy identity implicitly. IAM also
-  // enforces this ownership on sending, MAIL FROM writes and associations.
+  // enforces ownership on MAIL FROM writes and associations. Sending is confined
+  // to environment tenants by IAM and their resource memberships by SES.
   if (identity.Tags?.find(tag => tag.Key === SES_ENVIRONMENT_TAG)?.Value !== environment) {
     throw new Error("ses_identity_environment_mismatch");
   }

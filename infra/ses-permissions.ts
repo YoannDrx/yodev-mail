@@ -12,7 +12,12 @@ export function sesPermissions(account: string, region: string, environment: "de
   const tenantCondition = { "ses:TenantName": `ym-${environment}-*` };
   return {
     sender: [
-      new PolicyStatement({ actions: ["ses:SendEmail"], resources: [identity], conditions: { StringEquals: ownership, StringLike: tenantCondition } }),
+      // Real SES SendEmail rejects even owned, tagged domains with ResourceTag
+      // conditions. TenantName is enforced by IAM; SES validates that the domain
+      // belongs to that tenant. Ownership remains mandatory on association writes
+      // below. Audit legacy associations before activation; tags alone are not an
+      // authorization boundary for sending, and retagging cannot move membership.
+      new PolicyStatement({ actions: ["ses:SendEmail"], resources: [identity], conditions: { StringLike: tenantCondition } }),
       new PolicyStatement({ actions: ["ses:SendEmail"], resources: [configuration], conditions: { StringLike: tenantCondition } }),
     ],
     provisioner: [

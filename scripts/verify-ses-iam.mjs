@@ -87,8 +87,11 @@ for (const environment of ["dev", "prod"]) {
   send("send-owned", [identity, configuration], senderContext, true);
   send("send-other-tenant", [identity, configuration], { ...owned, "ses:TenantName": otherTenantName }, false);
   send("send-missing-tenant", identity, owned, false);
-  send("send-unowned-identity", identity, { "ses:TenantName": tenantName }, false);
-  send("send-foreign-identity", identity, { ...foreign, "ses:TenantName": tenantName }, false);
+  // ResourceTag does not work on real SendEmail in this account. IAM alone
+  // permits the identity when the tenant condition matches; SES must separately
+  // deny non-membership. These cases are not claims of successful SES sending.
+  send("send-unowned-identity-iam-only", identity, { "ses:TenantName": tenantName }, true);
+  send("send-foreign-identity-iam-only", identity, { ...foreign, "ses:TenantName": tenantName }, true);
   send("send-foreign-configuration", [identity, otherConfiguration], senderContext, false);
   send("send-other-region", `arn:aws:ses:${otherRegion}:${account}:identity/certification.example.test`, senderContext, false);
   send("send-other-account", `arn:aws:ses:${region}:000000000000:identity/certification.example.test`, senderContext, false);
@@ -122,5 +125,5 @@ for (const environment of ["dev", "prod"]) {
   provision("reputation-foreign-tenant", "UpdateReputationEntityPolicy", [otherTenant, standard], {}, false);
   provision("reputation-other-policy", "UpdateReputationEntityPolicy", [tenant, standard.replace("/standard", "/strict")], {}, false);
 }
-console.log(JSON.stringify({ source, passed, failures, scope: "IAM simulation only; no SES API execution or email delivery" }));
+console.log(JSON.stringify({ source, passed, failures, scope: "IAM simulation only; SES tenant membership is not evaluated; no SES API execution or email delivery" }));
 if (failures.length) process.exitCode = 1;

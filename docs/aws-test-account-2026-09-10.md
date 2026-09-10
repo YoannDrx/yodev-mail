@@ -160,18 +160,25 @@ Le correctif Next.js 16.3.4 est publié en production sous `c5b91e4` ; les endpo
 avec ce SHA. La CI de PR et celle de `main` sont vertes. Aucun gate ouvert.
 
 La stack de rôles privés `YodevMailSesProbe` est ensuite créée à 14:06 dans le
-seul compte de test. Les 44 contrôles réels de provisioning passent ; aucun
-envoi n'a été effectué. Après déverrouillage du Mac, les dix entrées DNS de test
-sont ajoutées et vérifiées sur les deux serveurs autoritatifs OVH. AWS affiche
-encore DKIM et MAIL FROM `PENDING`. La nouvelle sonde d'envoi au simulateur est
-implémentée et testée ; son précontrôle bloque tout envoi tant que les identités
-ne sont pas validées. Voir le [rapport des sondes réelles](ses-real-probe-2026-09-10.md).
+seul compte de test. Les 44 contrôles réels de provisioning passent. Les dix
+entrées DNS sont ajoutées et vérifiées sur les deux serveurs autoritatifs OVH ;
+AWS confirme ensuite les deux identités, DKIM et MAIL FROM `SUCCESS`. Après
+diagnostic d'un refus réel lié à ResourceTag sur SendEmail, les deux politiques
+sender sont corrigées : tenant IAM obligatoire et contrôle d'association SES,
+propriété toujours imposée aux écritures d'association. Les 12 essais finaux
+passent (deux acceptations, huit refus IAM, deux refus d'association SES).
+La stack de sonde est `UPDATE_COMPLETE`, sans dérive. Aucun déploiement de
+workload applicatif ni activation commerciale. Voir le
+[rapport des sondes réelles](ses-real-probe-2026-09-10.md).
 
 ## État SES relu le 10 septembre (inchangé par la journalisation)
 
 Nouveau compte : `ProductionAccessEnabled=false`, `SendingEnabled=true`,
 `EnforcementStatus=HEALTHY`, quota `200/jour`, débit `1/seconde`,
-`SentLast24Hours=0`. Il s'agit d'un sandbox neuf, pas d'une preuve de livraison.
+`SentLast24Hours=0` lors de la lecture initiale avant les sondes. Les acceptations
+synthétiques ultérieures sont détaillées dans le rapport ; ce compteur initial
+n'est pas une mesure après essai. Le compte reste un sandbox, pas une preuve de
+livraison ni une autorisation commerciale.
 
 Compte existant `274319534967` : `ProductionAccessEnabled=false`, revue
 `DENIED`. La création du compte de test ne contourne pas cette décision AWS et

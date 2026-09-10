@@ -1,6 +1,6 @@
 # Sonde IAM SES réelle - 10 septembre 2026
 
-Statut : **44 contrôles de provisioning réussis ; DNS publiés ; SendEmail non testé**.
+Statut : **44 contrôles de provisioning et 12 contrôles SendEmail réussis dans le compte de test**.
 Ce résultat ne certifie ni la livraison ni la chaîne applicative et ne vaut pas
 autorisation commerciale AWS. Les stacks applicatives Dev/Prod restent en standby.
 
@@ -19,7 +19,8 @@ autorisation commerciale AWS. Les stacks applicatives Dev/Prod restent en standb
 L'adaptation du plan utilise des rôles assumés depuis le poste opérateur plutôt
 qu'une Lambda : elle teste directement les mêmes permissions SES avec moins de
 ressources. `infra/ses-permissions.ts` est la source commune des politiques des
-workers et de la sonde, sans élargissement de permission pour faire passer un test.
+workers et de la sonde. Le changement de frontière d'autorisation d'envoi est
+explicité ci-dessous ; il ne s'agit pas d'une autorisation inconditionnelle.
 La confiance des rôles de test est distincte de celle des workers Lambda.
 
 Synthèse stricte et contrôle `cdk-nag` exécuté réellement : zéro violation non
@@ -75,9 +76,8 @@ Exemples d'identifiants de requêtes AWS permettant de retrouver les preuves :
 - Association Prod vers identité opposée refusée : `24bbfdc6-98bd-4927-a11e-880acb2f2c7a`.
 
 Les quatre cas positifs CreateConfigurationSet/CreateEmailIdentity refusés par
-le simulateur fonctionnent donc réellement avec la politique candidate. La
-divergence du simulateur n'est pas déclarée résolue pour SendEmail : les deux
-cas positifs d'envoi restent à effectuer.
+le simulateur fonctionnent donc réellement avec la politique candidate. Les
+permissions de provisioning n'ont pas changé depuis ces 44 contrôles.
 
 ## Ressources conservées pour terminer l'essai
 
@@ -119,13 +119,15 @@ Noms relatifs à la zone `yodev.fr` ; cibles CNAME/MX absolues :
 | MX | bounce.prod.ses-probe-20260910a | 10 feedback-smtp.eu-west-3.amazonses.com. |
 | TXT | bounce.prod.ses-probe-20260910a | v=spf1 include:amazonses.com -all |
 
-## Sonde d'envoi implémentée, validation SES encore attendue
+## Validation DNS et sonde d'envoi
 
-À la relecture après publication DNS, AWS retourne encore, pour les deux
+À la première relecture après publication DNS, AWS retournait, pour les deux
 identités, `VerifiedForSendingStatus=false`, DKIM `PENDING`, MAIL FROM `PENDING`.
-Le précontrôle réel du nouveau script s'arrête sur `ProbeIdentityNotReady` avant
+Le précontrôle réel du nouveau script s'est arrêté sur `ProbeIdentityNotReady` avant
 tout SendEmail : zéro tentative, zéro message accepté. Il ne faut pas relancer
-la création des identités pour accélérer la validation.
+la création des identités pour accélérer la validation. À la reprise du même
+jour, les deux identités sont vérifiées : `VerifiedForSendingStatus=true`,
+DKIM `SUCCESS`, signature active et MAIL FROM `SUCCESS`.
 
 La phase d'envoi est séparée du provisioning afin de ne pas recréer ou modifier
 les ressources existantes :
@@ -140,34 +142,137 @@ signature DKIM active, MAIL FROM `SUCCESS` avec `REJECT_MESSAGE`, tenant associ�
 aux deux seules ressources attendues, configuration active et destinations
 d'événements désactivées. Il assume ensuite uniquement les rôles sender de test.
 
-Douze scénarios prévus : pour chaque rôle, envoi propre attendu autorisé ;
+Douze scénarios : pour chaque rôle, envoi propre attendu autorisé ;
 absence de tenant, tenant opposé, configuration opposée, identité opposée et
-ensemble opposé attendus refusés par IAM. L'unique destinataire est codé en dur :
+ensemble opposé attendus refusés. Le contrôle d'identité opposée relève de
+l'association SES au tenant ; les huit autres refus relèvent d'IAM.
+L'unique destinataire est codé en dur :
 le simulateur SES de succès, non configurable par argument ou environnement.
 Contenu entièrement synthétique, aucun tag contenant une adresse ou du contenu.
 Les credentials STS restent en mémoire ; aucun identifiant root ou clé statique.
 
-`maxAttempts=1`, délai de 1100 ms entre essais, arrêt sur succès inattendu ou
+Pour SendEmail : `maxAttempts=1`, délai de 1100 ms entre essais, arrêt sur succès inattendu ou
 résultat non interprétable. Un HTTP 200 doit avoir un `MessageId` pour compter
-comme acceptation ; seuls les vrais refus IAM 403 comptent pour l'isolation.
+comme acceptation ; seuls les refus `AccessDeniedException`/`AccessDenied` 403
+comptent pour l'isolation. Les refus d'association SES sont distingués des refus
+IAM ; les erreurs 400, quotas et timeouts ne passent pas. Les lectures de contrôle
+et STS ont trois tentatives au maximum, bornées à 60 secondes après des timeouts
+observés avant tout envoi. Ces reprises ne s'appliquent jamais à SendEmail.
 Les sorties excluent messages d'erreur bruts, adresses et contenu. Un identifiant
-SES prouvera l'acceptation, **pas la livraison**, les événements de la sonde
+SES prouve l'acceptation, **pas la livraison**, les événements de la sonde
 restant volontairement désactivés. Ne pas relancer après un résultat incertain
 sans réconciliation opérateur.
 
-Vérifications locales de cette reprise : neuf tests ciblés des sondes, puis
-`npm run check` complet (259 tests, 40 fichiers, lint, types et build), ainsi que
-`npm run test:e2e` (8/8). Le typage initial des fixtures MAIL FROM a été corrigé
-avant la validation complète. Aucun changement de politique IAM ou déploiement
-applicatif dans cette reprise.
+## Défaut réel détecté et correction de la politique d'envoi
 
-Ne pas fusionner la PR #44 avant ces preuves et la relecture des permissions.
-Une sonde IAM réussie ne certifiera toujours pas EventBridge/SQS, l'ingestion,
+La première politique candidate refuse les deux envois légitimes, même après
+validation DNS. Les dix refus négatifs seuls ne constituaient donc pas une preuve
+d'isolation utilisable. Trois matrices de 12 essais confirment ces refus, y
+compris en fournissant explicitement `FromEmailAddressIdentityArn`.
+
+Une stack temporaire à quatre rôles compare la même requête Dev, limitée à
+l'identité/configuration exactes et au seul destinataire du simulateur SES :
+
+| Condition supplémentaire | Résultat réel | Request ID |
+| --- | --- | --- |
+| Aucune (ressources et destinataire exacts) | Accepté | f2279e38-59a7-459e-baa5-65ff90ee94ea |
+| Tag de propriété de l'identité | Refus 403 | 8c2e188b-32c0-49c0-ab0b-3125652ac801 |
+| Tenant, StringLike | Accepté | bd22bfff-ec82-4be4-a98b-83c766b7a0e0 |
+| Tenant, StringEquals | Accepté | b32dbf36-6fee-4b19-bf16-1ef9a83a6d04 |
+
+Correction : SendEmail exige le tenant de l'environnement et les ARN du
+compte/région, avec configurations limitées au préfixe de l'environnement.
+La condition `aws:ResourceTag/yodev:environment` est retirée **de SendEmail
+seulement** : elle reste obligatoire sur les écritures d'association d'identité
+et MAIL FROM. SES contrôle à l'envoi que l'identité appartient au tenant.
+Il s'agit d'une frontière combinée **IAM tenant + association SES**, et non
+d'une isolation d'envoi par tag IAM. Les associations historiques doivent être
+inventoriées avant activation ; un tag seul ne déplace pas une association.
+
+La référence AWS liste pourtant ResourceTag pour SendEmail. Les observations
+ci-dessus justifient le diagnostic dans ce compte/région, pas une affirmation
+de bug AWS universel ou officiellement confirmé. La documentation des tenants
+SES confirme le contrôle des associations à chaque envoi.
+
+Le changement CDK touche uniquement les deux politiques des rôles sender dans
+`YodevMailSesProbe`, sans remplacement. Après une interruption réseau du client
+CDK, le change set préparé a été relu puis exécuté exactement, sans recréation
+de ressources. Stack `UPDATE_COMPLETE` à `2026-09-10T15:35:23.575Z`, dérive
+`IN_SYNC`, zéro ressource dérivée. Les quatre politiques déployées correspondent
+exactement à la synthèse commune, y compris les provisioners inchangés.
+
+## Matrice finale : 12/12
+
+| Cas | Dev synthétique | Prod synthétique | Contrôle effectif |
+| --- | --- | --- | --- |
+| Envoi propre | Accepté 200 + MessageId | Accepté 200 + MessageId | IAM et associations valides |
+| Sans tenant | Refus 403 | Refus 403 | IAM |
+| Tenant opposé | Refus 403 | Refus 403 | IAM |
+| Configuration opposée | Refus 403 | Refus 403 | IAM |
+| Identité opposée | Refus 403 | Refus 403 | Association SES |
+| Toutes ressources opposées | Refus 403 | Refus 403 | IAM |
+
+Acceptation Dev : requête `e2a244d4-4f9e-46c6-973b-10d9a0853921`, MessageId
+`011301a08bf6fda1-d07de562-b226-480a-830b-ea1fc48774b4-000000`.
+Acceptation Prod synthétique : requête `9f751067-c98c-4c01-a531-6770ba643d83`,
+MessageId `011301a08bf73c95-6c726079-c953-4238-9029-cba1913a9164-000000`.
+Refus d'identité opposée : Dev `bd5fcc6e-70ed-493f-ae3d-3585b4c68338`,
+Prod `f5288379-19f6-4a68-80aa-09dafe9957e8`, raison assainie
+`resource-not-associated`. Sortie du script : 12 cas, zéro échec, deux
+acceptations, `deliveryCertified=false`, code de sortie 0. Le libellé du script
+a ensuite été précisé en `tenant-denied` pour ces deux refus, avec test de
+régression ; aucune nouvelle tentative n'est nécessaire pour renommer une trace.
+
+Les 44 contrôles de provisioning plus ces 12 contrôles donnent **56 résultats
+attendus**, pas 56 messages envoyés. Avec les comparaisons de diagnostic, cinq
+messages synthétiques ont été acceptés au total ; aucune boîte réelle ciblée.
+CloudTrail de gestion reste actif et sans erreur de livraison ; il ne s'agit
+pas d'une collecte d'événements de données SendEmail ou de livraison.
+
+Le simulateur IAM reste divergent : nouvelle matrice 76 cas, 66 résultats
+attendus et dix refus inattendus (cinq par environnement : les trois cas
+SendEmail attendus autorisés au niveau IAM seul et les deux créations). Zéro
+autorisation inattendue ; code de sortie 1 conservé. Les cas SendEmail d'identité
+non attribuée/opposée sont volontairement autorisés **dans la simulation IAM
+seule** avec le bon tenant ; la matrice réelle vérifie le refus d'association
+SES. `accessanalyzer validate-policy` : zéro constat pour les quatre politiques.
+La simulation n'est pas présentée comme verte ni comme un substitut aux appels
+réels. La CI n'exécute pas cette simulation externe.
+
+## Nettoyage et validation locale finale
+
+La stack `YodevMailSesConditionProbe` et ses quatre rôles de comparaison sont
+supprimés : `DELETE_COMPLETE` confirmé, suppression commencée à
+`2026-09-10T15:50:46.326Z`. Leur code reste disponible, uniquement sur opt-in
+`sesDiagnostics=true`, pour reproduire le diagnostic dans le compte de test.
+La fondation d'audit, ses journaux, les quatre rôles candidats, les identités
+synthétiques et leurs DNS sont conservés. Aucun domaine historique supprimé.
+
+`npm run check` final : 264 tests dans 41 fichiers, lint, typage et build réussis.
+`npm run test:e2e` : huit parcours publics Chromium réussis. `agent-browser`
+indisponible ; pas de contrôle visuel supplémentaire. Le serveur de développement
+a utilisé les polices de repli après des erreurs réseau Google Fonts ; le build
+de production a réussi. Ce test ne certifie pas les parcours OAuth réels.
+Les synthèses strictes applicative et de test passent, contrôle `cdk-nag` sans
+violation non reconnue. La relecture cible les permissions, la séparation des
+reprises de lectures/envois, l'absence de données privées dans les diagnostics
+et le bornage exact des rôles temporaires. Pas de constat bloquant supplémentaire
+sur ce diff ; les limites de simulation et de certification ci-dessous restent
+explicites.
+
+La PR #44 reste en brouillon avant la relecture et les validations finales.
+Ces contrôles réussis ne certifient toujours pas EventBridge/SQS, l'ingestion,
 le ledger, les fournisseurs de boîtes de réception ou la réputation commerciale.
-L'identité historique `mail.yodev.fr` du compte existant est intacte.
+L'identité historique `mail.yodev.fr` du compte existant est intacte : vérifiée,
+DKIM/MAIL FROM `SUCCESS`, aucun tag d'environnement, seul tenant associé
+`ym-sandbox-cert`. L'inventaire du compte existant ne retourne aucun tenant
+`ym-dev-*` ou `ym-prod-*`. Aucun workload applicatif de production n'est déployé
+par cette reprise et aucun gate n'est ouvert.
 
 ## Référence
 
 [AWS SES CreateEmailIdentity : vérification DKIM du domaine](https://docs.aws.amazon.com/ses/latest/APIReference-V2/API_CreateEmailIdentity.html).
 [AWS SES SendEmail : associations tenant et acceptation](https://docs.aws.amazon.com/ses/latest/APIReference-V2/API_SendEmail.html).
 [AWS SES mailbox simulator](https://docs.aws.amazon.com/ses/latest/dg/send-an-email-from-console.html).
+[AWS SES : contrôle des associations aux tenants](https://docs.aws.amazon.com/ses/latest/dg/tenants.html).
+[Référence des autorisations SES v2](https://docs.aws.amazon.com/service-authorization/latest/reference/list_sesv2.html).

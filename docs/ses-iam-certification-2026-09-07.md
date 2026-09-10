@@ -1,6 +1,8 @@
 # Certification des permissions SES - 7 septembre 2026
 
-Statut : **correctif proposé, non déployé, certification réelle non acquise**.
+Statut actualisé le 10 septembre : **correctif testé dans le compte dédié,
+44 contrôles de provisioning et 12 contrôles SendEmail réussis ; non publié
+dans les workloads applicatifs Dev/Prod**.
 À l'audit initial, la version publiée est `7436dd3` (PR #43). Les stacks Dev et Prod restent en
 standby. Ce rapport ne vaut pas GO commercial.
 
@@ -21,7 +23,9 @@ frontière IAM.
 
 - Expéditeur : `ses:SendEmail` limité au compte/région, au préfixe de tenant
   de son environnement et aux configurations `ym-{dev|prod}-*-txn`.
-  L'identité doit porter `yodev:environment=dev|prod` correspondant au rôle.
+  SES exige l'association de l'identité au tenant. La condition de tag sur
+  SendEmail de la première version a été retirée après avoir refusé les envois
+  légitimes réels ; la propriété reste imposée aux écritures d'association.
 - Provisioner : tenants/configurations limités par préfixe ; associations et
   modification MAIL FROM conditionnées à la propriété de l'identité ; seule la
   politique de réputation `standard` peut être affectée.
@@ -45,8 +49,12 @@ de plateforme, inaccessibles aux clients.
 `mail.yodev.fr`, identité vérifiée avec DKIM et MAIL FROM `SUCCESS`, ne porte
 actuellement aucun tag `yodev:environment`. Elle reste intacte. Son association
 au tenant historique `ym-sandbox-cert` n'est pas modifiée.
+Relecture le 10 septembre : cette association est la seule retournée et aucun
+tenant `ym-dev-*` ou `ym-prod-*` n'existe dans le compte applicatif. Avant
+activation, contrôler les associations existantes : la frontière d'envoi
+combine IAM tenant et appartenance SES, et ne repose pas sur un tag d'envoi.
 
-## Vérifications réalisées
+## Vérifications initiales du 7 septembre
 
 - Sept assertions en échec avant correction ; 43 tests ciblés passent après.
 - `npm run check` : lint, types, 245 tests unitaires/infrastructure et build
@@ -84,7 +92,7 @@ n'envoie pas de message, n'assume pas les rôles et ne lit pas de secret.
 
 ## Divergence du simulateur, non résolue
 
-### État de la revue
+### État historique de la revue au 7 septembre
 
 [PR #44](https://github.com/YoannDrx/yodev-mail/pull/44), **brouillon**,
 tête `0f1d9bf93c6802ffa18fa5e975983b56c1f808d5`.
@@ -118,10 +126,20 @@ AWS documente lui-même des différences possibles avec les appels réels.
 **Mise à jour du 10 septembre** : le compte de test `764858776290` existe,
 son accès et sa journalisation sont vérifiés. Une sonde privée à quatre rôles
 réutilise les politiques candidates ; 44 appels réels de provisioning ont les
-résultats attendus. Après déverrouillage du Mac, les dix DNS sont publiés et
-vérifiés sur les deux serveurs autoritatifs OVH. SendEmail reste non testé :
-AWS affiche les identités `PENDING` et le précontrôle du nouveau script d'envoi
-au simulateur bloque toute tentative avant validation. Voir le
+résultats attendus. Les dix DNS sont publiés et vérifiés sur les deux serveurs
+autoritaires OVH ; les deux identités sont ensuite vérifiées par AWS, avec DKIM
+et MAIL FROM `SUCCESS`. Les premiers envois légitimes échouent : une comparaison
+isolée montre que la condition ResourceTag sur SendEmail est en cause dans ce
+compte, alors que les conditions TenantName fonctionnent. La politique corrigée
+conserve le tenant IAM et les contrôles de propriété au rattachement des domaines.
+Après déploiement sur les deux rôles sender du compte de test seulement, les
+12 contrôles passent : deux acceptations, huit refus IAM, deux refus d'association
+SES. Dérive nulle et quatre politiques déployées identiques à la synthèse.
+La nouvelle simulation IAM retourne 66/76 résultats attendus : dix refus
+inattendus, aucun allow inattendu, code de sortie 1 conservé. La différence entre
+IAM seul et contrôle d'association SES est explicite dans les scénarios. Les
+appels réels apportent la preuve distincte ; la divergence du simulateur n'est
+pas déclarée corrigée ni qualifiée de bug AWS officiellement confirmé. Voir le
 [rapport de certification réelle](ses-real-probe-2026-09-10.md).
 La production web est désormais `c5b91e4` (correctif de sécurité #47 uniquement).
 La PR #44 reste non fusionnée et les permissions applicatives AWS inchangées.
@@ -140,8 +158,10 @@ pas un inventaire actuel des comptes.
    par les API SES v2 ; utiliser uniquement des identités de test contrôlées et
    le mailbox simulator pour les envois. Un rejet d'identité non vérifiée ne
    vaut pas preuve de livraison.
-3. Résoudre toute divergence avant fusion/déploiement du correctif. Exécuter les
-   contrôles requis, puis déployer en standby et relire politiques et gates.
+3. Expliquer les divergences par des appels réels positifs et négatifs et relire
+   la frontière d'autorisation avant fusion/déploiement. Les preuves du 10
+   septembre sont ci-dessus. Exécuter les contrôles requis, puis déployer en
+   standby et relire politiques et gates ; ne pas déclarer le simulateur vert.
 4. Réconcilier explicitement les identités historiques, puis certifier séparément
    DNS, envoi, retours EventBridge/SQS, ingestion et ledger applicatif. La sonde
    IAM ne certifie pas cette chaîne complète.
@@ -158,3 +178,4 @@ les tests.
 - [Exemple AWS de condition IAM par tenant](https://aws.amazon.com/blogs/messaging-and-targeting/improve-email-deliverability-with-tenant-management-in-amazon-ses/).
 - [Limites du simulateur IAM](https://docs.aws.amazon.com/IAM/latest/UserGuide/access_policies_testing-policies.html).
 - [CreateEmailIdentity et tags](https://docs.aws.amazon.com/ses/latest/APIReference-V2/API_CreateEmailIdentity.html).
+- [Contrôle SES des associations au tenant lors de l'envoi](https://docs.aws.amazon.com/ses/latest/dg/tenants.html).
