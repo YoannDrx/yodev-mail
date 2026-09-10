@@ -1,7 +1,7 @@
 # Certification des permissions SES - 7 septembre 2026
 
 Statut : **correctif proposé, non déployé, certification réelle non acquise**.
-La version publiée reste `7436dd3` (PR #43). Les stacks Dev et Prod restent en
+À l'audit initial, la version publiée est `7436dd3` (PR #43). Les stacks Dev et Prod restent en
 standby. Ce rapport ne vaut pas GO commercial.
 
 ## Défaut vérifié
@@ -84,6 +84,23 @@ n'envoie pas de message, n'assume pas les rôles et ne lit pas de secret.
 
 ## Divergence du simulateur, non résolue
 
+### État de la revue
+
+[PR #44](https://github.com/YoannDrx/yodev-mail/pull/44), **brouillon**,
+tête `0f1d9bf93c6802ffa18fa5e975983b56c1f808d5`.
+[CI 34070938308](https://github.com/YoannDrx/yodev-mail/actions/runs/34070938308)
+entièrement verte, contrôles requis compris : qualité, intégration, parcours
+publics et authentifiés, secrets et aperçu Vercel. Les simulations IAM réelles
+ne font pas partie de cette CI ; leurs six échecs restent ouverts.
+
+Relecture après création du brouillon : 26 workers en standby, 26 avec
+`SES_ENABLED=false` et `POSTMARK_ENABLED=false`. API health `ok`, base `ok`,
+version `7436dd3`. SES : production `false`, revue `DENIED`, quota 200/jour et
+1/seconde, zéro envoi sur 24 heures. Aucune fusion ou publication en production.
+Ces preuves post-CI sont ajoutées au rapport local après le commit du brouillon.
+
+### Cas témoins
+
 Cas témoins exécutés : SendEmail sur une identité explicite est autorisé avec
 une politique inconditionnelle. La même action sous condition `ses:TenantName`,
 avec la valeur correspondante fournie au simulateur, est autorisée lorsque
@@ -97,6 +114,17 @@ ni à garantir que la politique proposée fonctionnera à l'exécution. Le simul
 AWS documente lui-même des différences possibles avec les appels réels.
 
 ## Conditions de reprise
+
+**Mise à jour du 10 septembre** : le compte de test `764858776290` existe,
+son accès et sa journalisation sont vérifiés. Une sonde privée à quatre rôles
+réutilise les politiques candidates ; 44 appels réels de provisioning ont les
+résultats attendus. SendEmail reste non testé en attente de validation DNS, le
+Mac étant verrouillé lors de l'accès OVH. Voir le
+[rapport de certification réelle](ses-real-probe-2026-09-10.md).
+La production web est désormais `c5b91e4` (correctif de sécurité #47 uniquement).
+La PR #44 reste non fusionnée et les permissions applicatives AWS inchangées.
+Les conditions ci-dessous sont celles du diagnostic initial et ne constituent
+pas un inventaire actuel des comptes.
 
 1. Identifier un compte AWS de test distinct de celui qui héberge la production.
    La procédure du skill `aws-cdk` interdit les essais d'intégration dans le
