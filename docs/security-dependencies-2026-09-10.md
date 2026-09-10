@@ -51,6 +51,24 @@ la version et les endpoints de santé. Ne pas publier la branche de certificatio
 SES. En cas d'échec, conserver les gates fermées ; un retour à `7436dd3`
 réintroduirait les versions signalées et n'est pas un rollback de sécurité neutre.
 
+### Résultat de publication
+
+La [PR #47](https://github.com/YoannDrx/yodev-mail/pull/47) est fusionnée le
+10 septembre 2026 à 12:02:26 UTC, après tous les contrôles verts de la
+[CI de PR](https://github.com/YoannDrx/yodev-mail/actions/runs/34474174013) et
+la prévisualisation Vercel `2988ad6` avec santé/base `ok`.
+La [CI de main](https://github.com/YoannDrx/yodev-mail/actions/runs/34474488756)
+est également verte pour `c5b91e4e102eae874b5e3585f03892d9a2f1506d`.
+
+Déploiement production Vercel `dpl_6JGazXDWSjgw1ngcpFKUU8X7yBiU`, état `READY`.
+Le journal de build confirme Next.js 16.3.4. À 12:04 UTC, les endpoints
+`mail.yodev.fr/api/health` et `api.mail.yodev.fr/health` retournent tous deux
+`status=ok`, `database=ok`, `version=c5b91e4`. Le chemin
+`mail.yodev.fr/health` redirige normalement vers l'endpoint du domaine API.
+Les tests authentifiés et intégrés PostgreSQL ont bien été exécutés en CI.
+Aucune publication des permissions SES de la PR #44, aucune migration de
+production, aucun changement de gate ou de secret dans ce correctif.
+
 ## Sources
 
 - [Avis officiel Next.js AVIF](https://github.com/vercel/next.js/security/advisories/GHSA-2xp9-vwfh-vxw4).

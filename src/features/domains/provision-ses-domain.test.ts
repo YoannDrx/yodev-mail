@@ -10,7 +10,7 @@ import { provisionSesDomain, SES_REPUTATION_POLICY } from "./provision-ses-domai
 
 beforeEach(() => {
   vi.stubEnv("DEPLOYMENT_ENVIRONMENT", "prod");
-  send.mockReset().mockResolvedValue({ DkimAttributes: { Tokens: ["dkim-token"] } });
+  send.mockReset().mockImplementation(async () => ({ Tags: [{ Key: "yodev:environment", Value: process.env.DEPLOYMENT_ENVIRONMENT }], DkimAttributes: { Tokens: ["dkim-token"] } }));
   stsSend.mockReset().mockResolvedValue({ Account: "123456789012" });
 });
 afterEach(() => vi.unstubAllEnvs());
@@ -18,6 +18,23 @@ afterEach(() => vi.unstubAllEnvs());
 const workspaceId = "00000000-0000-4000-8000-000000000002";
 
 describe("SES tenant reputation policy", () => {
+  it.each([undefined, "dev", "unknown"])("does not mutate or associate an identity owned by %s", async (environment) => {
+    send.mockImplementation(async (command) => {
+      if (command.constructor.name === "CreateEmailIdentityCommand") throw Object.assign(new Error("exists"), { name: "AlreadyExistsException" });
+      if (command.constructor.name === "GetEmailIdentityCommand") return { Tags: environment ? [{ Key: "yodev:environment", Value: environment }] : [] };
+      return {};
+    });
+    await expect(provisionSesDomain({ workspaceId, domain: "example.test" })).rejects.toThrow("ses_identity_environment_mismatch");
+    expect(send.mock.calls.some(([command]) => ["CreateTenantCommand", "CreateConfigurationSetCommand", "PutEmailIdentityMailFromAttributesCommand", "CreateTenantResourceAssociationCommand"].includes(command.constructor.name))).toBe(false);
+  });
+
+  it.each(["dev", "prod"])("tags new identities with their explicit %s owner", async (environment) => {
+    vi.stubEnv("DEPLOYMENT_ENVIRONMENT", environment);
+    send.mockImplementation(async () => ({ Tags: [{ Key: "yodev:environment", Value: environment }], DkimAttributes: { Tokens: ["dkim-token"] } }));
+    await provisionSesDomain({ workspaceId, domain: "example.test" });
+    const create = send.mock.calls.find(([command]) => command.constructor.name === "CreateEmailIdentityCommand")![0];
+    expect(create.input.Tags).toEqual([{ Key: "yodev:environment", Value: environment }]);
+  });
   it("shares one abort budget across SES and STS requests", async () => {
     const signal = new AbortController().signal;
     await provisionSesDomain({ workspaceId, domain: "example.test", signal });
@@ -33,7 +50,6 @@ describe("SES tenant reputation policy", () => {
     expect(SES_REPUTATION_POLICY).toBe("standard");
   });
   it("returns the same complete identity ARN associated with the tenant when account ID is resolved at runtime", async () => {
-    send.mockResolvedValue({ DkimAttributes: { Tokens: ["dkim-token"] } });
     stsSend.mockResolvedValue({ Account: "123456789012" });
     const result = await provisionSesDomain({ workspaceId, domain: "example.test" });
     expect(result.identityArn).toBe("arn:aws:ses:eu-west-3:123456789012:identity/example.test");
@@ -44,7 +60,7 @@ describe("SES tenant reputation policy", () => {
       if (command.constructor.name === "CreateConfigurationSetEventDestinationCommand") {
         throw Object.assign(new Error("exists"), { name: "AlreadyExistsException" });
       }
-      return {};
+      return { Tags: [{ Key: "yodev:environment", Value: "prod" }] };
     });
     await provisionSesDomain({ workspaceId, domain: "example.test" });
     const updates = send.mock.calls.filter(([command]) => command.constructor.name === "UpdateConfigurationSetEventDestinationCommand");
@@ -65,7 +81,7 @@ describe("SES tenant reputation policy", () => {
         throw Object.assign(new Error("exists"), { name: "AlreadyExistsException" });
       }
       if (command.constructor.name === "UpdateConfigurationSetEventDestinationCommand") throw new Error("denied");
-      return {};
+      return { Tags: [{ Key: "yodev:environment", Value: "prod" }] };
     });
     await expect(provisionSesDomain({ workspaceId, domain: "example.test" })).rejects.toThrow("denied");
     expect(send.mock.calls.some(([command]) => command.constructor.name === "CreateTenantResourceAssociationCommand")).toBe(false);
@@ -73,7 +89,7 @@ describe("SES tenant reputation policy", () => {
   it("does not try to update after a non-conflict create failure", async () => {
     send.mockImplementation(async (command) => {
       if (command.constructor.name === "CreateConfigurationSetEventDestinationCommand") throw new Error("throttled");
-      return {};
+      return { Tags: [{ Key: "yodev:environment", Value: "prod" }] };
     });
     await expect(provisionSesDomain({ workspaceId, domain: "example.test" })).rejects.toThrow("throttled");
     expect(send.mock.calls.some(([command]) => command.constructor.name === "UpdateConfigurationSetEventDestinationCommand")).toBe(false);

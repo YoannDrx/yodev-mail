@@ -77,7 +77,38 @@ describe("Mail by Yodev AWS infrastructure", () => {
       [statement.Action].flat().includes("ses:UpdateConfigurationSetEventDestination"),
     );
     expect(reconciliation).toHaveLength(1);
-    expect(reconciliation[0].Resource).toBe("arn:aws:ses:eu-west-3:123456789012:configuration-set/ym-*-txn");
+    expect([reconciliation[0].Resource].flat()).toEqual(["arn:aws:ses:eu-west-3:123456789012:configuration-set/ym-prod-*-txn"]);
+  });
+  test("limits SES sending by tenant and enforces identity ownership on association writes", () => {
+    for (const [template, environment] of [[standbyWorkload, "dev"], [sesCertificationWorkload, "dev"], [activeProductionWorkload, "prod"]] as const) {
+      const policies = Object.values(template.findResources("AWS::IAM::Policy"));
+      const sender = policies.find(entry => JSON.stringify(entry.Properties.Roles).includes("SendEmailServiceRole"))!;
+      const provisioner = policies.find(entry => JSON.stringify(entry.Properties.Roles).includes("ProviderProvisioningServiceRole"))!;
+      const sending = sender.Properties.PolicyDocument.Statement.filter((statement: { Action: string | string[] }) => [statement.Action].flat().includes("ses:SendEmail"));
+      expect(sending).toHaveLength(2);
+      for (const statement of sending) {
+        expect(statement.Condition.StringLike).toEqual({ "ses:TenantName": `ym-${environment}-*` });
+        expect([statement.Resource].flat()).not.toContain("*");
+      }
+      const identity = sending.find((statement: { Resource: string }) => statement.Resource.endsWith("identity/*"));
+      expect(identity.Condition).toEqual({ StringLike: { "ses:TenantName": `ym-${environment}-*` } });
+      const sesStatements = provisioner.Properties.PolicyDocument.Statement.filter((statement: { Action: string | string[] }) => [statement.Action].flat().some(action => action.startsWith("ses:")));
+      for (const statement of sesStatements) expect([statement.Resource].flat()).not.toContain("*");
+      const tenant = sesStatements.find((statement: { Action: string | string[] }) => [statement.Action].flat().includes("ses:GetTenant"));
+      expect(tenant.Resource).toBe(`arn:aws:ses:eu-west-3:123456789012:tenant/ym-${environment}-*/*`);
+      const reputation = sesStatements.find((statement: { Action: string | string[] }) => [statement.Action].flat().includes("ses:UpdateReputationEntityPolicy"));
+      expect(reputation.Resource).toEqual([`arn:aws:ses:eu-west-3:123456789012:tenant/ym-${environment}-*/*`, "arn:aws:ses:eu-west-3:aws:reputation-policy/standard"]);
+      const mailFrom = sesStatements.find((statement: { Action: string | string[] }) => [statement.Action].flat().includes("ses:PutEmailIdentityMailFromAttributes"));
+      expect(mailFrom.Condition.StringEquals).toEqual({ "aws:ResourceTag/yodev:environment": environment });
+      expect([mailFrom.Action].flat()).toContain("ses:CreateTenantResourceAssociation");
+      expect(mailFrom.Resource).toBe(`arn:aws:ses:eu-west-3:123456789012:identity/*`);
+      const tag = sesStatements.find((statement: { Action: string | string[] }) => [statement.Action].flat().includes("ses:TagResource"));
+      expect(tag.Condition).toEqual({
+        StringEquals: { "aws:RequestTag/yodev:environment": environment },
+        StringEqualsIfExists: { "aws:ResourceTag/yodev:environment": environment },
+        "ForAllValues:StringEquals": { "aws:TagKeys": ["yodev:environment"] },
+      });
+    }
   });
   test("uses the verified team-scoped Vercel OIDC claims", () => {
     foundation.hasResourceProperties("Custom::AWSCDKOpenIdConnectProvider", {

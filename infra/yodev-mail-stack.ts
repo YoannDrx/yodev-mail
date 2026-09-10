@@ -29,6 +29,7 @@ import { type ITopic } from "aws-cdk-lib/aws-sns";
 import { Queue, QueueEncryption } from "aws-cdk-lib/aws-sqs";
 import { StringParameter } from "aws-cdk-lib/aws-ssm";
 import type { Construct } from "constructs";
+import { sesPermissions } from "./ses-permissions";
 
 export interface YodevMailStackProps extends StackProps {
   alertTopic: ITopic;
@@ -227,7 +228,8 @@ export class YodevMailStack extends Stack {
     }));
     attachmentBucket.grantDelete(send);
     attachmentKey.grantDecrypt(send);
-    send.addToRolePolicy(new PolicyStatement({ actions: ["ses:SendEmail"], resources: ["*"] }));
+    const sesPolicies = sesPermissions(this.account, this.region, props.environment);
+    for (const policy of sesPolicies.sender) send.addToRolePolicy(policy);
     send.addToRolePolicy(new PolicyStatement({ actions: ["ssm:GetParameter", "ssm:GetParameters"], resources: [`arn:aws:ssm:${this.region}:${this.account}:parameter/${prefix}/providers/*`] }));
     providerCredentialsKey.grantDecrypt(send);
 
@@ -240,11 +242,7 @@ export class YodevMailStack extends Stack {
     providerProvisioning.main.grantConsumeMessages(provision);
     provision.addToRolePolicy(new PolicyStatement({ actions: ["ssm:GetParameter", "ssm:GetParameters", "ssm:PutParameter"], resources: [`arn:aws:ssm:${this.region}:${this.account}:parameter/${prefix}/providers/*`] }));
     providerCredentialsKey.grantEncryptDecrypt(provision);
-    provision.addToRolePolicy(new PolicyStatement({ actions: ["ses:CreateConfigurationSet", "ses:CreateConfigurationSetEventDestination", "ses:CreateEmailIdentity", "ses:CreateTenant", "ses:CreateTenantResourceAssociation", "ses:GetEmailIdentity", "ses:GetTenant", "ses:PutEmailIdentityMailFromAttributes", "ses:UpdateReputationEntityPolicy"], resources: ["*"] }));
-    provision.addToRolePolicy(new PolicyStatement({
-      actions: ["ses:UpdateConfigurationSetEventDestination"],
-      resources: [`arn:aws:ses:${this.region}:${this.account}:configuration-set/ym-*-txn`],
-    }));
+    for (const policy of sesPolicies.provisioner) provision.addToRolePolicy(policy);
 
     const deliver = worker(
       "CustomerWebhooks",

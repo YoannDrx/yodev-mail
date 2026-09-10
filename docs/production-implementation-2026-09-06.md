@@ -97,6 +97,33 @@ l'isolation des événements par des noms de tenant/configuration Dev/Prod
 distincts et un contrôle du compte stocké avant provisionnement et envoi.
 L'inventaire du workspace interne est vide pour SES dans les deux branches
 Neon ; aucune référence historique n'est migrée implicitement.
+Publié dans la PR #43, commit `7436dd392d13ec138ed730be94f12b872e8b5c04` :
+353 tests, CI PR/main vertes, huit parcours authentifiés et huit publics.
+Vercel READY, health `7436dd3`, AWS Dev/Prod UPDATE_COMPLETE ; 26 workers
+toujours en standby. Les permissions IAM et la chaîne d'envoi réelle restent
+à certifier séparément ; aucun tenant partagé n'a été modifié.
+
+### Correctif IAM SES certifié sur sonde de test, non publié dans les workloads
+
+Le [rapport IAM SES](ses-iam-certification-2026-09-07.md) documente une permission
+Dev trop large confirmée par le simulateur AWS et le correctif proposé :
+restriction des tenants/configurations par environnement, propriété explicite
+des identités et refus applicatif des identités historiques non attribuées.
+Le compte de test dédié `764858776290` est désormais configuré avec accès SSO
+et journalisation durable. Les 44 contrôles réels de provisioning passent et
+les deux identités synthétiques sont vérifiées, DKIM et MAIL FROM `SUCCESS`.
+La première politique d'envoi refusait aussi les envois légitimes : un diagnostic
+isolé a identifié la condition ResourceTag sur SendEmail. La correction limite
+l'envoi par tenant IAM et utilise le contrôle d'association SES ; les tags de
+propriété restent requis lors des écritures d'association et MAIL FROM.
+Les 12 contrôles réels d'envoi passent après mise à jour des seuls rôles sender
+de test : deux acceptations, huit refus IAM, deux refus d'association SES.
+La simulation IAM reste divergente (66/76 résultats attendus, dix faux négatifs
+par rapport aux attentes IAM, aucun allow inattendu) et n'est pas présentée
+comme verte. Les [preuves réelles et limites](ses-real-probe-2026-09-10.md)
+distinguent ces contrôles d'une certification de livraison ou du parcours
+applicatif complet. PR #44 encore en brouillon, non fusionnée ; workloads Dev/Prod
+inchangés par ces sondes et gates fermés. L'identité historique reste intacte.
 
 ### Stripe
 

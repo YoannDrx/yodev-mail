@@ -57,6 +57,17 @@ file. Re-run the normalizer after editing `.env.local`:
 npm run env:normalize
 ```
 
+The local AWS account directory uses `YODEV_MAIL_AWS_MANAGEMENT_*` and
+`YODEV_MAIL_AWS_TEST_*` for account names, IDs, administrative emails, profiles
+and regions; `YODEV_MAIL_AWS_SSO_*` documents the existing SSO login. Explicit
+`YODEV_MAIL_AWS_DEV_ACCOUNT_ID` and `YODEV_MAIL_AWS_PROD_ACCOUNT_ID` record that
+both current workloads still share the management account. These are operator
+reference values, not an automatic account switch. Preserve `AWS_PROFILE`,
+`AWS_ACCOUNT_ID`, runtime resource ARNs and operating modes when adding account
+metadata. Keep SSO credentials in the AWS CLI credential store, never in `.env`
+files, and do not upload this directory to Vercel. See the
+[test-account setup report](docs/aws-test-account-2026-09-10.md).
+
 Never use `drizzle-kit push` against production. Create and verify a Neon
 restore branch before every production migration.
 
@@ -166,6 +177,15 @@ environment, or an older unscoped tenant, is rejected before AWS access. Existin
 accounts are never silently replaced by provisioning; reconcile legacy bindings
 explicitly before enabling SES. These application checks do not create separate
 AWS accounts or make a shared sending identity environment-specific.
+
+The proposed additional SES IAM restrictions are **not deployed or certified**.
+See the [IAM certification report](docs/ses-iam-certification-2026-09-07.md)
+before applying that change. Local tests and policy validation are insufficient:
+the IAM simulator currently disagrees with six expected positive cases, and
+legacy identities require an explicit ownership decision before activation.
+The [September 10 real probe](docs/ses-real-probe-2026-09-10.md) confirms 44
+provisioning checks in the dedicated test account. SendEmail remains untested
+pending test-domain DNS verification; this is not a commercial readiness claim.
 
 `STRIPE_TAX_MODE` defaults to `unconfigured` and blocks Checkout. Set it to
 `franchise_base` only after confirming that no active Stripe Tax registration

@@ -61,7 +61,30 @@ Publication coordonnée des workers d'envoi et de provisionnement en standby.
 Aucune migration de schéma ; aucun remplacement automatique de binding. Les
 références historiques, si elles existent dans d'autres espaces, restent fermées
 et nécessitent une réconciliation explicite. Les gates commerciaux ne changent
-pas. Références de publication à compléter après contrôle.
+pas.
+
+### Publication vérifiée
+
+- [PR #43](https://github.com/YoannDrx/yodev-mail/pull/43) fusionnée le 7 septembre
+  à 02 h 21 min 07 s (Paris), sans contournement des contrôles. Tête testée
+  `c34c66df63bf42bf740e1fd7c8d5207f69ca8a33`, commit publié
+  `7436dd392d13ec138ed730be94f12b872e8b5c04`, arbres identiques.
+- CI PR `34069402476` et `main` `34069542657` vertes. Les huit parcours
+  authentifiés passent sur `main` en 59 secondes ; les huit publics en 17,9 s.
+- AWS Dev `UPDATE_COMPLETE` à 02 h 21 min 53 s ; Prod à 02 h 22 min 48 s.
+  Hash `SendEmail` commun : `iAOTJihITeP2klbF0BnkCIDxjxO2J+KUqj890P6FSKo=`.
+  Hash `ProviderProvisioning` : `At8oy8jal99Xa5fK0Vkv+LVH6DQA5R3jnEI3Q5LKIcM=`.
+  Les 26 workers sont en `OPERATING_MODE=standby`, avec les deux fournisseurs
+  désactivés. Zéro mapping Lambda/SQS ; les deux règles SES restent désactivées.
+- Vercel Production `dpl_EhGbbqXtRHHTnxLUcNNd6PXdnhRo` est `READY` sur le commit
+  publié (build 32,2 s). Le health API répond `ok`, base `ok`, version
+  `7436dd3` ; l'onboarding anonyme redirige vers `/fr/connexion`.
+  Aucun log `error`/`fatal` retourné sur la courte fenêtre post-publication
+  vérifiée, sans prétendre à une observation de 72 heures.
+- Lecture SES pendant la CI : accès production toujours `false`, revue
+  `DENIED`, quota sandbox 200/jour et 1/seconde, zéro envoi sur 24 h.
+  `mail.yodev.fr` est vérifié, DKIM et MAIL FROM `SUCCESS`, comportement
+  `REJECT_MESSAGE` si le MX MAIL FROM est invalide. Aucun email envoyé par ce lot.
 
 ## Limites
 
