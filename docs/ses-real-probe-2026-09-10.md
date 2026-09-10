@@ -27,6 +27,13 @@ reconnue. Les exceptions IAM5 reconnaissent uniquement les motifs ARN SES préci
 nécessaires aux ressources dynamiques, pas `Resource:*` ni des actions wildcard.
 La validation statique ne remplace pas les appels réels ci-dessous.
 
+Après intégration du correctif de sécurité de `main`, `npm ci` et `npm audit`
+passent sans vulnérabilité connue ; `npm run check` réussit (253 tests, lint,
+types, build Next.js 16.3.4), ainsi que huit tests navigateur et la synthèse
+stricte de test. Les empreintes SHA-256 des seuls statements SES des templates
+Dev et Prod sont identiques avant/après extraction vers le module partagé :
+aucune modification de ces permissions n'est cachée dans cette extraction.
+
 ## Appels réels
 
 Exécution `20260910a`, script `scripts/certify-ses-test.mts`. Assertions STS avant
