@@ -1,8 +1,11 @@
 # Contrats de files et point de mise en production - 11 septembre 2026
 
-**Pas de GO commercial.** Ce lot est corrigé et vérifié localement ; sa
-publication est préparée en PR brouillon, sans fusion ni déploiement AWS.
-La dernière version publiée vérifiée le 10 septembre est `a65f72d` (PR #44).
+**Pas de GO commercial.** Ce lot est corrigé et vérifié localement dans la
+[PR #48 en brouillon](https://github.com/YoannDrx/yodev-mail/pull/48), commit
+fonctionnel `126feb6`, sans fusion ni déploiement AWS. Les contrôles CI sont
+suivis sur la PR ; leur résultat final est consigné dans son commentaire.
+Les deux endpoints de santé production, relus le 11 septembre, retournent
+HTTP 200, `status=ok`, `database=ok`, `version=a65f72d` (PR #44).
 Les preuves de cette publication sont conservées dans le
 [rapport SES réel](ses-real-probe-2026-09-10.md), pas réattribuées à ce lot.
 
