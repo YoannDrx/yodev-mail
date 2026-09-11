@@ -197,6 +197,12 @@ database records; do not purge queues or add an unscoped compatibility fallback.
 See the [September 11 certification and remaining blockers](docs/queue-workspace-certification-2026-09-11.md)
 for this change's publication status.
 
+The [real SES event transport probe](docs/ses-transport-certification-2026-09-11.md)
+uses a separately gated stack in the dedicated test account. It found that
+EventBridge emits an empty optional bounce field on Delivery events; the consumer
+accepts that representation for non-bounce events without weakening workspace or
+environment checks. The probe is not a full application/ledger certification.
+
 `STRIPE_TAX_MODE` defaults to `unconfigured` and blocks Checkout. Set it to
 `franchise_base` only after confirming that no active Stripe Tax registration
 exists and that the business is legally eligible for the franchise en base. Set

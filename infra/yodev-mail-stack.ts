@@ -9,7 +9,7 @@ import {
 } from "aws-cdk-lib";
 import { Dashboard, GraphWidget, MathExpression, Metric, TreatMissingData } from "aws-cdk-lib/aws-cloudwatch";
 import { SnsAction } from "aws-cdk-lib/aws-cloudwatch-actions";
-import { EventField, Rule, RuleTargetInput, Schedule } from "aws-cdk-lib/aws-events";
+import { Rule, Schedule } from "aws-cdk-lib/aws-events";
 import { LambdaFunction, SqsQueue } from "aws-cdk-lib/aws-events-targets";
 import { CfnMalwareProtectionPlan } from "aws-cdk-lib/aws-guardduty";
 import {
@@ -30,6 +30,7 @@ import { Queue, QueueEncryption } from "aws-cdk-lib/aws-sqs";
 import { StringParameter } from "aws-cdk-lib/aws-ssm";
 import type { Construct } from "constructs";
 import { sesPermissions } from "./ses-permissions";
+import { sanitizedSesEventInput, sesEventPattern } from "./ses-event-contract";
 
 export interface YodevMailStackProps extends StackProps {
   alertTopic: ITopic;
@@ -309,27 +310,9 @@ export class YodevMailStack extends Stack {
 
     new Rule(this, "SesEventRule", {
       enabled: !standby,
-      eventPattern: {
-        source: ["aws.ses"],
-        account: [this.account],
-        region: [this.region],
-        detail: {
-          eventType: ["Delivery", "Bounce", "Complaint", "Reject", "DeliveryDelay"],
-          mail: { tags: { ym_workspace_id: [{ exists: true }], ym_message_id: [{ exists: true }], ym_environment: [props.environment] } },
-        },
-      },
+      eventPattern: sesEventPattern(this.account, this.region, props.environment),
       targets: [new SqsQueue(providerEvents.main, {
-        message: RuleTargetInput.fromObject({
-          eventId: EventField.eventId,
-          eventType: EventField.fromPath("$.detail.eventType"),
-          providerMessageId: EventField.fromPath("$.detail.mail.messageId"),
-          messageId: EventField.fromPath("$.detail.mail.tags.ym_message_id[0]"),
-          workspaceId: EventField.fromPath("$.detail.mail.tags.ym_workspace_id[0]"),
-          environment: EventField.fromPath("$.detail.mail.tags.ym_environment[0]"),
-          // mail.timestamp is the original send time, not the lifecycle event time.
-          occurredAt: EventField.time,
-          bounceType: EventField.fromPath("$.detail.bounce.bounceType"),
-        }),
+        message: sanitizedSesEventInput(),
       })],
     });
 
