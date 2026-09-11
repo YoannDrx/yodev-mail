@@ -260,14 +260,51 @@ et le bornage exact des rôles temporaires. Pas de constat bloquant supplémenta
 sur ce diff ; les limites de simulation et de certification ci-dessous restent
 explicites.
 
-La PR #44 reste en brouillon avant la relecture et les validations finales.
+La PR #44 a été fusionnée après la relecture et les validations finales,
+puis publiée en standby ; preuves de publication ci-dessous.
 Ces contrôles réussis ne certifient toujours pas EventBridge/SQS, l'ingestion,
 le ledger, les fournisseurs de boîtes de réception ou la réputation commerciale.
 L'identité historique `mail.yodev.fr` du compte existant est intacte : vérifiée,
 DKIM/MAIL FROM `SUCCESS`, aucun tag d'environnement, seul tenant associé
 `ym-sandbox-cert`. L'inventaire du compte existant ne retourne aucun tenant
-`ym-dev-*` ou `ym-prod-*`. Aucun workload applicatif de production n'est déployé
-par cette reprise et aucun gate n'est ouvert.
+`ym-dev-*` ou `ym-prod-*`. Les sondes n'ont pas activé les workloads ; la
+publication ultérieure conserve le standby et tous les gates fermés.
+
+## Publication en standby après certification
+
+[PR #44](https://github.com/YoannDrx/yodev-mail/pull/44) fusionnée le 10 septembre
+à `16:20:09Z`, commit `a65f72d2bca12e2412d5931863338ea7a249244a`. Le contenu
+fusionné est identique au commit vérifié `9df9f6f`. Les
+[contrôles de PR](https://github.com/YoannDrx/yodev-mail/actions/runs/34500547119)
+et la [CI main](https://github.com/YoannDrx/yodev-mail/actions/runs/34501437434)
+sont tous réussis, y compris intégration PostgreSQL et parcours authentifiés.
+La couverture complète de PR exécute 378 tests dans 51 fichiers ; les seuils
+configurés restent inchangés. Ce résultat n'inclut pas la simulation IAM externe
+divergente, conservée séparément ci-dessus.
+
+Vercel Production `dpl_HVjanc6FfPHDnWPGQ1Z5mLd7RhWN` : `READY`, build environ
+44 secondes, Next.js 16.3.4. `mail.yodev.fr/api/health` et
+`api.mail.yodev.fr/health` retournent `status=ok`, `database=ok`,
+`version=a65f72d`. Le scan des erreurs/fatal de ce déploiement depuis
+`16:20:09Z` ne retourne aucune entrée lors des contrôles post-publication.
+C'est une observation ponctuelle sur une fenêtre courte, pas une certification
+sous charge ni un suivi de canaris de 72 heures.
+
+AWS Dev : `UPDATE_COMPLETE` à `16:21:33Z`. AWS Prod : `UPDATE_COMPLETE` à
+`16:24:24Z`. Deux politiques IAM et les assets des deux workers SendEmail et
+ProviderProvisioning mis à jour dans chaque stack ; pas de changement de
+stockage, schéma, fondation ou gate, pas de remplacement de ressource métier.
+Les quatre politiques SES relues dans IAM correspondent aux templates vérifiés.
+La relecture des ressources réellement rattachées aux stacks confirme 26 workers
+en standby, SES/Postmark désactivés, 20 règles EventBridge désactivées et zéro
+mapping SQS. Les contrôles de dérive Dev et Prod sont `IN_SYNC`, zéro ressource
+dérivée dans les deux stacks.
+
+Le statut SES du compte applicatif relu après fusion reste : production `false`,
+revue `DENIED`, envoi sandbox activé, enforcement `HEALTHY`. Aucun contournement
+de cette décision, aucun message client, paiement ou activation commerciale.
+Ces preuves post-publication sont ajoutées au rapport local après fusion ; le
+commentaire de clôture de la PR conserve également l'état de publication.
 
 ## Référence
 

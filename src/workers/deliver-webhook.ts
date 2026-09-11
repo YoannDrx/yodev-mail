@@ -2,6 +2,7 @@ import type { SQSEvent, SQSBatchResponse } from "aws-lambda";
 import { and, eq, isNull, lt, lte, or } from "drizzle-orm";
 import { requireDb } from "@/db/runtime";
 import { emailEvents, outboxJobs, webhookDeliveries, webhookEndpoints } from "@/db/schema";
+import { parseWebhookDeliveryJob } from "@/features/webhooks/delivery-job";
 import { nextWebhookAttemptAt } from "@/features/webhooks/retry-policy";
 import { postWebhookSafely } from "@/features/webhooks/safe-http";
 import { validateWebhookUrl } from "@/features/webhooks/validate-url";
@@ -15,7 +16,8 @@ export async function handler(event: SQSEvent): Promise<SQSBatchResponse> {
   const failed: Array<{ itemIdentifier: string }> = [];
   for (const record of event.Records) {
     try {
-      await deliverWebhook(JSON.parse(record.body).deliveryId);
+      const job = parseWebhookDeliveryJob(JSON.parse(record.body));
+      await deliverWebhook(job.deliveryId, job.workspaceId);
       logWorkerResult({ worker: "deliver-webhook", correlationId: record.messageId, outcome: "completed" });
     } catch {
       logWorkerResult({ worker: "deliver-webhook", correlationId: record.messageId, outcome: "failed", code: "technical_failure" });
@@ -66,7 +68,8 @@ async function recordExpectedFailure(input: {
   if (terminal) emitOperationalMetric("CustomerWebhookTerminalFailure");
 }
 
-export async function deliverWebhook(deliveryId: string, now = new Date()) {
+export async function deliverWebhook(deliveryId: string, workspaceId: string, now = new Date()) {
+  parseWebhookDeliveryJob({ deliveryId, workspaceId });
   const db = requireDb();
   const [row] = await db.select({ delivery: webhookDeliveries, endpoint: webhookEndpoints, event: emailEvents })
     .from(webhookDeliveries)
@@ -74,6 +77,7 @@ export async function deliverWebhook(deliveryId: string, now = new Date()) {
     .innerJoin(emailEvents, eq(webhookDeliveries.eventId, emailEvents.id))
     .where(and(
       eq(webhookDeliveries.id, deliveryId),
+      eq(webhookDeliveries.workspaceId, workspaceId),
       eq(webhookDeliveries.workspaceId, webhookEndpoints.workspaceId),
       eq(webhookDeliveries.workspaceId, emailEvents.workspaceId),
     )).limit(1);

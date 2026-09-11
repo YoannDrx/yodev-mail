@@ -178,14 +178,24 @@ accounts are never silently replaced by provisioning; reconcile legacy bindings
 explicitly before enabling SES. These application checks do not create separate
 AWS accounts or make a shared sending identity environment-specific.
 
-The proposed additional SES IAM restrictions are **not deployed or certified**.
-See the [IAM certification report](docs/ses-iam-certification-2026-09-07.md)
-before applying that change. Local tests and policy validation are insufficient:
-the IAM simulator currently disagrees with six expected positive cases, and
-legacy identities require an explicit ownership decision before activation.
-The [September 10 real probe](docs/ses-real-probe-2026-09-10.md) confirms 44
-provisioning checks in the dedicated test account. SendEmail remains untested
-pending test-domain DNS verification; this is not a commercial readiness claim.
+The additional SES IAM restrictions were deployed **in standby** on September 10
+under `a65f72d`. The [real probe](docs/ses-real-probe-2026-09-10.md) records 44
+provisioning checks and 12 SendEmail checks in the dedicated test account (two
+accepted simulator messages, not 56 deliveries). IAM tenant constraints and SES
+identity membership provide distinct layers of enforcement. The
+[IAM simulator](docs/ses-iam-certification-2026-09-07.md) still disagrees with ten
+expected positive cases; its result is not green. Legacy identities require an
+explicit ownership decision, and the complete application transport and ledger
+still need certification. SES production approval is a separate prerequisite.
+
+Email and customer-webhook queue jobs now require an explicit UUID workspace ID
+alongside the message or delivery ID. Unknown fields and legacy unscoped payloads
+are rejected; workers filter the initial database access by that workspace.
+Deploy outbox, send and webhook workers together in standby. Before activating
+transport, inventory queues and reconcile legacy jobs against their owned
+database records; do not purge queues or add an unscoped compatibility fallback.
+See the [September 11 certification and remaining blockers](docs/queue-workspace-certification-2026-09-11.md)
+for this change's publication status.
 
 `STRIPE_TAX_MODE` defaults to `unconfigured` and blocks Checkout. Set it to
 `franchise_base` only after confirming that no active Stripe Tax registration
