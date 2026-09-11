@@ -152,12 +152,23 @@ Projet `round-star-39482619`, branche principale `br-sweet-haze-aso0rivg`, forfa
 
 ## Travaux restant à fermer
 
+Le [test de retour SES du 11 septembre](ses-transport-certification-2026-09-11.md)
+a reçu deux événements réels du simulateur via EventBridge/SQS dans le compte
+de test. Il a révélé le rejet de `bounceType: ""` par le consommateur pour une
+Delivery. Correction locale, quatre régressions reproduites avant correction,
+426 tests complets réussis. Le même événement est accepté après correction
+sans nouvel envoi. Ce jalon ne valide pas encore la chaîne API/worker/DB/ledger.
+
 Le [lot du 11 septembre](queue-workspace-certification-2026-09-11.md) corrige
 les contrats des jobs d'envoi et de callbacks : workspace obligatoire et filtré
 dès l'accès initial, payload strict, erreur d'outbox assainie et échec partiel
 SQS détecté. 412 tests complets et 16 parcours navigateur locaux réussissent.
-Ce lot est préparé pour publication coordonnée, pas déployé sur AWS : les
-sessions SSO ont expiré. Le rapport détaille aussi Stripe et Neon relus ce jour.
+Ce lot est publié par la PR #48, commit `dd25ddd` : CI PR/main vertes, Vercel
+READY et santé application/API sur cette version, AWS Dev/Prod UPDATE_COMPLETE.
+La reconnexion SSO a réussi ; les workers restent en standby et les gates
+AWS SES/Postmark fermées. La lecture SES du 11 septembre confirme toujours
+production false et revue DENIED. Le rapport détaille la publication coordonnée,
+les limites de l'observation courte ainsi que Stripe et Neon relus ce jour.
 
 Le lot de [certification authentifiée](authenticated-certification-2026-09-06.md)
 est vérifié dans la [PR #37](https://github.com/YoannDrx/yodev-mail/pull/37) : huit

@@ -20,7 +20,9 @@ const sesSchema = z.object({
   provider: z.literal("ses").optional(),
   eventId: eventOpaqueId.optional(),
   eventType: z.string().min(1).max(48),
-  bounceType: z.enum(["Permanent", "Transient", "Undetermined"]).optional(),
+  // EventBridge supplies "" for the missing bounce JSONPath on non-bounce
+  // lifecycle events. Keep this transport representation distinct from a bounce.
+  bounceType: z.enum(["", "Permanent", "Transient", "Undetermined"]).optional(),
 });
 const postmarkSchema = z.object({
   ...correlationFields,
@@ -49,6 +51,7 @@ export function normalizeSanitizedSesEvent(value: unknown): NormalizedProviderEv
   // Also defend against direct queue publication or a misconfigured rule.
   // Never infer an environment from a copied workspace UUID or default to prod.
   if (input.environment !== process.env.DEPLOYMENT_ENVIRONMENT) return null;
+  if (input.bounceType === "" && input.eventType.trim().toUpperCase() === "BOUNCE") return null;
   const type = normalizeType(input.eventType, input.bounceType);
   if (!type || !input.providerMessageId || !input.workspaceId) return null;
   const occurredAt = new Date(input.occurredAt);

@@ -18,6 +18,18 @@ beforeEach(() => { vi.resetAllMocks(); vi.stubEnv("DEPLOYMENT_ENVIRONMENT", "pro
 afterEach(() => { vi.useRealTimers(); vi.unstubAllEnvs(); });
 
 describe("provider event runtime contract", () => {
+  it.each(["Delivery", "Complaint", "Reject", "DeliveryDelay"])("accepts the real EventBridge empty bounce path for %s without inventing a reason", async (eventType) => {
+    const payload = { ...ses, eventType, bounceType: "" };
+    expect(normalizeQueuedProviderEvent(payload)).toMatchObject({ provider: "ses", workspaceId, messageId, reasonCode: undefined });
+    expect(await handler({ Records: [{ messageId: "real-eventbridge", body: JSON.stringify(payload) }] } as SQSEvent)).toEqual({ batchItemFailures: [] });
+    expect(mocks.ingest).toHaveBeenCalledOnce();
+  });
+
+  it("does not interpret an empty bounce classification as a soft bounce", async () => {
+    expect(normalizeQueuedProviderEvent({ ...ses, eventType: "Bounce", bounceType: "" })).toBeNull();
+    expect(mocks.ingest).not.toHaveBeenCalled();
+  });
+
   it.each(["dev", undefined, "production"])("does not ingest SES events from another or unknown environment: %s", async (environment) => {
     const body = JSON.stringify({ ...ses, environment });
     expect(await handler({ Records: [{ messageId: "cross-env", body }] } as SQSEvent)).toEqual({ batchItemFailures: [{ itemIdentifier: "cross-env" }] });
