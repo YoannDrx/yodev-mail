@@ -28,8 +28,10 @@ afterEach(async () => {
 });
 afterAll(async () => { await databasePool!.end(); });
 
-async function seed(kind = "email") {
-  const [job] = await db.insert(outboxJobs).values({ workspaceId, kind, aggregateId: randomUUID() }).returning();
+async function seed(kind = "email", availableAt = new Date(Date.now() - 60_000)) {
+  // PostgreSQL now() has sub-millisecond precision; due jobs must not depend
+  // on the insert completing in a different JavaScript clock tick.
+  const [job] = await db.insert(outboxJobs).values({ workspaceId, kind, aggregateId: randomUUID(), availableAt }).returning();
   return job;
 }
 async function read(id: string) {
@@ -37,6 +39,12 @@ async function read(id: string) {
 }
 
 describe("outbox workspace contracts", () => {
+  it("leaves future jobs pending without publishing them", async () => {
+    const job = await seed("email", new Date(Date.now() + 60_000));
+    expect(await dispatchPendingOutbox()).toEqual({ delivered: 0, scanned: 0 });
+    expect(send).not.toHaveBeenCalled();
+    expect(await read(job.id)).toMatchObject({ status: "pending", attempts: 0, claimedAt: null });
+  });
   it("publishes only scoped IDs and never republishes a delivered outbox job", async () => {
     const job = await seed();
     expect(await dispatchPendingOutbox()).toEqual({ delivered: 1, scanned: 1 });

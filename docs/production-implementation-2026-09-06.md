@@ -155,7 +155,7 @@ Projet `round-star-39482619`, branche principale `br-sweet-haze-aso0rivg`, forfa
 Le [lot du 11 septembre](queue-workspace-certification-2026-09-11.md) corrige
 les contrats des jobs d'envoi et de callbacks : workspace obligatoire et filtré
 dès l'accès initial, payload strict, erreur d'outbox assainie et échec partiel
-SQS détecté. 411 tests complets et 16 parcours navigateur locaux réussissent.
+SQS détecté. 412 tests complets et 16 parcours navigateur locaux réussissent.
 Ce lot est préparé pour publication coordonnée, pas déployé sur AWS : les
 sessions SSO ont expiré. Le rapport détaille aussi Stripe et Neon relus ce jour.
 

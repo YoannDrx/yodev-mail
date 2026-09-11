@@ -41,9 +41,9 @@ Les contrôles API, IAM et les gates existants restent des protections distincte
 | Contrôle | Résultat |
 | --- | --- |
 | Régressions avant correction | 4 tests en échec : envoi et callback, workspace et contrat |
-| Envoi / outbox / callback, PostgreSQL réel local | 52 tests réussis |
+| Envoi / outbox / callback, PostgreSQL réel local | 53 tests réussis |
 | `npm run check` | lint, types, 287 tests unitaires/infrastructure et build réussis |
-| `npm run test:coverage:full` | 411 tests dans 54 fichiers, seuils inchangés respectés |
+| `npm run test:coverage:full` | 412 tests dans 54 fichiers, seuils inchangés respectés |
 | Couverture des fichiers instrumentés | lignes 76,37 %, branches 69,54 % |
 | Worker d'envoi | lignes 100 %, branches 90,90 % |
 | Worker callback | lignes 93,18 %, branches 88,88 % |
@@ -59,6 +59,14 @@ Les fournisseurs, SQS et l'HTTP des callbacks sont simulés dans les tests worke
 L'authentification navigateur est réelle mais locale, avec comptes synthétiques
 et authentificateur WebAuthn virtuel. Aucun email client ni paiement réel.
 La couverture ne représente pas la certification de tous les parcours externes.
+
+La première CI a révélé un test d'outbox instable : le fixture utilisait le
+`now()` PostgreSQL (précision sous-milliseconde), tandis que le dispatcher
+comparait immédiatement avec un `Date` JavaScript. La tâche pouvait donc ne pas
+être encore échue au moment du scan. Les fixtures utilisent maintenant une date
+explicitement passée ; un sixième test d'outbox vérifie qu'une tâche future
+reste en attente. Les 412 tests complets repassent localement après correction,
+sans temporisation ajoutée, seuil abaissé ni modification du dispatcher.
 
 Revue du diff, des appelants et des contrats voisins : aucun autre défaut
 bloquant identifié dans ce lot ; risque de migration de file ci-dessous.
