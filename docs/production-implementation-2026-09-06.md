@@ -103,7 +103,7 @@ Vercel READY, health `7436dd3`, AWS Dev/Prod UPDATE_COMPLETE ; 26 workers
 toujours en standby. Les permissions IAM et la chaîne d'envoi réelle restent
 à certifier séparément ; aucun tenant partagé n'a été modifié.
 
-### Correctif IAM SES certifié sur sonde de test, non publié dans les workloads
+### Correctif IAM SES certifié sur sonde de test et publié en standby
 
 Le [rapport IAM SES](ses-iam-certification-2026-09-07.md) documente une permission
 Dev trop large confirmée par le simulateur AWS et le correctif proposé :
@@ -122,10 +122,19 @@ La simulation IAM reste divergente (66/76 résultats attendus, dix faux négatif
 par rapport aux attentes IAM, aucun allow inattendu) et n'est pas présentée
 comme verte. Les [preuves réelles et limites](ses-real-probe-2026-09-10.md)
 distinguent ces contrôles d'une certification de livraison ou du parcours
-applicatif complet. PR #44 encore en brouillon, non fusionnée ; workloads Dev/Prod
-inchangés par ces sondes et gates fermés. L'identité historique reste intacte.
+applicatif complet. PR #44 fusionnée sous `a65f72d`, CI PR/main vertes, Vercel
+READY et AWS Dev/Prod UPDATE_COMPLETE. Les quatre politiques SES déployées sont
+conformes aux templates. Les 26 workers restent en standby, SES/Postmark fermés,
+20 règles EventBridge désactivées et zéro mapping SQS. L'identité historique
+reste intacte. Les preuves post-publication sont détaillées dans le rapport
+réel ; aucun GO commercial n'est accordé.
 
 ### Stripe
+
+Actualisation du 11 septembre : le même compte Live retourne toujours
+`charges_enabled=false`, `payouts_enabled=false`, `details_submitted=false` et
+`requirements.past_due`. Aucun paiement ni changement de compte effectué.
+Les autres objets Stripe cités ci-dessous n'ont pas été relus le 11 septembre.
 
 Le connecteur est à nouveau accessible. Le compte Live sélectionné pour ce produit est `acct_1U6Sh495MZhNiINX` (Mail by Yodev). Les autres comptes ne sont pas modifiés.
 
@@ -142,6 +151,13 @@ Les constats de l'audit précédent restent les conditions d'ouverture : approba
 Projet `round-star-39482619`, branche principale `br-sweet-haze-aso0rivg`, forfait `free_v3`, rétention de six heures, dix branches présentes pour une limite de dix. Aucun exercice ne doit remplacer ou réinitialiser la branche principale. Les anciennes sauvegardes sont conservées. Libérer une branche explicitement choisie ou disposer de capacité supplémentaire est nécessaire avant de créer une nouvelle branche d'exercice. Les branches protégées sont une fonctionnalité de forfait payant selon la [documentation Neon](https://neon.com/docs/guides/protected-branches) ; aucun forfait n'a été acheté.
 
 ## Travaux restant à fermer
+
+Le [lot du 11 septembre](queue-workspace-certification-2026-09-11.md) corrige
+les contrats des jobs d'envoi et de callbacks : workspace obligatoire et filtré
+dès l'accès initial, payload strict, erreur d'outbox assainie et échec partiel
+SQS détecté. 412 tests complets et 16 parcours navigateur locaux réussissent.
+Ce lot est préparé pour publication coordonnée, pas déployé sur AWS : les
+sessions SSO ont expiré. Le rapport détaille aussi Stripe et Neon relus ce jour.
 
 Le lot de [certification authentifiée](authenticated-certification-2026-09-06.md)
 est vérifié dans la [PR #37](https://github.com/YoannDrx/yodev-mail/pull/37) : huit

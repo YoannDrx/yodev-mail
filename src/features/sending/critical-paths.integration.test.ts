@@ -366,6 +366,37 @@ afterAll(async () => {
 });
 
 describe("transactional email critical paths", () => {
+  it("does not claim or send a message for a different explicit workspace", async () => {
+    const context = await seedTransactionalContext({ reservedEmails: 1 });
+    const other = await seedTransactionalContext({ domainName: "other.example.test" });
+    const messageId = await seedQueuedMessage(context);
+    dependencies.send.mockResolvedValue({ acceptedAt: new Date(), providerMessageId: "must-not-send" });
+
+    await sendOne(messageId, other.workspaceId);
+
+    expect(dependencies.send).not.toHaveBeenCalled();
+    const [message] = await db.select().from(messages).where(and(eq(messages.id, messageId), eq(messages.workspaceId, context.workspaceId)));
+    const [usage] = await db.select().from(usageDays).where(eq(usageDays.workspaceId, context.workspaceId));
+    expect(message).toMatchObject({ status: "queued", sendingClaimedAt: null, providerMessageId: null });
+    expect(usage).toMatchObject({ reservedEmails: 1, acceptedEmails: 0 });
+    expect(await db.select().from(usageLedger).where(eq(usageLedger.workspaceId, context.workspaceId))).toHaveLength(0);
+  });
+
+  it("rejects unscoped and extra-field queue jobs before sending", async () => {
+    const context = await seedTransactionalContext({ reservedEmails: 1 });
+    const messageId = await seedQueuedMessage(context);
+    dependencies.send.mockResolvedValue({ acceptedAt: new Date(), providerMessageId: "must-not-send" });
+    const result = await sendEmailHandler({ Records: [
+      { messageId: "unscoped", body: JSON.stringify({ messageId }) },
+      { messageId: "extra", body: JSON.stringify({ messageId, workspaceId: context.workspaceId, email: "private@example.test" }) },
+    ] } as never);
+    expect(result.batchItemFailures).toEqual([{ itemIdentifier: "unscoped" }, { itemIdentifier: "extra" }]);
+    expect(dependencies.send).not.toHaveBeenCalled();
+    expect(JSON.stringify(dependencies.logWorkerResult.mock.calls)).not.toContain("private@example.test");
+    const [message] = await db.select().from(messages).where(and(eq(messages.id, messageId), eq(messages.workspaceId, context.workspaceId)));
+    expect(message.status).toBe("queued");
+  });
+
   it("commits provider acceptance, quota, attempt, ledger and event exactly once", async () => {
     const context = await seedTransactionalContext({ reservedEmails: 1 });
     const messageId = await seedQueuedMessage(context);
@@ -375,8 +406,8 @@ describe("transactional email critical paths", () => {
       providerMessageId: "postmark-accepted-1",
     });
 
-    await sendOne(messageId);
-    await sendOne(messageId);
+    await sendOne(messageId, context.workspaceId);
+    await sendOne(messageId, context.workspaceId);
 
     const [message] = await db.select().from(messages).where(and(
       eq(messages.id, messageId),
@@ -422,7 +453,7 @@ describe("transactional email critical paths", () => {
       for each row execute function fail_accepted_attempt()
     `);
 
-    await sendOne(messageId);
+    await sendOne(messageId, context.workspaceId);
 
     const [message] = await db.select().from(messages).where(eq(messages.id, messageId));
     const [usage] = await db.select().from(usageDays).where(eq(usageDays.workspaceId, context.workspaceId));
@@ -443,7 +474,7 @@ describe("transactional email critical paths", () => {
       new ProviderSendError("Rate limited", "transient", "provider_rate_limited"),
     );
 
-    await expect(sendOne(messageId)).rejects.toThrow("Rate limited");
+    await expect(sendOne(messageId, context.workspaceId)).rejects.toThrow("Rate limited");
 
     const [message] = await db.select().from(messages).where(eq(messages.id, messageId));
     const [usage] = await db.select().from(usageDays).where(eq(usageDays.workspaceId, context.workspaceId));
@@ -461,7 +492,7 @@ describe("transactional email critical paths", () => {
       throw new ProviderSendError("Rate limited", "transient", "provider_rate_limited");
     });
 
-    await sendOne(messageId);
+    await sendOne(messageId, context.workspaceId);
 
     const [message] = await db.select().from(messages).where(eq(messages.id, messageId));
     const attempts = await db.select().from(messageAttempts).where(eq(messageAttempts.messageId, messageId));
@@ -476,7 +507,7 @@ describe("transactional email critical paths", () => {
       new ProviderSendError("Timeout", "ambiguous", "provider_timeout"),
     );
 
-    await sendOne(messageId);
+    await sendOne(messageId, context.workspaceId);
 
     const [message] = await db.select().from(messages).where(eq(messages.id, messageId));
     const [usage] = await db.select().from(usageDays).where(eq(usageDays.workspaceId, context.workspaceId));
@@ -512,7 +543,7 @@ describe("transactional email critical paths", () => {
       for each row execute function fail_retry_attempt()
     `);
 
-    await expect(sendOne(messageId)).rejects.toThrow("Failed query");
+    await expect(sendOne(messageId, context.workspaceId)).rejects.toThrow("Failed query");
 
     const [message] = await db.select().from(messages).where(eq(messages.id, messageId));
     const [usage] = await db.select().from(usageDays).where(eq(usageDays.workspaceId, context.workspaceId));
@@ -541,14 +572,14 @@ describe("transactional email critical paths", () => {
       for each row execute function fail_failed_event()
     `);
 
-    await expect(sendOne(messageId)).rejects.toThrow("Failed query");
+    await expect(sendOne(messageId, context.workspaceId)).rejects.toThrow("Failed query");
     let [message] = await db.select().from(messages).where(eq(messages.id, messageId));
     let [usage] = await db.select().from(usageDays).where(eq(usageDays.workspaceId, context.workspaceId));
     expect(message.status).toBe("queued");
     expect(usage.reservedEmails).toBe(1);
 
     await pool.query("drop function fail_failed_event() cascade");
-    await sendOne(messageId);
+    await sendOne(messageId, context.workspaceId);
     [message] = await db.select().from(messages).where(eq(messages.id, messageId));
     [usage] = await db.select().from(usageDays).where(eq(usageDays.workspaceId, context.workspaceId));
     const failedEvents = await db.select().from(emailEvents).where(and(
@@ -567,7 +598,7 @@ describe("transactional email critical paths", () => {
       sendDeadlineAt: new Date(Date.now() - 1_000),
     }).where(eq(messages.id, messageId));
 
-    await sendOne(messageId);
+    await sendOne(messageId, context.workspaceId);
 
     const [message] = await db.select().from(messages).where(eq(messages.id, messageId));
     const [usage] = await db.select().from(usageDays).where(eq(usageDays.workspaceId, context.workspaceId));
@@ -591,7 +622,7 @@ describe("transactional email critical paths", () => {
       reason: "manual",
     });
 
-    await sendOne(messageId);
+    await sendOne(messageId, context.workspaceId);
 
     const [message] = await db.select().from(messages).where(eq(messages.id, messageId));
     const [usage] = await db.select().from(usageDays).where(eq(usageDays.workspaceId, context.workspaceId));
@@ -610,7 +641,7 @@ describe("transactional email critical paths", () => {
       context.workspaceId,
     ));
 
-    await sendOne(messageId);
+    await sendOne(messageId, context.workspaceId);
 
     const [message] = await db.select().from(messages).where(eq(messages.id, messageId));
     const [usage] = await db.select().from(usageDays).where(eq(usageDays.workspaceId, context.workspaceId));
@@ -633,7 +664,7 @@ describe("transactional email critical paths", () => {
       dependencies.afterEligibility = undefined;
     };
 
-    await sendOne(messageId);
+    await sendOne(messageId, context.workspaceId);
 
     const [message] = await db.select().from(messages).where(eq(messages.id, messageId));
     const [usage] = await db.select().from(usageDays).where(eq(usageDays.workspaceId, context.workspaceId));
@@ -648,7 +679,7 @@ describe("transactional email critical paths", () => {
     const messageId = await seedQueuedMessage(context);
     await db.update(messages).set({ provider: null }).where(eq(messages.id, messageId));
 
-    await sendOne(messageId);
+    await sendOne(messageId, context.workspaceId);
 
     const [message] = await db.select().from(messages).where(eq(messages.id, messageId));
     const [usage] = await db.select().from(usageDays).where(eq(usageDays.workspaceId, context.workspaceId));
@@ -665,7 +696,7 @@ describe("transactional email critical paths", () => {
     const messageId = await seedQueuedMessage(context);
     await seedCleanAttachment(context, messageId);
 
-    await sendOne(messageId);
+    await sendOne(messageId, context.workspaceId);
 
     const [message] = await db.select().from(messages).where(eq(messages.id, messageId));
     expect(message.status).toBe("failed");
@@ -680,7 +711,7 @@ describe("transactional email critical paths", () => {
     process.env.ATTACHMENTS_BUCKET_NAME = "integration-attachments";
     dependencies.s3Send.mockResolvedValueOnce({ Body: undefined });
 
-    await sendOne(messageId);
+    await sendOne(messageId, context.workspaceId);
 
     const [message] = await db.select().from(messages).where(eq(messages.id, messageId));
     expect(message.status).toBe("failed");
@@ -703,7 +734,7 @@ describe("transactional email critical paths", () => {
       providerMessageId: "postmark-with-attachment",
     });
 
-    await sendOne(messageId);
+    await sendOne(messageId, context.workspaceId);
 
     const [message] = await db.select().from(messages).where(eq(messages.id, messageId));
     const [storedAttachment] = await db.select().from(attachments).where(eq(attachments.id, attachment.id));
@@ -721,7 +752,7 @@ describe("transactional email critical paths", () => {
     const messageId = await seedQueuedMessage(context);
     dependencies.send.mockRejectedValue("transport disconnected");
 
-    await sendOne(messageId);
+    await sendOne(messageId, context.workspaceId);
 
     const [message] = await db.select().from(messages).where(eq(messages.id, messageId));
     expect(message.status).toBe("unknown");
@@ -736,7 +767,7 @@ describe("transactional email critical paths", () => {
       return { acceptedAt: new Date(), providerMessageId: "postmark-state-race" };
     });
 
-    await sendOne(messageId);
+    await sendOne(messageId, context.workspaceId);
 
     const [message] = await db.select().from(messages).where(eq(messages.id, messageId));
     const ledger = await db.select().from(usageLedger).where(eq(usageLedger.messageId, messageId));
@@ -758,8 +789,8 @@ describe("transactional email critical paths", () => {
       providerMessageId: "postmark-billable",
     });
 
-    await sendOne(messageId);
-    await sendOne(messageId);
+    await sendOne(messageId, context.workspaceId);
+    await sendOne(messageId, context.workspaceId);
 
     const jobs = await db.select().from(stripeUsageReportJobs).where(eq(
       stripeUsageReportJobs.messageId,
@@ -788,7 +819,7 @@ describe("transactional email critical paths", () => {
       providerMessageId: "postmark-webhook",
     });
 
-    await sendOne(messageId);
+    await sendOne(messageId, context.workspaceId);
 
     expect(await db.select().from(webhookDeliveries)).toHaveLength(1);
     expect(await db.select().from(outboxJobs).where(eq(outboxJobs.kind, "webhook"))).toHaveLength(1);
@@ -804,7 +835,7 @@ describe("transactional email critical paths", () => {
 
     const result = await sendEmailHandler({
       Records: [
-        { body: JSON.stringify({ messageId }), messageId: "sqs-good" },
+        { body: JSON.stringify({ messageId, workspaceId: context.workspaceId }), messageId: "sqs-good" },
         { body: "not-json", messageId: "sqs-bad" },
       ],
     } as never);

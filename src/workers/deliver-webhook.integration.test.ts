@@ -38,7 +38,7 @@ import {
   workspaces,
 } from "@/db/schema";
 import { encryptSecret, sha256 } from "@/lib/crypto";
-import { deliverWebhook } from "@/workers/deliver-webhook";
+import { deliverWebhook, handler } from "@/workers/deliver-webhook";
 
 const db = requireDb();
 const pool = databasePool!;
@@ -143,12 +143,42 @@ afterAll(async () => {
 });
 
 describe("customer webhook delivery state machine", () => {
+  it("does not deliver a callback from a different explicit workspace", async () => {
+    const delivery = await seedDelivery();
+    dependencies.postWebhookSafely.mockResolvedValue(204);
+    await handler({ Records: [{ messageId: "cross-workspace", body: JSON.stringify({ deliveryId: delivery.id, workspaceId: randomUUID() }) }] } as never);
+    expect(dependencies.postWebhookSafely).not.toHaveBeenCalled();
+    const [stored] = await db.select().from(webhookDeliveries).where(eq(webhookDeliveries.id, delivery.id));
+    expect(stored).toMatchObject({ attempt: 0, claimedAt: null, deliveredAt: null });
+  });
+  it("rejects unscoped and extra-field callback jobs without logging their content", async () => {
+    const delivery = await seedDelivery();
+    dependencies.postWebhookSafely.mockResolvedValue(204);
+    const result = await handler({ Records: [
+      { messageId: "unscoped", body: JSON.stringify({ deliveryId: delivery.id }) },
+      { messageId: "extra", body: JSON.stringify({ deliveryId: delivery.id, workspaceId: delivery.workspaceId, email: "private@example.test" }) },
+    ] } as never);
+    expect(result.batchItemFailures).toEqual([{ itemIdentifier: "unscoped" }, { itemIdentifier: "extra" }]);
+    expect(dependencies.postWebhookSafely).not.toHaveBeenCalled();
+    expect(JSON.stringify(dependencies.logWorkerResult.mock.calls)).not.toContain("private@example.test");
+  });
+  it("delivers a scoped batch item once and retries only malformed items", async () => {
+    const delivery = await seedDelivery();
+    dependencies.postWebhookSafely.mockResolvedValue(204);
+    const body = JSON.stringify({ deliveryId: delivery.id, workspaceId: delivery.workspaceId });
+    const result = await handler({ Records: [
+      { messageId: "valid", body }, { messageId: "duplicate", body }, { messageId: "invalid", body: "not-json" },
+    ] } as never);
+    expect(result.batchItemFailures).toEqual([{ itemIdentifier: "invalid" }]);
+    expect(dependencies.postWebhookSafely).toHaveBeenCalledOnce();
+  });
+
   it("records a successful signed delivery", async () => {
     const delivery = await seedDelivery();
     dependencies.postWebhookSafely.mockResolvedValue(204);
     const now = new Date("2026-08-18T18:00:00.000Z");
 
-    await deliverWebhook(delivery.id, now);
+    await deliverWebhook(delivery.id, delivery.workspaceId, now);
 
     const [stored] = await db.select().from(webhookDeliveries).where(eq(webhookDeliveries.id, delivery.id));
     expect(stored).toMatchObject({ attempt: 1, deliveredAt: now, lastError: null, statusCode: 204 });
@@ -165,7 +195,7 @@ describe("customer webhook delivery state machine", () => {
     const delivery = await seedDelivery();
     dependencies.postWebhookSafely.mockResolvedValue(503);
 
-    await deliverWebhook(delivery.id, new Date("2026-08-18T18:00:00.000Z"));
+    await deliverWebhook(delivery.id, delivery.workspaceId, new Date("2026-08-18T18:00:00.000Z"));
 
     const [stored] = await db.select().from(webhookDeliveries).where(eq(webhookDeliveries.id, delivery.id));
     const jobs = await db.select().from(outboxJobs);
@@ -179,7 +209,7 @@ describe("customer webhook delivery state machine", () => {
     const delivery = await seedDelivery({ attempt: 7 });
     dependencies.postWebhookSafely.mockResolvedValue(500);
 
-    await deliverWebhook(delivery.id, new Date("2026-08-18T18:00:00.000Z"));
+    await deliverWebhook(delivery.id, delivery.workspaceId, new Date("2026-08-18T18:00:00.000Z"));
 
     const [stored] = await db.select().from(webhookDeliveries).where(eq(webhookDeliveries.id, delivery.id));
     expect(stored).toMatchObject({ attempt: 8, lastError: "http_500", nextAttemptAt: null });
@@ -199,9 +229,9 @@ describe("customer webhook delivery state machine", () => {
     const firstClaimAt = new Date("2026-08-18T18:00:00.000Z");
     const secondClaimAt = new Date(firstClaimAt.getTime() + 3 * 60_000);
 
-    const staleDelivery = deliverWebhook(delivery.id, firstClaimAt);
+    const staleDelivery = deliverWebhook(delivery.id, delivery.workspaceId, firstClaimAt);
     await vi.waitFor(() => expect(dependencies.postWebhookSafely).toHaveBeenCalledTimes(1));
-    await deliverWebhook(delivery.id, secondClaimAt);
+    await deliverWebhook(delivery.id, delivery.workspaceId, secondClaimAt);
     releaseFirst(503);
     await staleDelivery;
 
@@ -213,7 +243,7 @@ describe("customer webhook delivery state machine", () => {
   it("does not call the endpoint after it has been disabled", async () => {
     const delivery = await seedDelivery({ enabled: false });
 
-    await deliverWebhook(delivery.id, new Date("2026-08-18T18:00:00.000Z"));
+    await deliverWebhook(delivery.id, delivery.workspaceId, new Date("2026-08-18T18:00:00.000Z"));
 
     expect(dependencies.postWebhookSafely).not.toHaveBeenCalled();
   });

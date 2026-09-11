@@ -2,6 +2,8 @@ import { SendMessageCommand, SQSClient } from "@aws-sdk/client-sqs";
 import { and, eq, lt, lte, or } from "drizzle-orm";
 import { requireDb } from "@/db/runtime";
 import { outboxJobs } from "@/db/schema";
+import { parseEmailSendJob } from "@/features/sending/send-job";
+import { parseWebhookDeliveryJob } from "@/features/webhooks/delivery-job";
 import { loadRuntimeSecrets } from "@/workers/runtime-secrets";
 
 const queueForKind = (kind: string) => {
@@ -10,9 +12,9 @@ const queueForKind = (kind: string) => {
   return undefined;
 };
 
-const bodyForJob = (kind: string, aggregateId: string) => {
-  if (kind === "email") return { messageId: aggregateId };
-  if (kind === "webhook") return { deliveryId: aggregateId };
+const bodyForJob = (kind: string, aggregateId: string, workspaceId: string) => {
+  if (kind === "email") return parseEmailSendJob({ messageId: aggregateId, workspaceId });
+  if (kind === "webhook") return parseWebhookDeliveryJob({ deliveryId: aggregateId, workspaceId });
   throw new Error(`Unsupported outbox job kind: ${kind}`);
 };
 
@@ -65,7 +67,7 @@ export async function dispatchPendingOutbox(limit = 50) {
       if (!queueUrl) throw new Error(`Queue is not configured for ${job.kind}`);
       await sqs.send(
         new SendMessageCommand({
-          MessageBody: JSON.stringify(bodyForJob(job.kind, job.aggregateId)),
+          MessageBody: JSON.stringify(bodyForJob(job.kind, job.aggregateId, job.workspaceId)),
           QueueUrl: queueUrl,
         }),
       );
@@ -85,7 +87,7 @@ export async function dispatchPendingOutbox(limit = 50) {
           ),
         );
       delivered += 1;
-    } catch (error) {
+    } catch {
       const attempts = job.attempts + 1;
       const backoffSeconds = Math.min(900, 2 ** Math.min(attempts, 9));
       await db
@@ -93,7 +95,7 @@ export async function dispatchPendingOutbox(limit = 50) {
         .set({
           attempts,
           availableAt: new Date(Date.now() + backoffSeconds * 1000),
-          lastError: error instanceof Error ? error.message : "Outbox dispatch failed",
+          lastError: "outbox_dispatch_failed",
           status: "pending",
           updatedAt: new Date(),
         })

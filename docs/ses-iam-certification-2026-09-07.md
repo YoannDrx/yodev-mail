@@ -1,8 +1,8 @@
 # Certification des permissions SES - 7 septembre 2026
 
 Statut actualisé le 10 septembre : **correctif testé dans le compte dédié,
-44 contrôles de provisioning et 12 contrôles SendEmail réussis ; non publié
-dans les workloads applicatifs Dev/Prod**.
+44 contrôles de provisioning et 12 contrôles SendEmail réussis ; correctif
+publié en standby sur Vercel et les workloads applicatifs Dev/Prod**.
 À l'audit initial, la version publiée est `7436dd3` (PR #43). Les stacks Dev et Prod restent en
 standby. Ce rapport ne vaut pas GO commercial.
 
@@ -141,8 +141,12 @@ IAM seul et contrôle d'association SES est explicite dans les scénarios. Les
 appels réels apportent la preuve distincte ; la divergence du simulateur n'est
 pas déclarée corrigée ni qualifiée de bug AWS officiellement confirmé. Voir le
 [rapport de certification réelle](ses-real-probe-2026-09-10.md).
-La production web est désormais `c5b91e4` (correctif de sécurité #47 uniquement).
-La PR #44 reste non fusionnée et les permissions applicatives AWS inchangées.
+Après les contrôles finaux, la PR #44 est fusionnée sous `a65f72d`, CI PR/main
+vertes, Vercel READY et AWS Dev/Prod UPDATE_COMPLETE. Les quatre politiques
+déployées correspondent au code vérifié ; 26 workers en standby, SES/Postmark
+fermés, 20 règles EventBridge désactivées et zéro mapping SQS. Voir le rapport
+de certification réelle pour les preuves détaillées de publication ajoutées
+après fusion. Cette publication ne vaut toujours pas GO commercial.
 Les conditions ci-dessous sont celles du diagnostic initial et ne constituent
 pas un inventaire actuel des comptes.
 

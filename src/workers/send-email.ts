@@ -16,6 +16,7 @@ import {
 import { deliveryProvider } from "@/features/providers/registry";
 import { ProviderSendError } from "@/features/providers/types";
 import { evaluateStoredMessage, utcDay } from "@/features/sending/eligibility";
+import { parseEmailSendJob } from "@/features/sending/send-job";
 import {
   type DatabaseTransaction,
   queuePublicEmailEventInTransaction,
@@ -31,7 +32,8 @@ export async function handler(event: SQSEvent): Promise<SQSBatchResponse> {
   const failures: Array<{ itemIdentifier: string }> = [];
   for (const record of event.Records) {
     try {
-      await sendOne(JSON.parse(record.body).messageId);
+      const job = parseEmailSendJob(JSON.parse(record.body));
+      await sendOne(job.messageId, job.workspaceId);
       logWorkerResult({ worker: "send-email", correlationId: record.messageId, outcome: "completed" });
     } catch {
       logWorkerResult({ worker: "send-email", correlationId: record.messageId, outcome: "failed", code: "technical_failure" });
@@ -212,12 +214,13 @@ async function finalizeUnknownMessage(input: {
   });
 }
 
-export async function sendOne(messageId: string) {
+export async function sendOne(messageId: string, workspaceId: string) {
+  parseEmailSendJob({ messageId, workspaceId });
   const db = requireDb();
   const [claimed] = await db
     .update(messages)
     .set({ status: "sending", sendingClaimedAt: new Date(), updatedAt: new Date() })
-    .where(and(eq(messages.id, messageId), eq(messages.status, "queued")))
+    .where(and(eq(messages.id, messageId), eq(messages.workspaceId, workspaceId), eq(messages.status, "queued")))
     .returning();
   if (!claimed) return;
   if (!claimed.provider || !claimed.transactionalProfileId) {
