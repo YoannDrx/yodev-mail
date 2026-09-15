@@ -2,13 +2,6 @@ import { getSecureParameter } from "@/workers/runtime-secrets";
 import type { DeliveryProvider, ProviderSendInput } from "@/features/providers/types";
 import { ProviderSendError } from "@/features/providers/types";
 
-type PostmarkResponse = {
-  ErrorCode?: number;
-  Message?: string;
-  MessageID?: string;
-  SubmittedAt?: string;
-};
-
 function mailbox(value: { email: string; name?: string | null }) {
   return value.name ? `${value.name.replace(/[<>]/g, "")} <${value.email}>` : value.email;
 }
@@ -26,6 +19,7 @@ export class PostmarkDeliveryProvider implements DeliveryProvider {
     try {
       response = await fetch("https://api.postmarkapp.com/email", {
         method: "POST",
+        redirect: "error",
         headers: {
           Accept: "application/json",
           "Content-Type": "application/json",
@@ -53,34 +47,42 @@ export class PostmarkDeliveryProvider implements DeliveryProvider {
         }),
         signal: AbortSignal.timeout(15_000),
       });
-    } catch (error) {
+    } catch {
       throw new ProviderSendError(
-        error instanceof Error ? error.message : "Postmark request outcome is unknown.",
+        "Postmark request outcome is unknown.",
         "ambiguous",
         "provider_outcome_unknown",
       );
     }
-    const payload = (await response.json().catch(() => null)) as PostmarkResponse | null;
+    const body: unknown = await response.json().catch(() => null);
+    const payload = body && typeof body === "object" && !Array.isArray(body)
+      ? body as Record<string, unknown> : null;
+    const errorCode = typeof payload?.ErrorCode === "number" && Number.isSafeInteger(payload.ErrorCode) && payload.ErrorCode >= 0
+      ? payload.ErrorCode : null;
     if (!response.ok) {
-      const kind = response.status >= 500 || response.status === 429 ? "transient" : "definitive";
+      // A server failure does not prove that the email was not accepted. Never
+      // replay it automatically. Only a rate-limit rejection is safely retryable.
+      const kind = response.status >= 500 ? "ambiguous" : response.status === 429 ? "transient" : "definitive";
       throw new ProviderSendError(
-        payload?.Message ?? `Postmark rejected the request (${response.status}).`,
+        kind === "ambiguous" ? "Postmark request outcome is unknown." : `Postmark rejected the request (${response.status}).`,
         kind,
-        `postmark_${payload?.ErrorCode ?? response.status}`,
+        kind === "ambiguous" ? "provider_outcome_unknown" : `postmark_${errorCode ?? response.status}`,
       );
     }
-    if (!payload || typeof payload.ErrorCode !== "number") {
+    if (!payload || errorCode === null) {
       throw new ProviderSendError("Postmark response did not prove acceptance.", "ambiguous", "provider_outcome_unknown");
     }
-    if (payload.ErrorCode !== 0) {
-      throw new ProviderSendError(payload.Message ?? "Postmark rejected the request.", "definitive", `postmark_${payload.ErrorCode}`);
+    if (errorCode !== 0) {
+      throw new ProviderSendError("Postmark rejected the request.", "definitive", `postmark_${errorCode}`);
     }
-    if (!payload.MessageID) {
+    const acceptedAt = payload.SubmittedAt === undefined ? new Date()
+      : typeof payload.SubmittedAt === "string" ? new Date(payload.SubmittedAt) : new Date(NaN);
+    if (typeof payload.MessageID !== "string" || !/^[a-zA-Z0-9-]{1,180}$/.test(payload.MessageID) || !Number.isFinite(acceptedAt.getTime())) {
       throw new ProviderSendError("Postmark response did not prove acceptance.", "ambiguous", "provider_outcome_unknown");
     }
     return {
       providerMessageId: payload.MessageID,
-      acceptedAt: payload.SubmittedAt ? new Date(payload.SubmittedAt) : new Date(),
+      acceptedAt,
     };
   }
 }

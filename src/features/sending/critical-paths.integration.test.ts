@@ -3,6 +3,7 @@ import { and, eq } from "drizzle-orm";
 import type Stripe from "stripe";
 import { afterAll, beforeEach, describe, expect, it, vi } from "vitest";
 import { ProviderSendError } from "@/features/providers/types";
+import { PostmarkDeliveryProvider } from "@/features/providers/postmark";
 
 const dependencies = vi.hoisted(() => ({
   afterEligibility: undefined as (() => Promise<void>) | undefined,
@@ -74,6 +75,7 @@ vi.mock("@/lib/worker-log", () => ({
 }));
 vi.mock("@/workers/runtime-secrets", () => ({
   loadRuntimeSecrets: dependencies.loadRuntimeSecrets,
+  getSecureParameter: async () => "local-fixture-token",
 }));
 
 import { POST as sendEmailRoute } from "@/app/v1/emails/route";
@@ -366,6 +368,28 @@ afterAll(async () => {
 });
 
 describe("transactional email critical paths", () => {
+  it("never resends after an HTTP 500 from the real Postmark adapter", async () => {
+    const context = await seedTransactionalContext({ reservedEmails: 1 });
+    const messageId = await seedQueuedMessage(context);
+    const request = vi.fn().mockResolvedValue(new Response(JSON.stringify({ ErrorCode: 101, Message: "private@example.test body" }), { status: 500 }));
+    vi.stubGlobal("fetch", request);
+    vi.stubEnv("POSTMARK_ENABLED", "true");
+    dependencies.send.mockImplementation(input => new PostmarkDeliveryProvider().send(input));
+    try {
+      await sendOne(messageId, context.workspaceId);
+      await sendOne(messageId, context.workspaceId);
+      expect(request).toHaveBeenCalledOnce();
+      const [message] = await db.select().from(messages).where(and(eq(messages.id, messageId), eq(messages.workspaceId, context.workspaceId)));
+      const [usage] = await db.select().from(usageDays).where(eq(usageDays.workspaceId, context.workspaceId));
+      expect(message).toMatchObject({ status: "unknown", lastError: "provider_outcome_unknown" });
+      expect(usage).toMatchObject({ reservedEmails: 0, acceptedEmails: 0 });
+      expect(await db.select().from(usageLedger).where(eq(usageLedger.workspaceId, context.workspaceId))).toHaveLength(0);
+      expect(JSON.stringify(dependencies.logWorkerResult.mock.calls)).not.toContain("private@example.test");
+    } finally {
+      vi.unstubAllGlobals();
+      vi.unstubAllEnvs();
+    }
+  });
   it("does not claim or send a message for a different explicit workspace", async () => {
     const context = await seedTransactionalContext({ reservedEmails: 1 });
     const other = await seedTransactionalContext({ domainName: "other.example.test" });

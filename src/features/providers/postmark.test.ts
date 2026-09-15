@@ -36,8 +36,8 @@ describe("Postmark delivery contract", () => {
     expect(body.Metadata).not.toHaveProperty("recipient");
   });
 
-  it("classifies 429 and 5xx as transient, 4xx as definitive, and network timeouts as ambiguous", async () => {
-    for (const [status, kind] of [[429, "transient"], [503, "transient"], [422, "definitive"]] as const) {
+  it("retries rate limits but never retries an uncertain server or network outcome", async () => {
+    for (const [status, kind] of [[429, "transient"], [500, "ambiguous"], [502, "ambiguous"], [503, "ambiguous"], [504, "ambiguous"], [422, "definitive"]] as const) {
       vi.mocked(fetch).mockResolvedValueOnce(new Response(JSON.stringify({ ErrorCode: status, Message: "rejected" }), { status }));
       await expect(new PostmarkDeliveryProvider().send(input)).rejects.toMatchObject({ kind });
     }
@@ -46,7 +46,22 @@ describe("Postmark delivery contract", () => {
   });
 
   it("classifies malformed successful responses as ambiguous", async () => {
-    vi.mocked(fetch).mockResolvedValueOnce(new Response("{}", { status: 200 }));
-    await expect(new PostmarkDeliveryProvider().send(input)).rejects.toMatchObject({ kind: "ambiguous", code: "provider_outcome_unknown" });
+    for (const payload of [{}, null, { ErrorCode: "0" }, { ErrorCode: 0, MessageID: 42 }, { ErrorCode: 0, MessageID: " " }, { ErrorCode: 0, MessageID: "pm-1", SubmittedAt: "invalid" }]) {
+      vi.mocked(fetch).mockResolvedValueOnce(new Response(JSON.stringify(payload), { status: 200 }));
+      await expect(new PostmarkDeliveryProvider().send(input)).rejects.toMatchObject({ kind: "ambiguous", code: "provider_outcome_unknown" });
+    }
+  });
+
+  it("never persists provider or network diagnostics containing private data", async () => {
+    const privateText = "recipient@example.test private body server-token";
+    for (const status of [200, 422, 429, 500]) {
+      vi.mocked(fetch).mockResolvedValueOnce(new Response(JSON.stringify({ ErrorCode: privateText, Message: privateText }), { status }));
+      const error = await new PostmarkDeliveryProvider().send(input).catch((error: Error & { code: string }) => error);
+      expect(error).toBeInstanceOf(Error);
+      expect(JSON.stringify(error)).not.toContain(privateText);
+      expect((error as Error).message).not.toContain(privateText);
+    }
+    vi.mocked(fetch).mockRejectedValueOnce(new Error(privateText));
+    await expect(new PostmarkDeliveryProvider().send(input)).rejects.toMatchObject({ message: "Postmark request outcome is unknown.", kind: "ambiguous" });
   });
 });

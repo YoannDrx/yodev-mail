@@ -5,15 +5,17 @@ import {
   RemovalPolicy,
   Stack,
   Tags,
+  Validations,
   type StackProps,
 } from "aws-cdk-lib";
-import { Dashboard, GraphWidget, MathExpression, Metric, TreatMissingData } from "aws-cdk-lib/aws-cloudwatch";
+import { ComparisonOperator, Dashboard, GraphWidget, MathExpression, Metric, TreatMissingData } from "aws-cdk-lib/aws-cloudwatch";
 import { SnsAction } from "aws-cdk-lib/aws-cloudwatch-actions";
 import { Rule, Schedule } from "aws-cdk-lib/aws-events";
 import { LambdaFunction, SqsQueue } from "aws-cdk-lib/aws-events-targets";
 import { CfnMalwareProtectionPlan } from "aws-cdk-lib/aws-guardduty";
 import {
   type IOpenIdConnectProvider,
+  CfnRole,
   PolicyStatement,
   Role,
   ServicePrincipal,
@@ -24,11 +26,11 @@ import { Runtime } from "aws-cdk-lib/aws-lambda";
 import { SqsEventSource } from "aws-cdk-lib/aws-lambda-event-sources";
 import { NodejsFunction } from "aws-cdk-lib/aws-lambda-nodejs";
 import { LogGroup, RetentionDays } from "aws-cdk-lib/aws-logs";
-import { BlockPublicAccess, Bucket, BucketEncryption, HttpMethods } from "aws-cdk-lib/aws-s3";
+import { BlockPublicAccess, Bucket, BucketEncryption, CfnBucket, HttpMethods, ObjectOwnership } from "aws-cdk-lib/aws-s3";
 import { type ITopic } from "aws-cdk-lib/aws-sns";
 import { Queue, QueueEncryption } from "aws-cdk-lib/aws-sqs";
 import { StringParameter } from "aws-cdk-lib/aws-ssm";
-import type { Construct } from "constructs";
+import type { Construct, IConstruct } from "constructs";
 import { sesPermissions } from "./ses-permissions";
 import { sanitizedSesEventInput, sesEventPattern } from "./ses-event-contract";
 
@@ -47,6 +49,8 @@ export interface YodevMailStackProps extends StackProps {
 export class YodevMailStack extends Stack {
   constructor(scope: Construct, id: string, props: YodevMailStackProps) {
     super(scope, id, props);
+    // Use source-scoped service policies for log delivery, never legacy S3 ACLs.
+    this.node.setContext("@aws-cdk/aws-s3:serverAccessLogsUseBucketPolicy", true);
     const prod = props.environment === "prod";
     const standby = props.operatingMode === "standby";
     const monitoringEnabled = prod && !standby;
@@ -88,6 +92,18 @@ export class YodevMailStack extends Stack {
       enableKeyRotation: true,
       removalPolicy: prod ? RemovalPolicy.RETAIN : RemovalPolicy.DESTROY,
     });
+    const accessLogs = new Bucket(this, "S3AccessLogs", {
+      objectOwnership: ObjectOwnership.BUCKET_OWNER_ENFORCED,
+      blockPublicAccess: BlockPublicAccess.BLOCK_ALL,
+      encryption: BucketEncryption.S3_MANAGED,
+      enforceSSL: true,
+      lifecycleRules: [{ expiration: Duration.days(90) }],
+      removalPolicy: RemovalPolicy.RETAIN,
+    });
+    Validations.of(accessLogs).acknowledge({
+      id: "AwsSolutions-S1",
+      reason: "Dedicated S3 access-log destination. Logging its own deliveries would create recursive logs. Source attachment bucket logging is enabled; this private SSE-S3 sink retains logs for 90 days.",
+    });
     const attachmentBucket = new Bucket(this, "Attachments", {
       autoDeleteObjects: !prod,
       blockPublicAccess: BlockPublicAccess.BLOCK_ALL,
@@ -103,6 +119,8 @@ export class YodevMailStack extends Stack {
       encryptionKey: attachmentKey,
       enforceSSL: true,
       lifecycleRules: [{ expiration: Duration.days(1) }],
+      serverAccessLogsBucket: accessLogs,
+      serverAccessLogsPrefix: "attachments/",
       removalPolicy: prod ? RemovalPolicy.RETAIN : RemovalPolicy.DESTROY,
     });
 
@@ -111,9 +129,16 @@ export class YodevMailStack extends Stack {
         assumedBy: new ServicePrincipal("malware-protection-plan.guardduty.amazonaws.com"),
         roleName: `${prefix}-guardduty-malware`,
       });
-      attachmentBucket.grantRead(malwareRole);
-      attachmentBucket.grantPut(malwareRole);
-      attachmentKey.grantDecrypt(malwareRole);
+      // Match the service's documented scan/validation policy, not the broader
+      // S3 read/write grants (which also permit bucket reads and multipart aborts).
+      malwareRole.addToPolicy(new PolicyStatement({
+        actions: ["s3:GetObject", "s3:GetObjectVersion"],
+        resources: [attachmentBucket.arnForObjects("*")],
+      }));
+      malwareRole.addToPolicy(new PolicyStatement({
+        actions: ["s3:PutObject"],
+        resources: [attachmentBucket.arnForObjects("malware-protection-resource-validation-object")],
+      }));
       malwareRole.addToPolicy(new PolicyStatement({
         actions: ["s3:GetObjectTagging", "s3:PutObjectTagging", "s3:GetObjectVersionTagging", "s3:PutObjectVersionTagging"],
         resources: [attachmentBucket.arnForObjects("*")],
@@ -180,27 +205,35 @@ export class YodevMailStack extends Stack {
         retention: prod ? RetentionDays.THREE_MONTHS : RetentionDays.ONE_MONTH,
       });
       const fn = new NodejsFunction(this, name, {
-        bundling: { minify: true, sourceMap: true },
+        // Pin the SDK used by SES tenant APIs to package-lock, not the runtime's
+        // independently updated built-in SDK version.
+        bundling: { minify: true, sourceMap: true, bundleAwsSDK: true },
         entry: path.join(process.cwd(), entry),
         environment: { ...commonEnvironment, ...extra },
         functionName,
         handler: "handler",
         logGroup,
         memorySize: 512,
-        runtime: Runtime.NODEJS_22_X,
+        runtime: Runtime.NODEJS_24_X,
         timeout: Duration.seconds(60),
       });
+      // Keep the existing ServiceRole construct/logical ID, but replace the
+      // CDK default account-wide logging policy with this worker's log group.
+      const serviceRole = fn.role?.node.defaultChild;
+      if (!(serviceRole instanceof CfnRole)) throw new Error("Expected a generated worker service role");
+      serviceRole.managedPolicyArns = undefined;
+      logGroup.grantWrite(fn);
       for (const secretName of runtimeSecretNames) runtimeParameters[secretName].grantRead(fn);
       workerFunctions.push(fn);
       return fn;
     };
-    const scheduledWorkerRule = (id: string, schedule: Schedule, fn: NodejsFunction) => {
+    const scheduledWorkerRule = (id: string, schedule: Schedule, fn: NodejsFunction, maintenance = false) => {
       const rule = new Rule(this, id, {
-        enabled: !standby,
+        enabled: maintenance || !standby,
         schedule,
         targets: [new LambdaFunction(fn, { retryAttempts: 0 })],
       });
-      if (monitoringEnabled) {
+      if (monitoringEnabled || (prod && maintenance)) {
         const failedInvocations = new Metric({
           namespace: "AWS/Events",
           metricName: "FailedInvocations",
@@ -227,7 +260,7 @@ export class YodevMailStack extends Stack {
       resources: [attachmentBucket.arnForObjects("*")],
       conditions: { StringEquals: { "s3:ExistingObjectTag/GuardDutyMalwareScanStatus": "NO_THREATS_FOUND" } },
     }));
-    attachmentBucket.grantDelete(send);
+    send.addToRolePolicy(new PolicyStatement({ actions: ["s3:DeleteObject"], resources: [attachmentBucket.arnForObjects("*")] }));
     attachmentKey.grantDecrypt(send);
     const sesPolicies = sesPermissions(this.account, this.region, props.environment);
     for (const policy of sesPolicies.sender) send.addToRolePolicy(policy);
@@ -242,7 +275,7 @@ export class YodevMailStack extends Stack {
     if (!standby) provision.addEventSource(new SqsEventSource(providerProvisioning.main, { batchSize: 1, maxConcurrency: 2, reportBatchItemFailures: true }));
     providerProvisioning.main.grantConsumeMessages(provision);
     provision.addToRolePolicy(new PolicyStatement({ actions: ["ssm:GetParameter", "ssm:GetParameters", "ssm:PutParameter"], resources: [`arn:aws:ssm:${this.region}:${this.account}:parameter/${prefix}/providers/*`] }));
-    providerCredentialsKey.grantEncryptDecrypt(provision);
+    providerCredentialsKey.grant(provision, "kms:Encrypt", "kms:Decrypt", "kms:GenerateDataKey");
     for (const policy of sesPolicies.provisioner) provision.addToRolePolicy(policy);
 
     const deliver = worker(
@@ -275,7 +308,7 @@ export class YodevMailStack extends Stack {
     );
 
     const domainHealth = worker("DomainHealth", "src/workers/domain-health.ts");
-    domainHealth.addToRolePolicy(new PolicyStatement({ actions: ["ses:GetEmailIdentity"], resources: ["*"] }));
+    domainHealth.addToRolePolicy(new PolicyStatement({ actions: ["ses:GetEmailIdentity"], resources: [`arn:aws:ses:${this.region}:${this.account}:identity/*`] }));
     domainHealth.addToRolePolicy(new PolicyStatement({ actions: ["ssm:GetParameter", "ssm:GetParameters"], resources: [`arn:aws:ssm:${this.region}:${this.account}:parameter/${prefix}/providers/*`] }));
     providerCredentialsKey.grantDecrypt(domainHealth);
     scheduledWorkerRule("DomainHealthSchedule", Schedule.rate(Duration.minutes(15)), domainHealth);
@@ -295,7 +328,7 @@ export class YodevMailStack extends Stack {
     scheduledWorkerRule("WarmupProgressSchedule", Schedule.cron({ hour: "1", minute: "15" }), warmup);
 
     const scan = worker("AttachmentScan", "src/workers/attachment-scan.ts");
-    attachmentBucket.grantRead(scan);
+    scan.addToRolePolicy(new PolicyStatement({ actions: ["s3:GetObject"], resources: [attachmentBucket.arnForObjects("*")] }));
     attachmentKey.grantDecrypt(scan);
     new Rule(this, "AttachmentScanResultRule", {
       enabled: Boolean(props.malwareProtectionEnabled) && !standby,
@@ -303,10 +336,31 @@ export class YodevMailStack extends Stack {
       targets: [new LambdaFunction(scan)],
     });
     const purge = worker("AttachmentPurge", "src/workers/purge-attachments.ts");
-    attachmentBucket.grantDelete(purge);
-    scheduledWorkerRule("AttachmentPurgeSchedule", Schedule.rate(Duration.hours(1)), purge);
+    purge.addToRolePolicy(new PolicyStatement({ actions: ["s3:DeleteObject"], resources: [attachmentBucket.arnForObjects("*")] }));
+    scheduledWorkerRule("AttachmentPurgeSchedule", Schedule.rate(Duration.minutes(30)), purge, true);
     const retention = worker("RetentionPurge", "src/workers/purge-retention.ts");
-    scheduledWorkerRule("RetentionPurgeSchedule", Schedule.cron({ hour: "2", minute: "30" }), retention);
+    scheduledWorkerRule("RetentionPurgeSchedule", Schedule.rate(Duration.minutes(30)), retention, true);
+    // Privacy maintenance continues even while delivery and billing are paused.
+    if (prod) {
+      for (const [name, fn] of [["AttachmentPurge", purge], ["RetentionPurge", retention]] as const) {
+        const failure = fn.metricErrors({ period: Duration.minutes(5), statistic: "Sum" }).createAlarm(this, `${name}MaintenanceFailure`, {
+          threshold: 1, evaluationPeriods: 1, treatMissingData: TreatMissingData.NOT_BREACHING,
+        });
+        failure.addAlarmAction(new SnsAction(props.alertTopic));
+      }
+      for (const metricName of ["RetentionPurgeFailure", "RetentionPurgeBacklog", "RetentionPurgeCompleted"] as const) {
+        const heartbeat = metricName === "RetentionPurgeCompleted";
+        const alarm = new Metric({
+          namespace: "Yodev/Mail", metricName, dimensionsMap: { Environment: props.environment },
+          period: heartbeat ? Duration.hours(1) : Duration.minutes(15), statistic: "Sum",
+        }).createAlarm(this, `${metricName}MaintenanceAlarm`, {
+          threshold: 1, evaluationPeriods: 1,
+          comparisonOperator: heartbeat ? ComparisonOperator.LESS_THAN_THRESHOLD : ComparisonOperator.GREATER_THAN_OR_EQUAL_TO_THRESHOLD,
+          treatMissingData: heartbeat ? TreatMissingData.BREACHING : TreatMissingData.NOT_BREACHING,
+        });
+        alarm.addAlarmAction(new SnsAction(props.alertTopic));
+      }
+    }
 
     new Rule(this, "SesEventRule", {
       enabled: !standby,
@@ -336,9 +390,35 @@ export class YodevMailStack extends Stack {
       actions: ["s3:PutObject"],
       resources: [attachmentBucket.arnForObjects("pending/*")],
     }));
-    attachmentKey.grantEncrypt(vercelRole);
+    attachmentKey.grant(vercelRole, "kms:Encrypt", "kms:GenerateDataKey");
     vercelRole.addToPolicy(new PolicyStatement({ actions: ["ssm:GetParameter", "ssm:GetParameters"], resources: [`arn:aws:ssm:${this.region}:${this.account}:parameter/${prefix}/providers/*`] }));
     providerCredentialsKey.grantDecrypt(vercelRole);
+
+    // Acknowledge only individually reviewed resource patterns on their exact
+    // role policy. A new wildcard action or unrelated resource must still fail.
+    const acknowledgePattern = (role: IConstruct, pattern: string, reason: string) => {
+      Validations.of(role.node.findChild("DefaultPolicy")).acknowledge({
+        id: `AwsSolutions-IAM5[Resource::${pattern}]`, reason,
+      });
+    };
+    const attachmentArnReference = `<${this.getLogicalId(attachmentBucket.node.defaultChild as CfnBucket)}.Arn>`;
+    for (const role of [send.role!, scan.role!, purge.role!]) {
+      acknowledgePattern(role, `${attachmentArnReference}/*`, "Only objects in this workload's dedicated encrypted attachment bucket. Opaque keys are tenant-scoped in application operations; exact GetObject/DeleteObject actions are used. Sending also requires a clean malware tag.");
+    }
+    acknowledgePattern(vercelRole, `${attachmentArnReference}/pending/*`, "Ingress can upload only dynamically named pending objects in this workload bucket. It has no attachment read, decrypt or send permission; upload authorization is checked per workspace.");
+    for (const role of [send.role!, provision.role!, domainHealth.role!, vercelRole]) {
+      acknowledgePattern(role, `arn:aws:ssm:${this.region}:${this.account}:parameter/${prefix}/providers/*`, "Provider credentials are provisioned per workspace below this exact account/region/environment SSM prefix. Runtime parameters use separately enumerated ARNs; application tenant ownership is verified before selecting a provider credential.");
+      acknowledgePattern(role, `arn:aws:ses:${this.region}:${this.account}:identity/*`, "Verified sender domains are dynamic in this SES account and region. Each role has enumerated operations. SendEmail is constrained by environment TenantName and SES tenant membership; association writes require environment ownership tags. This is not a separate AWS-account isolation boundary.");
+    }
+    for (const role of [send.role!, provision.role!]) {
+      acknowledgePattern(role, `arn:aws:ses:${this.region}:${this.account}:configuration-set/ym-${props.environment}-*-txn`, "Only transactional configuration sets generated from workspace UUIDs in this deployment environment. The exact pattern is shared by provisioning and sending and protected by tests in ses-permissions.");
+    }
+    acknowledgePattern(provision.role!, `arn:aws:ses:${this.region}:${this.account}:tenant/ym-${props.environment}-*/*`, "SES tenant ARNs contain a generated tenant ID and workspace UUID name. Provisioning is limited to this account, region and environment name prefix; application ownership validation rejects legacy or cross-environment bindings.");
+    const malwareRole = this.node.tryFindChild("GuardDutyMalwareRole");
+    if (malwareRole) {
+      acknowledgePattern(malwareRole, `${attachmentArnReference}/*`, "GuardDuty scans and tags dynamic objects only in this workload bucket, using enumerated read/tag operations. Object PUT is separately limited to its validation object. See AWS malware-protection-s3-iam-policy-prerequisite documentation.");
+      acknowledgePattern(malwareRole, `arn:aws:events:${this.region}:${this.account}:rule/DO-NOT-DELETE-AmazonGuardDutyMalwareProtectionS3*`, "AWS GuardDuty generates its managed EventBridge rule name. The documented service-specific prefix is limited to this account/region, and all rule mutations require the GuardDuty events:ManagedBy condition.");
+    }
 
     for (const pair of queues) {
       if (monitoringEnabled) {

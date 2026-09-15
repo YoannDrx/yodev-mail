@@ -1,11 +1,14 @@
 import { App } from "aws-cdk-lib";
 import { Match, Template } from "aws-cdk-lib/assertions";
+import { PolicyStatement } from "aws-cdk-lib/aws-iam";
+import { AwsSolutionsChecks } from "cdk-nag";
 import { beforeAll, describe, expect, test } from "vitest";
 import { YodevMailFoundationStack } from "./foundation-stack";
 import { YodevMailStack } from "./yodev-mail-stack";
 
 let foundation: Template;
 let standbyWorkload: Template;
+let standbyProductionWorkload: Template;
 let activeProductionWorkload: Template;
 let sesCertificationWorkload: Template;
 
@@ -38,6 +41,12 @@ beforeAll(() => {
     vercelOidcProvider: foundationStack.vercelOidcProvider,
     vercelTeam: "yoanndrxs-projects",
   });
+  const standbyProductionStack = new YodevMailStack(app, "StandbyProduction", {
+    alertTopic: foundationStack.alertTopic,
+    environment: "prod", env, operatingMode: "standby",
+    vercelOidcProvider: foundationStack.vercelOidcProvider,
+    vercelTeam: "yoanndrxs-projects",
+  });
   const sesCertificationStack = new YodevMailStack(app, "SesCertification", {
     alertTopic: foundationStack.alertTopic,
     environment: "dev",
@@ -49,12 +58,123 @@ beforeAll(() => {
   });
   foundation = Template.fromStack(foundationStack);
   standbyWorkload = Template.fromStack(workloadStack);
+  standbyProductionWorkload = Template.fromStack(standbyProductionStack);
   activeProductionWorkload = Template.fromStack(productionStack);
   sesCertificationWorkload = Template.fromStack(sesCertificationStack);
-// Four CDK stacks bundle real workers. Allow cold builds on busy developer hosts.
+// Five CDK stacks bundle real workers. Allow cold builds on busy developer hosts.
 }, 240_000);
 
 describe("Mail by Yodev AWS infrastructure", () => {
+  test("checks actual workload compliance and rejects an unreviewed wildcard", () => {
+    const app = new App();
+    const env = { account: "123456789012", region: "eu-west-3" };
+    const foundationStack = new YodevMailFoundationStack(app, "CompliantFoundation", {
+      env, vercelTeam: "yoanndrxs-projects",
+      existingVercelOidcProviderArn: "arn:aws:iam::123456789012:oidc-provider/oidc.vercel.com/yoanndrxs-projects",
+    });
+    const stack = new YodevMailStack(app, "CompliantProduction", {
+      env, environment: "prod", operatingMode: "live", malwareProtectionEnabled: true,
+      vercelTeam: "yoanndrxs-projects", vercelOidcProvider: foundationStack.vercelOidcProvider,
+      alertTopic: foundationStack.alertTopic,
+    });
+    Template.fromStack(stack);
+    const checks = new AwsSolutionsChecks(app);
+    expect(checks.validateScope(app)).toMatchObject({ success: true, violations: [] });
+    // A new broad action on an otherwise reviewed policy cannot inherit a
+    // blanket IAM5 exception from the resource-pattern acknowledgments.
+    const sender = stack.node.findChild("SendEmail") as import("aws-cdk-lib/aws-lambda-nodejs").NodejsFunction;
+    sender.addToRolePolicy(new PolicyStatement({ actions: ["ses:*"], resources: ["*"] }));
+    const report = checks.validateScope(app);
+    expect(report.success).toBe(false);
+    expect(report.violations.some(v => v.ruleName === "AwsSolutions-IAM5[Action::ses:*]")).toBe(true);
+  // This isolated positive/negative control also bundles thirteen real workers.
+  }, 60_000);
+  test("logs attachment and CloudTrail bucket access to separate private retained sinks", () => {
+    for (const template of [foundation, standbyProductionWorkload]) {
+      const buckets = Object.entries(template.findResources("AWS::S3::Bucket"));
+      const sink = buckets.find(([id]) => id.startsWith("S3AccessLogs"))!;
+      expect(sink).toBeDefined();
+      expect(sink[1].DeletionPolicy).toBe("Retain");
+      expect(sink[1].Properties.AccessControl).toBeUndefined();
+      expect(sink[1].Properties.OwnershipControls.Rules).toEqual([{ ObjectOwnership: "BucketOwnerEnforced" }]);
+      expect(sink[1].Properties.LoggingConfiguration).toBeUndefined();
+      expect(sink[1].Properties.LifecycleConfiguration.Rules[0].ExpirationInDays).toBe(90);
+      expect(sink[1].Properties.PublicAccessBlockConfiguration).toEqual({
+        BlockPublicAcls: true, BlockPublicPolicy: true, IgnorePublicAcls: true, RestrictPublicBuckets: true,
+      });
+      expect(sink[1].Properties.BucketEncryption.ServerSideEncryptionConfiguration[0].ServerSideEncryptionByDefault.SSEAlgorithm).toBe("AES256");
+      const source = buckets.find(([id]) => /^(CloudTrailLogs|Attachments)/.test(id))!;
+      expect(source[1].Properties.LoggingConfiguration.DestinationBucketName).toEqual({ Ref: sink[0] });
+      const sinkPolicy = Object.values(template.findResources("AWS::S3::BucketPolicy"))
+        .find(policy => policy.Properties.Bucket.Ref === sink[0])!;
+      const delivery = sinkPolicy.Properties.PolicyDocument.Statement
+        .filter((statement: { Effect: string }) => statement.Effect === "Allow");
+      expect(delivery).toHaveLength(1);
+      expect(delivery[0]).toMatchObject({
+        Action: "s3:PutObject", Principal: { Service: "logging.s3.amazonaws.com" },
+        Condition: {
+          ArnLike: { "aws:SourceArn": { "Fn::GetAtt": [source[0], "Arn"] } },
+          StringEquals: { "aws:SourceAccount": "123456789012" },
+        },
+      });
+    }
+  });
+  test("keeps worker role identities while limiting logging to their own log group", () => {
+    const template = standbyProductionWorkload;
+    const roles = Object.entries(template.findResources("AWS::IAM::Role"))
+      .filter(([id]) => id.includes("ServiceRole"));
+    expect(roles).toHaveLength(13);
+    const policies = Object.values(template.findResources("AWS::IAM::Policy"));
+    for (const [id, role] of roles) {
+      expect(role.Properties.ManagedPolicyArns).toBeUndefined();
+      const policy = policies.find(entry => entry.Properties.Roles.some((r: { Ref?: string }) => r.Ref === id));
+      expect(policy).toBeDefined();
+      const logStatements = policy!.Properties.PolicyDocument.Statement.filter((statement: { Action: string | string[] }) =>
+        [statement.Action].flat().some(action => action.startsWith("logs:")));
+      expect(logStatements).toHaveLength(1);
+      expect([logStatements[0].Action].flat().sort()).toEqual(["logs:CreateLogStream", "logs:PutLogEvents"]);
+      const workerName = id.split("ServiceRole")[0];
+      expect(logStatements[0].Resource).not.toBe("*");
+      expect(JSON.stringify(logStatements[0].Resource)).toContain(`${workerName}Logs`);
+    }
+  });
+  test("uses the stable Node 24 runtime and exact worker S3/KMS actions", () => {
+    const functions = Object.values(activeProductionWorkload.findResources("AWS::Lambda::Function"));
+    expect(functions.filter(fn => fn.Properties.FunctionName?.startsWith("yodev-mail-prod-"))).toHaveLength(13);
+    for (const fn of functions.filter(fn => fn.Properties.FunctionName?.startsWith("yodev-mail-prod-"))) {
+      expect(fn.Properties.Runtime).toBe("nodejs24.x");
+    }
+    const policies = Object.values(activeProductionWorkload.findResources("AWS::IAM::Policy"));
+    for (const policy of policies) {
+      for (const statement of policy.Properties.PolicyDocument.Statement) {
+        for (const action of [statement.Action].flat()) {
+          if (action.startsWith("s3:") || action.startsWith("kms:")) expect(action).not.toContain("*");
+        }
+      }
+    }
+  });
+  test("limits domain health SES reads to identities in the workload account and region", () => {
+    const policy = Object.values(standbyWorkload.findResources("AWS::IAM::Policy"))
+      .find(entry => JSON.stringify(entry.Properties.Roles).includes("DomainHealth"))!;
+    const read = policy.Properties.PolicyDocument.Statement.find((statement: { Action: string | string[] }) =>
+      [statement.Action].flat().includes("ses:GetEmailIdentity"));
+    expect(read.Resource).toBe("arn:aws:ses:eu-west-3:123456789012:identity/*");
+  });
+  test("monitors maintenance failures and missing retention heartbeats in production standby", () => {
+    standbyProductionWorkload.resourceCountIs("AWS::CloudWatch::Alarm", 7);
+    standbyProductionWorkload.resourceCountIs("AWS::Lambda::EventSourceMapping", 0);
+    standbyProductionWorkload.hasResourceProperties("AWS::CloudWatch::Alarm", {
+      Namespace: "Yodev/Mail", MetricName: "RetentionPurgeCompleted",
+      ComparisonOperator: "LessThanThreshold", Threshold: 1, Period: 3600,
+      TreatMissingData: "breaching", AlarmActions: Match.arrayWith([Match.objectLike({
+        "Fn::ImportValue": Match.stringLikeRegexp("Foundation:ExportsOutputRefOperationsAlerts"),
+      })]),
+    });
+    const enabledRules = Object.entries(standbyProductionWorkload.findResources("AWS::Events::Rule"))
+      .filter(([, rule]) => rule.Properties.State === "ENABLED").map(([id]) => id);
+    expect(enabledRules).toHaveLength(2);
+    expect(enabledRules.every(id => /^(AttachmentPurgeSchedule|RetentionPurgeSchedule)/.test(id))).toBe(true);
+  });
   test("scopes SES event routing to each deployment environment, account and region", () => {
     for (const [template, environment] of [[standbyWorkload, "dev"], [sesCertificationWorkload, "dev"], [activeProductionWorkload, "prod"]] as const) {
       const rule = Object.values(template.findResources("AWS::Events::Rule")).find((entry) => entry.Properties.EventPattern?.source?.includes("aws.ses"));
@@ -242,7 +362,7 @@ describe("Mail by Yodev AWS infrastructure", () => {
             Action: Match.arrayWith([
               "kms:DescribeKey",
               "kms:Encrypt",
-              "kms:GenerateDataKey*",
+              "kms:GenerateDataKey",
             ]),
             Effect: "Allow",
           }),
@@ -336,7 +456,7 @@ describe("Mail by Yodev AWS infrastructure", () => {
     });
   });
 
-  test("encrypts every queue and keeps standby resources passive", () => {
+  test("encrypts every queue and keeps standby delivery passive while privacy maintenance runs", () => {
     const queues = standbyWorkload.findResources("AWS::SQS::Queue");
 
     expect(Object.values(queues)).toHaveLength(8);
@@ -346,10 +466,12 @@ describe("Mail by Yodev AWS infrastructure", () => {
     standbyWorkload.resourceCountIs("AWS::CloudWatch::Alarm", 0);
     standbyWorkload.resourceCountIs("AWS::Lambda::EventSourceMapping", 0);
     standbyWorkload.resourceCountIs("AWS::CloudWatch::Dashboard", 1);
-    for (const rule of Object.values(
+    for (const [id, rule] of Object.entries(
       standbyWorkload.findResources("AWS::Events::Rule"),
     )) {
-      expect(rule.Properties.State).toBe("DISABLED");
+      const maintenance = id.startsWith("RetentionPurgeSchedule") || id.startsWith("AttachmentPurgeSchedule");
+      expect(rule.Properties.State).toBe(maintenance ? "ENABLED" : "DISABLED");
+      if (maintenance) expect(rule.Properties.ScheduleExpression).toBe("rate(30 minutes)");
     }
     standbyWorkload.hasResourceProperties(
       "AWS::Lambda::Function",

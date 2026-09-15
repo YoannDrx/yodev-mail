@@ -100,6 +100,9 @@ async function main() {
         ambiguous_messages: string;
         pending_outbox: string;
         pending_webhooks: string;
+        expired_bodies: string;
+        unredacted_old_messages: string;
+        expired_attachments: string;
         approved_workspaces: string;
         unready_providers: string;
         active_verified_bindings: string;
@@ -125,6 +128,11 @@ async function main() {
       Number(state.approved_workspaces) > 0 &&
       Number(state.unready_providers) === 0 &&
       Number(state.active_verified_bindings) > 0;
+    checks.push({
+      name: "retention_invariants",
+      passed: Number(state.expired_bodies) === 0 && Number(state.unredacted_old_messages) === 0 && Number(state.expired_attachments) === 0,
+      detail: `expired_bodies=${state.expired_bodies}, unredacted_old_messages=${state.unredacted_old_messages}, expired_attachments=${state.expired_attachments}`,
+    });
     checks.push({
       name: "database_invariants",
       passed: databasePassed,
