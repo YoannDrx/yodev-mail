@@ -19,8 +19,8 @@ export function SignInPanel({
   locale: Locale;
 }) {
   const copy = localized(locale, {
-    fr: { oauthError: "La connexion n’a pas abouti. Vérifiez que vous disposez d’une invitation.", passkeyError: "Aucune passkey valide n’a été trouvée pour ce domaine.", credentialsError: "Identifiants invalides ou adresse non vérifiée.", eyebrow: "CONSOLE PRIVÉE", title: "Connexion à Mail by Yodev", intro: "L’accès est limité au compte administrateur et aux membres invités.", google: "Continuer avec Google", passkey: "Utiliser une passkey", email: "Adresse email", password: "Mot de passe", emailSignIn: "Se connecter par email", forgot: "Mot de passe oublié ?" },
-    en: { oauthError: "Sign-in failed. Check that you have an invitation.", passkeyError: "No valid passkey was found for this domain.", credentialsError: "Invalid credentials or unverified email address.", eyebrow: "PRIVATE CONSOLE", title: "Sign in to Mail by Yodev", intro: "Access is limited to the administrator account and invited members.", google: "Continue with Google", passkey: "Use a passkey", email: "Email address", password: "Password", emailSignIn: "Sign in with email", forgot: "Forgot your password?" },
+    fr: { oauthError: "La connexion n’a pas abouti. Vérifiez que vous disposez d’une invitation.", passkeyError: "Aucune passkey valide n’a été trouvée pour ce domaine.", credentialsError: "Identifiants invalides ou adresse non vérifiée.", eyebrow: "CONSOLE PRIVÉE", title: "Connexion à Yodev Mail", intro: "L’accès est limité au compte administrateur et aux membres invités.", google: "Continuer avec Google", passkey: "Utiliser une passkey", email: "Adresse email", password: "Mot de passe", emailSignIn: "Se connecter par email", forgot: "Mot de passe oublié ?" },
+    en: { oauthError: "Sign-in failed. Check that you have an invitation.", passkeyError: "No valid passkey was found for this domain.", credentialsError: "Invalid credentials or unverified email address.", eyebrow: "PRIVATE CONSOLE", title: "Sign in to Yodev Mail", intro: "Access is limited to the administrator account and invited members.", google: "Continue with Google", passkey: "Use a passkey", email: "Email address", password: "Password", emailSignIn: "Sign in with email", forgot: "Forgot your password?" },
   });
   const localizedCallbackURL = localizedPath(locale, callbackURL);
   const [email, setEmail] = useState("");
@@ -66,7 +66,7 @@ export function SignInPanel({
   }
 
   return (
-    <div className="w-full rounded-3xl border bg-white p-8 shadow-xl">
+    <div className="w-full rounded-md border bg-card p-8 ">
       <p className="text-sm font-medium text-primary">{copy.eyebrow}</p>
       <h1 className="mt-2 text-3xl font-semibold">{copy.title}</h1>
       <p className="mt-3 text-sm leading-6 text-muted-foreground">

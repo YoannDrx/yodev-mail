@@ -1,3 +1,4 @@
+import AxeBuilder from "@axe-core/playwright";
 import { randomBytes, randomUUID } from "node:crypto";
 import { hashPassword } from "better-auth/crypto";
 import { expect, test, type Page } from "@playwright/test";
@@ -44,7 +45,7 @@ async function tenant(label: string): Promise<Tenant> {
 
 async function signIn(page: Page, account: User, expectedWorkspace?: Tenant) {
   await page.goto("/fr/connexion");
-  await expect(page.getByRole("heading", { name: "Connexion à Mail by Yodev" })).toBeVisible();
+  await expect(page.getByRole("heading", { name: "Connexion à Yodev Mail" })).toBeVisible();
   await page.getByLabel("Adresse email", { exact: true }).fill(account.email);
   await page.getByLabel("Mot de passe", { exact: true }).fill(password);
   const response = page.waitForResponse((item) => item.url().endsWith("/api/auth/sign-in/email") && item.request().method() === "POST", { timeout: 60_000 });
@@ -212,4 +213,28 @@ test("passkey registration and passwordless sign-in use real WebAuthn", async ({
     await cdp.send("WebAuthn.removeVirtualAuthenticator", { authenticatorId });
     await cdp.detach();
   }
+});
+
+
+test("setup evidence and full navigation work in both themes at three sizes", async ({ page }, testInfo) => {
+  await signIn(page, a.owner, a);
+  await expect(page.getByRole("heading",{name:"Préparer les premiers envois"})).toBeVisible();
+  await expect(page.getByText("Vérification DNS nécessaire",{exact:true})).toBeVisible();
+  for (const width of [390,768,1440]) {
+    await page.setViewportSize({width,height:900});
+    for (const theme of ["dark","light"]) {
+      if (!(await page.locator("html").getAttribute("class"))?.includes(theme)) await page.getByRole("button",{name:"Changer le thème",exact:true}).click();
+      await expect(page.locator("html")).toHaveClass(new RegExp(theme));
+      expect(await page.evaluate(()=>document.documentElement.scrollWidth<=innerWidth)).toBe(true);
+      const results=await new AxeBuilder({page}).withTags(["wcag2a","wcag2aa"]).analyze();
+      expect(results.violations.map(v=>({id:v.id,nodes:v.nodes.map(n=>n.target)}))).toEqual([]);
+      await page.screenshot({path:testInfo.outputPath(`mail-${width}-${theme}.png`)});
+    }
+  }
+  await page.setViewportSize({width:390,height:844});
+  await page.getByLabel("Navigation complète",{exact:true}).click();
+  await page.getByRole("navigation",{name:"Navigation principale",exact:true}).getByRole("link",{name:"Domaines",exact:true}).click();
+  await expect(page.getByRole("heading",{name:"Domaines",exact:true})).toBeVisible();
+  await page.reload();
+  await expect(page.locator("html")).toHaveClass(/light/);
 });

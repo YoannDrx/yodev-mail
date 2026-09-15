@@ -71,9 +71,9 @@ export default async function MembersPage() {
     <div className="grid gap-4">
       {members.map((member) => {
         const isOwner = member.role.split(",").map((role) => role.trim()).includes("owner");
-        return <article className="flex flex-wrap items-center justify-between gap-4 rounded-2xl border bg-white p-5" key={member.id}>
+        return <article className="flex flex-wrap items-center justify-between gap-4 rounded-md border bg-card p-5" key={member.id}>
           <div className="flex items-center gap-3">
-            <div className="grid size-10 place-items-center rounded-full bg-violet-100 text-primary"><Users className="size-5" /></div>
+            <div className="grid size-10 place-items-center rounded-md bg-violet-100 text-primary"><Users className="size-5" /></div>
             <div><p className="font-medium">{member.name}</p><p className="text-sm text-muted-foreground">{member.email}</p></div>
             <Badge variant={isOwner ? "default" : "secondary"}>{isOwner ? copy.owner : copy.member}</Badge>
           </div>
@@ -82,7 +82,7 @@ export default async function MembersPage() {
           </form>}
         </article>;
       })}
-      {invitations.map((invitation) => <article className="flex flex-wrap items-center justify-between gap-4 rounded-2xl border border-dashed bg-white p-5" key={invitation.id}>
+      {invitations.map((invitation) => <article className="flex flex-wrap items-center justify-between gap-4 rounded-md border border-dashed bg-card p-5" key={invitation.id}>
         <div><p className="font-medium">{invitation.email}</p><p className="text-sm text-muted-foreground">{copy.validUntil} {invitation.expiresAt.toLocaleString(formatLocale)}</p></div>
         <div className="flex items-center gap-2"><Badge variant="outline">{copy.waiting}</Badge><form action={cancelMemberInvitationAction.bind(null, invitation.id)}><Button size="sm" type="submit" variant="outline">{copy.cancel}</Button></form></div>
       </article>)}

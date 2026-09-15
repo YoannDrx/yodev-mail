@@ -18,7 +18,7 @@ export default async function Page() {
         {isBetterAuthConfigured() ? (
           <SignInPanel emailPasswordEnabled={env.BETTER_AUTH_EMAIL_PASSWORD_ENABLED === "true"} locale={locale} />
         ) : (
-          <div className="w-full rounded-3xl border bg-white p-8 text-center shadow-xl">
+          <div className="w-full rounded-md border bg-card p-8 text-center ">
             <h1 className="text-2xl font-semibold">{copy.title}</h1>
             <p className="mt-3 text-sm leading-6 text-muted-foreground">{copy.text}</p>
           </div>

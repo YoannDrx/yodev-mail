@@ -41,7 +41,7 @@ export default async function Page({ params }: { params: Promise<{ id: string }>
       title={message.subject}
     >
       <div className="grid gap-6 lg:grid-cols-[1.1fr_0.9fr]">
-        <section className="rounded-2xl border bg-white p-6 shadow-sm">
+        <section className="rounded-md border bg-card p-6 ">
           <div className="flex flex-wrap items-center gap-3"><Badge>{statusLabel(locale, message.status)}</Badge><Badge variant="outline">{message.contentKind}</Badge><Badge variant="secondary">{statusLabel(locale, message.sendMode)}</Badge></div>
           <dl className="mt-6 grid gap-5 text-sm sm:grid-cols-2">
             <div><dt className="text-muted-foreground">{copy.from}</dt><dd className="mt-1 font-medium">{message.fromName ? `${message.fromName} <${message.fromEmail}>` : message.fromEmail}</dd></div>
@@ -51,17 +51,17 @@ export default async function Page({ params }: { params: Promise<{ id: string }>
             <div><dt className="text-muted-foreground">{copy.delivered}</dt><dd className="mt-1">{formatDate(message.deliveredAt, formatLocale)}</dd></div>
             <div><dt className="text-muted-foreground">{copy.reference}</dt><dd className="mt-1 break-all font-mono text-xs">{message.id}</dd></div>
           </dl>
-          {message.lastError && <div className="mt-6 rounded-xl border border-red-200 bg-red-50 p-4 text-sm text-red-800"><strong>{copy.lastError}</strong><p className="mt-1">{message.lastError}</p></div>}
+          {message.lastError && <div className="mt-6 rounded-md border border-red-200 y-status-danger p-4 text-sm text-[var(--y-danger)]"><strong>{copy.lastError}</strong><p className="mt-1">{message.lastError}</p></div>}
           <div className="mt-6 border-t pt-5"><p className="text-xs text-muted-foreground">{copy.retentionBefore} {formatDate(message.contentExpiresAt, formatLocale)}. {copy.retentionAfter}</p></div>
         </section>
 
-        <section className="rounded-2xl border bg-white p-6 shadow-sm">
+        <section className="rounded-md border bg-card p-6 ">
           <h2 className="font-semibold">{copy.timeline}</h2>
           <ol className="mt-6 grid gap-5">
             {timeline.map((item, index) => {
               const failed = /fail|bounce|complaint/i.test(item.type);
               const Icon = failed ? MailWarning : /deliver|sent|accept/i.test(item.type) ? CheckCircle2 : CircleDashed;
-              return <li className="grid grid-cols-[24px_1fr] gap-3" key={`${item.type}-${item.at.toISOString()}-${index}`}><Icon className={`mt-0.5 size-5 ${failed ? "text-red-600" : "text-emerald-600"}`} /><div><p className="text-sm font-medium">{item.label}</p><p className="mt-1 text-xs text-muted-foreground">{formatDate(item.at, formatLocale)}</p></div></li>;
+              return <li className="grid grid-cols-[24px_1fr] gap-3" key={`${item.type}-${item.at.toISOString()}-${index}`}><Icon className={`mt-0.5 size-5 ${failed ? "text-[var(--y-danger)]" : "text-[var(--y-success)]"}`} /><div><p className="text-sm font-medium">{item.label}</p><p className="mt-1 text-xs text-muted-foreground">{formatDate(item.at, formatLocale)}</p></div></li>;
             })}
           </ol>
         </section>

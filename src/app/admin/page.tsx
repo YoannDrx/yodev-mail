@@ -65,7 +65,7 @@ export default async function Page() {
     <p className="mt-2 text-muted-foreground">{copy.intro}</p>
 
     <Section title={copy.newClient}>
-      <form action={provisionClientWorkspaceAction} className="grid gap-4 rounded-2xl border bg-white p-6 lg:grid-cols-2">
+      <form action={provisionClientWorkspaceAction} className="grid gap-4 rounded-md border bg-card p-6 lg:grid-cols-2">
         <label className="grid gap-1 text-sm">{copy.company}<input className="h-10 rounded-md border px-3" disabled={!commercialOnboardingEnabled} maxLength={140} minLength={2} name="name" required /></label>
         <label className="grid gap-1 text-sm">Slug<input className="h-10 rounded-md border px-3" disabled={!commercialOnboardingEnabled} maxLength={120} name="slug" pattern="[a-z0-9]+(?:-[a-z0-9]+)*" placeholder="acme" required /></label>
         <label className="grid gap-1 text-sm">{copy.ownerEmail}<input className="h-10 rounded-md border px-3" disabled={!commercialOnboardingEnabled} name="ownerEmail" required type="email" /></label>
@@ -73,11 +73,11 @@ export default async function Page() {
         <label className="grid gap-1 text-sm">{copy.monthly}<input className="h-10 rounded-md border px-3" disabled={!commercialOnboardingEnabled} max={10_000_000} min={1} name="expectedMonthlyVolume" required type="number" /></label>
         <label className="grid gap-1 text-sm lg:col-span-2">{copy.useCase}<textarea className="min-h-28 rounded-md border p-3" disabled={!commercialOnboardingEnabled} maxLength={4_000} minLength={20} name="useCase" required /></label>
         <div className="lg:col-span-2"><Button disabled={!commercialOnboardingEnabled} type="submit">{copy.create}</Button></div>
-        {!commercialOnboardingEnabled && <p className="text-sm text-amber-800 lg:col-span-2">{copy.gate}</p>}
+        {!commercialOnboardingEnabled && <p className="text-sm text-[var(--y-warning)] lg:col-span-2">{copy.gate}</p>}
       </form>
       {provisioningRuns.map((run) => {
         const workspace = workspaceRows.find((row) => row.id === run.workspaceId);
-        return <article className="flex flex-wrap items-center justify-between gap-4 rounded-2xl border bg-white p-5" key={run.id}>
+        return <article className="flex flex-wrap items-center justify-between gap-4 rounded-md border bg-card p-5" key={run.id}>
           <div><p className="font-semibold">{workspace?.name ?? copy.deleted}</p><p className="text-sm text-muted-foreground">Provisioning : {statusLabel(locale,run.status)} · {copy.attempts} {run.attemptCount}</p>{run.lastErrorCode && <p className="text-sm text-destructive">{run.lastErrorCode}</p>}</div>
           <div className="flex gap-2">
             {(run.status === "email_failed" || run.status === "invitation_sent") && <form action={retryClientOwnerInvitationAction.bind(null, run.id)}><Button disabled={!commercialOnboardingEnabled} size="sm" type="submit" variant="outline">{copy.resend}</Button></form>}
@@ -90,7 +90,7 @@ export default async function Page() {
     <Section title={copy.workspaces}>
       {workspaceRows.map((workspace) => {
         const subscription = subscriptionRows.find((row) => row.workspaceId === workspace.id);
-        return <article className="rounded-2xl border bg-white p-6" key={workspace.id}>
+        return <article className="rounded-md border bg-card p-6" key={workspace.id}>
         <div className="flex flex-col justify-between gap-4 lg:flex-row">
           <div>
             <div className="flex gap-3"><h2 className="font-semibold">{workspace.name}</h2><Badge variant={workspace.status === "rejected" ? "destructive" : "secondary"}>{statusLabel(locale,workspace.status)}</Badge><Badge variant="outline">{statusLabel(locale,workspace.contentPolicy)}</Badge></div>
@@ -111,26 +111,26 @@ export default async function Page() {
           <input aria-label={`Inviter dans ${workspace.name}`} className="h-9 flex-1 rounded-md border px-3 text-sm" name="email" placeholder="membre@example.com" required type="email" />
           <Button size="sm" type="submit" variant="outline">{copy.inviteMember}</Button>
         </form>}
-        {workspace.status === "pending_review" && <p className="mt-4 rounded-xl bg-amber-50 p-3 text-sm text-amber-900"><AlertTriangle className="mr-2 inline size-4" />{copy.reviewWarning}</p>}
+        {workspace.status === "pending_review" && <p className="mt-4 rounded-md y-status-warning p-3 text-sm text-[var(--y-warning)]"><AlertTriangle className="mr-2 inline size-4" />{copy.reviewWarning}</p>}
       </article>;})}
     </Section>
 
     <Section title={copy.useCases}>
-      {profileRows.map((profile) => <article className="rounded-2xl border bg-white p-5" key={profile.id}><div className="flex flex-wrap justify-between gap-4">
+      {profileRows.map((profile) => <article className="rounded-md border bg-card p-5" key={profile.id}><div className="flex flex-wrap justify-between gap-4">
         <div><div className="flex items-center gap-2"><h2 className="font-semibold">{profile.name}</h2><Badge variant="secondary">{statusLabel(locale,profile.status)}</Badge></div><p className="font-mono text-xs text-muted-foreground">{profile.key}</p><p className="mt-3 max-w-3xl text-sm">{profile.triggerDescription}</p><p className="mt-2 max-w-3xl text-sm text-muted-foreground">{profile.recipientRelationship}</p></div>
         <div className="flex gap-2"><form action={reviewTransactionalProfileAction.bind(null, profile.id, "approved")}><Button size="sm">{copy.approve}</Button></form><form action={reviewTransactionalProfileAction.bind(null, profile.id, "rejected")}><Button size="sm" variant="destructive">{copy.reject}</Button></form><form action={disableTransactionalProfileAction.bind(null, profile.id)}><Button size="sm" variant="outline">{copy.disable}</Button></form></div>
       </div></article>)}
     </Section>
 
     <Section title={copy.templates}>
-      {templateRows.map((template) => <article className="rounded-2xl border bg-white p-5" key={template.id}><div className="flex flex-wrap justify-between gap-4">
+      {templateRows.map((template) => <article className="rounded-md border bg-card p-5" key={template.id}><div className="flex flex-wrap justify-between gap-4">
         <div><h2 className="font-semibold">{template.name}</h2><p className="text-sm text-muted-foreground">{template.subject} · {statusLabel(locale,template.reviewStatus)}</p></div>
         <div className="flex gap-2"><form action={reviewTemplateAction.bind(null, template.id, "approved")}><Button size="sm">{copy.approve}</Button></form><form action={reviewTemplateAction.bind(null, template.id, "rejected")}><Button size="sm" variant="destructive">{copy.reject}</Button></form><form action={disableTemplateAction.bind(null, template.id)}><Button size="sm" variant="outline">{copy.disable}</Button></form></div>
       </div></article>)}
     </Section>
 
     <Section title={copy.providerAccounts}>
-      {providerAccounts.map((account) => <article className="rounded-2xl border bg-white p-5" key={account.id}><div className="flex flex-wrap items-center justify-between gap-3">
+      {providerAccounts.map((account) => <article className="rounded-md border bg-card p-5" key={account.id}><div className="flex flex-wrap items-center justify-between gap-3">
         <p><strong>{account.provider}</strong> · {statusLabel(locale,account.status)} · workspace {account.workspaceId}</p>
         <div className="flex gap-2"><form action={setProviderAccountStatusAction.bind(null, account.id, account.status === "paused" ? "ready" : "paused")}><Button size="sm" variant="outline">{account.status === "paused" ? copy.reactivate : copy.pause}</Button></form><form action={setProviderAccountStatusAction.bind(null, account.id, "disabled")}><Button size="sm" variant="destructive">{copy.disable}</Button></form></div>
       </div></article>)}
@@ -139,12 +139,12 @@ export default async function Page() {
     <Section title={copy.domainsProviders}>
       {domainRows.map((domain) => {
         const domainBindings = bindings.filter((binding) => binding.domainId === domain.id);
-        return <article className="rounded-2xl border bg-white p-5" key={domain.id}>
+        return <article className="rounded-md border bg-card p-5" key={domain.id}>
           <div className="flex flex-wrap justify-between gap-4">
             <div><h2 className="font-semibold">{domain.name}</h2><p className="text-sm text-muted-foreground">{statusLabel(locale,domain.status)}{domain.activeProvider ? ` · ${copy.activeProvider} ${domain.activeProvider}` : ` · ${copy.noActiveProvider}`}</p></div>
             <div className="flex gap-2"><form action={provisionDomainAction.bind(null, domain.id, "postmark")}><Button size="sm">{copy.provision}</Button></form><form action={provisionDomainAction.bind(null, domain.id, "ses")}><Button size="sm" variant="outline">{copy.prepareSes}</Button></form></div>
           </div>
-          <div className="mt-4 grid gap-3">{domainBindings.map((binding) => <div className="rounded-xl border p-4 text-sm" key={binding.id}>
+          <div className="mt-4 grid gap-3">{domainBindings.map((binding) => <div className="rounded-md border p-4 text-sm" key={binding.id}>
             <div className="flex flex-wrap items-center justify-between gap-3"><p><strong>{binding.provider}</strong> · {statusLabel(locale,binding.status)}{binding.isActive ? ` · ${copy.active}` : ""}</p><div className="flex gap-2">{binding.status === "verified" && !binding.isActive && <form action={activateDomainBindingAction.bind(null, binding.id)}><Button size="sm" variant="outline">{copy.activate}</Button></form>}{binding.status !== "disabled" && <form action={disableDomainBindingAction.bind(null, binding.id)}><Button size="sm" variant="destructive">{copy.disable}</Button></form>}</div></div>
             {binding.lastCheckError && <p className="mt-2 text-destructive">{binding.lastCheckError}</p>}
           </div>)}</div>

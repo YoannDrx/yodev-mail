@@ -17,6 +17,8 @@ const machineRoots = [
   "/robots.txt",
   "/sitemap.xml",
   "/icon",
+  "/apple-icon",
+  "/opengraph-image",
   "/favicon.ico",
 ] as const;
 

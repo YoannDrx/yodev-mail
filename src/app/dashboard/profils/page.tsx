@@ -21,7 +21,7 @@ export default async function Page() {
   const context = await requirePageWorkspace();
   const rows = context ? await requireDb().select().from(transactionalProfiles).where(eq(transactionalProfiles.workspaceId, context.workspace.id)).orderBy(desc(transactionalProfiles.createdAt)) : [];
   return <DashboardPage title={copy.title} description={copy.description}>
-    <form action={createTransactionalProfileAction} className="mb-8 grid gap-5 rounded-2xl border bg-white p-6 md:grid-cols-2">
+    <form action={createTransactionalProfileAction} className="mb-8 grid gap-5 rounded-md border bg-card p-6 md:grid-cols-2">
       <div className="grid gap-2"><Label htmlFor="key">{copy.key}</Label><Input id="key" name="key" placeholder="payment_receipt" required /></div>
       <div className="grid gap-2"><Label htmlFor="name">{copy.name}</Label><Input id="name" name="name" placeholder={copy.namePlaceholder} required /></div>
       <div className="grid gap-2"><Label htmlFor="expectedMonthlyVolume">{copy.volume}</Label><Input id="expectedMonthlyVolume" name="expectedMonthlyVolume" type="number" min="1" required /></div>
@@ -30,7 +30,7 @@ export default async function Page() {
       <div className="grid gap-2 md:col-span-2"><Label htmlFor="contentExample">{copy.content}</Label><Textarea id="contentExample" name="contentExample" required /></div>
       <Button className="w-fit" type="submit">{copy.submit}</Button>
     </form>
-    <div className="grid gap-4">{rows.map((profile) => <article className="rounded-2xl border bg-white p-5" key={profile.id}>
+    <div className="grid gap-4">{rows.map((profile) => <article className="rounded-md border bg-card p-5" key={profile.id}>
       <div className="flex flex-wrap items-center justify-between gap-3"><div><div className="flex items-center gap-3"><h2 className="font-semibold">{profile.name}</h2><Badge variant="secondary">{statusLabel(locale, profile.status)}</Badge></div><p className="mt-1 font-mono text-xs text-muted-foreground">{profile.key}</p></div>{profile.status !== "disabled" && <form action={disableTransactionalProfileAction.bind(null, profile.id)}><Button type="submit" size="sm" variant="outline">{copy.disable}</Button></form>}</div>
       <p className="mt-4 text-sm">{profile.triggerDescription}</p><p className="mt-2 text-sm text-muted-foreground">{profile.recipientRelationship}</p>
     </article>)}</div>
