@@ -6,6 +6,7 @@ import { YodevMailStack } from "./yodev-mail-stack";
 
 let foundation: Template;
 let standbyWorkload: Template;
+let standbyProductionWorkload: Template;
 let activeProductionWorkload: Template;
 let sesCertificationWorkload: Template;
 
@@ -38,6 +39,12 @@ beforeAll(() => {
     vercelOidcProvider: foundationStack.vercelOidcProvider,
     vercelTeam: "yoanndrxs-projects",
   });
+  const standbyProductionStack = new YodevMailStack(app, "StandbyProduction", {
+    alertTopic: foundationStack.alertTopic,
+    environment: "prod", env, operatingMode: "standby",
+    vercelOidcProvider: foundationStack.vercelOidcProvider,
+    vercelTeam: "yoanndrxs-projects",
+  });
   const sesCertificationStack = new YodevMailStack(app, "SesCertification", {
     alertTopic: foundationStack.alertTopic,
     environment: "dev",
@@ -49,12 +56,35 @@ beforeAll(() => {
   });
   foundation = Template.fromStack(foundationStack);
   standbyWorkload = Template.fromStack(workloadStack);
+  standbyProductionWorkload = Template.fromStack(standbyProductionStack);
   activeProductionWorkload = Template.fromStack(productionStack);
   sesCertificationWorkload = Template.fromStack(sesCertificationStack);
-// Four CDK stacks bundle real workers. Allow cold builds on busy developer hosts.
+// Five CDK stacks bundle real workers. Allow cold builds on busy developer hosts.
 }, 240_000);
 
 describe("Mail by Yodev AWS infrastructure", () => {
+  test("limits domain health SES reads to identities in the workload account and region", () => {
+    const policy = Object.values(standbyWorkload.findResources("AWS::IAM::Policy"))
+      .find(entry => JSON.stringify(entry.Properties.Roles).includes("DomainHealth"))!;
+    const read = policy.Properties.PolicyDocument.Statement.find((statement: { Action: string | string[] }) =>
+      [statement.Action].flat().includes("ses:GetEmailIdentity"));
+    expect(read.Resource).toBe("arn:aws:ses:eu-west-3:123456789012:identity/*");
+  });
+  test("monitors maintenance failures and missing retention heartbeats in production standby", () => {
+    standbyProductionWorkload.resourceCountIs("AWS::CloudWatch::Alarm", 7);
+    standbyProductionWorkload.resourceCountIs("AWS::Lambda::EventSourceMapping", 0);
+    standbyProductionWorkload.hasResourceProperties("AWS::CloudWatch::Alarm", {
+      Namespace: "Yodev/Mail", MetricName: "RetentionPurgeCompleted",
+      ComparisonOperator: "LessThanThreshold", Threshold: 1, Period: 3600,
+      TreatMissingData: "breaching", AlarmActions: Match.arrayWith([Match.objectLike({
+        "Fn::ImportValue": Match.stringLikeRegexp("Foundation:ExportsOutputRefOperationsAlerts"),
+      })]),
+    });
+    const enabledRules = Object.entries(standbyProductionWorkload.findResources("AWS::Events::Rule"))
+      .filter(([, rule]) => rule.Properties.State === "ENABLED").map(([id]) => id);
+    expect(enabledRules).toHaveLength(2);
+    expect(enabledRules.every(id => /^(AttachmentPurgeSchedule|RetentionPurgeSchedule)/.test(id))).toBe(true);
+  });
   test("scopes SES event routing to each deployment environment, account and region", () => {
     for (const [template, environment] of [[standbyWorkload, "dev"], [sesCertificationWorkload, "dev"], [activeProductionWorkload, "prod"]] as const) {
       const rule = Object.values(template.findResources("AWS::Events::Rule")).find((entry) => entry.Properties.EventPattern?.source?.includes("aws.ses"));
@@ -336,7 +366,7 @@ describe("Mail by Yodev AWS infrastructure", () => {
     });
   });
 
-  test("encrypts every queue and keeps standby resources passive", () => {
+  test("encrypts every queue and keeps standby delivery passive while privacy maintenance runs", () => {
     const queues = standbyWorkload.findResources("AWS::SQS::Queue");
 
     expect(Object.values(queues)).toHaveLength(8);
@@ -346,10 +376,12 @@ describe("Mail by Yodev AWS infrastructure", () => {
     standbyWorkload.resourceCountIs("AWS::CloudWatch::Alarm", 0);
     standbyWorkload.resourceCountIs("AWS::Lambda::EventSourceMapping", 0);
     standbyWorkload.resourceCountIs("AWS::CloudWatch::Dashboard", 1);
-    for (const rule of Object.values(
+    for (const [id, rule] of Object.entries(
       standbyWorkload.findResources("AWS::Events::Rule"),
     )) {
-      expect(rule.Properties.State).toBe("DISABLED");
+      const maintenance = id.startsWith("RetentionPurgeSchedule") || id.startsWith("AttachmentPurgeSchedule");
+      expect(rule.Properties.State).toBe(maintenance ? "ENABLED" : "DISABLED");
+      if (maintenance) expect(rule.Properties.ScheduleExpression).toBe("rate(30 minutes)");
     }
     standbyWorkload.hasResourceProperties(
       "AWS::Lambda::Function",

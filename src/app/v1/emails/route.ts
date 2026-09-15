@@ -254,7 +254,8 @@ async function postEmail(request: Request) {
         },
         idempotencyKey,
         requestHash,
-        contentExpiresAt: new Date(now.getTime() + 30 * 864e5),
+        // Leave two hours for scheduled maintenance before the public 30-day cap.
+        contentExpiresAt: new Date(now.getTime() + 30 * 864e5 - 2 * 3600e3),
         sendDeadlineAt: new Date(now.getTime() + 24 * 3600e3),
       });
       const [queuedEvent] = await tx.insert(emailEvents).values({

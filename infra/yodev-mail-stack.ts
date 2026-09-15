@@ -7,7 +7,7 @@ import {
   Tags,
   type StackProps,
 } from "aws-cdk-lib";
-import { Dashboard, GraphWidget, MathExpression, Metric, TreatMissingData } from "aws-cdk-lib/aws-cloudwatch";
+import { ComparisonOperator, Dashboard, GraphWidget, MathExpression, Metric, TreatMissingData } from "aws-cdk-lib/aws-cloudwatch";
 import { SnsAction } from "aws-cdk-lib/aws-cloudwatch-actions";
 import { Rule, Schedule } from "aws-cdk-lib/aws-events";
 import { LambdaFunction, SqsQueue } from "aws-cdk-lib/aws-events-targets";
@@ -194,13 +194,13 @@ export class YodevMailStack extends Stack {
       workerFunctions.push(fn);
       return fn;
     };
-    const scheduledWorkerRule = (id: string, schedule: Schedule, fn: NodejsFunction) => {
+    const scheduledWorkerRule = (id: string, schedule: Schedule, fn: NodejsFunction, maintenance = false) => {
       const rule = new Rule(this, id, {
-        enabled: !standby,
+        enabled: maintenance || !standby,
         schedule,
         targets: [new LambdaFunction(fn, { retryAttempts: 0 })],
       });
-      if (monitoringEnabled) {
+      if (monitoringEnabled || (prod && maintenance)) {
         const failedInvocations = new Metric({
           namespace: "AWS/Events",
           metricName: "FailedInvocations",
@@ -275,7 +275,7 @@ export class YodevMailStack extends Stack {
     );
 
     const domainHealth = worker("DomainHealth", "src/workers/domain-health.ts");
-    domainHealth.addToRolePolicy(new PolicyStatement({ actions: ["ses:GetEmailIdentity"], resources: ["*"] }));
+    domainHealth.addToRolePolicy(new PolicyStatement({ actions: ["ses:GetEmailIdentity"], resources: [`arn:aws:ses:${this.region}:${this.account}:identity/*`] }));
     domainHealth.addToRolePolicy(new PolicyStatement({ actions: ["ssm:GetParameter", "ssm:GetParameters"], resources: [`arn:aws:ssm:${this.region}:${this.account}:parameter/${prefix}/providers/*`] }));
     providerCredentialsKey.grantDecrypt(domainHealth);
     scheduledWorkerRule("DomainHealthSchedule", Schedule.rate(Duration.minutes(15)), domainHealth);
@@ -304,9 +304,30 @@ export class YodevMailStack extends Stack {
     });
     const purge = worker("AttachmentPurge", "src/workers/purge-attachments.ts");
     attachmentBucket.grantDelete(purge);
-    scheduledWorkerRule("AttachmentPurgeSchedule", Schedule.rate(Duration.hours(1)), purge);
+    scheduledWorkerRule("AttachmentPurgeSchedule", Schedule.rate(Duration.minutes(30)), purge, true);
     const retention = worker("RetentionPurge", "src/workers/purge-retention.ts");
-    scheduledWorkerRule("RetentionPurgeSchedule", Schedule.cron({ hour: "2", minute: "30" }), retention);
+    scheduledWorkerRule("RetentionPurgeSchedule", Schedule.rate(Duration.minutes(30)), retention, true);
+    // Privacy maintenance continues even while delivery and billing are paused.
+    if (prod) {
+      for (const [name, fn] of [["AttachmentPurge", purge], ["RetentionPurge", retention]] as const) {
+        const failure = fn.metricErrors({ period: Duration.minutes(5), statistic: "Sum" }).createAlarm(this, `${name}MaintenanceFailure`, {
+          threshold: 1, evaluationPeriods: 1, treatMissingData: TreatMissingData.NOT_BREACHING,
+        });
+        failure.addAlarmAction(new SnsAction(props.alertTopic));
+      }
+      for (const metricName of ["RetentionPurgeFailure", "RetentionPurgeBacklog", "RetentionPurgeCompleted"] as const) {
+        const heartbeat = metricName === "RetentionPurgeCompleted";
+        const alarm = new Metric({
+          namespace: "Yodev/Mail", metricName, dimensionsMap: { Environment: props.environment },
+          period: heartbeat ? Duration.hours(1) : Duration.minutes(15), statistic: "Sum",
+        }).createAlarm(this, `${metricName}MaintenanceAlarm`, {
+          threshold: 1, evaluationPeriods: 1,
+          comparisonOperator: heartbeat ? ComparisonOperator.LESS_THAN_THRESHOLD : ComparisonOperator.GREATER_THAN_OR_EQUAL_TO_THRESHOLD,
+          treatMissingData: heartbeat ? TreatMissingData.BREACHING : TreatMissingData.NOT_BREACHING,
+        });
+        alarm.addAlarmAction(new SnsAction(props.alertTopic));
+      }
+    }
 
     new Rule(this, "SesEventRule", {
       enabled: !standby,

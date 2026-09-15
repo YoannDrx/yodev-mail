@@ -1,0 +1,2 @@
+ALTER TABLE "workspaces" ADD COLUMN "retention_attempted_at" timestamp with time zone;--> statement-breakpoint
+CREATE INDEX "workspaces_retention_idx" ON "workspaces" USING btree ("retention_attempted_at" NULLS FIRST,"id");

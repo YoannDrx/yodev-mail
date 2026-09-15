@@ -321,6 +321,7 @@ export const workspaces = pgTable(
     dailyLimit: integer("daily_limit").default(200).notNull(),
     warmupStage: integer("warmup_stage").default(0).notNull(),
     warmupAdvancedAt: timestamp("warmup_advanced_at", { withTimezone: true }),
+    retentionAttemptedAt: timestamp("retention_attempted_at", { withTimezone: true }),
     approvedAt: timestamp("approved_at", { withTimezone: true }),
     pausedAt: timestamp("paused_at", { withTimezone: true }),
     pauseReason: varchar("pause_reason", { length: 120 }),
@@ -333,6 +334,7 @@ export const workspaces = pgTable(
     uniqueIndex("workspaces_slug_idx").on(table.slug),
     index("workspaces_owner_idx").on(table.ownerUserId),
     index("workspaces_status_idx").on(table.status),
+    index("workspaces_retention_idx").on(table.retentionAttemptedAt.asc().nullsFirst(), table.id),
   ],
 );
 

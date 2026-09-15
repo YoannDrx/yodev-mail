@@ -129,7 +129,7 @@ All externally consequential capabilities are fail-closed. New environments star
 ## Privacy and reputation contract
 
 - Queue bodies, object keys, SES tags and operational logs contain opaque identifiers only.
-- Message bodies expire after 30 days; attachments after 24 hours. Recipient/sender fields and suppression addresses are redacted after 90 days, and normalized technical events are deleted after 90 days.
+- Message bodies are scheduled to expire two hours before the 30-day maximum; attachments before the 24-hour maximum. Recipient/sender fields and suppression addresses are redacted after 90 days, and normalized technical events are deleted after 90 days. Privacy maintenance runs every thirty minutes even in standby; retention sweeps are bounded and rotate by workspace. Production alarms cover failures, backlog and missing retention heartbeats. Apply migration `0010_retention_fair_sweep` before deploying the updated app or retention worker.
 - No open pixel or link rewriting is enabled.
 - A first complaint, three hard bounces, or a hard-bounce rate of at least 2% after 50 accepted messages pauses the workspace.
 - Initial quotas are 50/day, 200/day after three clean days and 500/day after seven clean days.
