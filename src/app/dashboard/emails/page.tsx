@@ -31,7 +31,7 @@ export default async function Page() {
       description={copy.description}
       title="Emails"
     >
-      <div className="overflow-hidden rounded-2xl border bg-white shadow-sm">
+      <div className="overflow-hidden rounded-md border bg-card ">
         <div className="overflow-x-auto">
           <table className="w-full text-sm">
             <thead>

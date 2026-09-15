@@ -38,13 +38,13 @@ export function AccountMenu({ locale }: { locale: Locale }) {
   }
 
   return (
-    <div className="flex items-center gap-2">
+    <div className="flex min-w-0 max-w-full flex-wrap items-center gap-2">
       {organizations.data?.length ? (
         <label className="sr-only" htmlFor="workspace-switcher">{copy.active}</label>
       ) : null}
       {organizations.data?.length ? (
         <select
-          className="h-9 max-w-48 rounded-md border bg-white px-3 text-sm"
+          className="h-9 max-w-36 sm:max-w-48 rounded-md border bg-card px-3 text-sm"
           id="workspace-switcher"
           onChange={(event) => setActive(event.target.value)}
           value={activeOrganizationId ?? ""}

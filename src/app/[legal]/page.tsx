@@ -7,7 +7,7 @@ export type LegalPage={title:string;intro:string;sections:Array<[string,string]>
 const frPages:Record<string,LegalPage>={
   "anti-abus":{
     title:"Politique anti-abus",
-    intro:"Mail by Yodev est exclusivement réservé aux messages transactionnels attendus par leur destinataire.",
+    intro:"Yodev Mail est exclusivement réservé aux messages transactionnels attendus par leur destinataire.",
     sections:[
       ["Usages autorisés","Un message doit être déclenché par une action utilisateur ou un événement métier documenté, envoyé à un destinataire unique et rattaché à un profil transactionnel approuvé."],
       ["Usages interdits","Sont interdits : campagnes, newsletters, publicité, prospection à froid, scraping, listes achetées, louées ou échangées, phishing, usurpation, contenu illicite et contournement d’une suspension."],
@@ -18,7 +18,7 @@ const frPages:Record<string,LegalPage>={
   },
   confidentialite:{
     title:"Politique de confidentialité",
-    intro:"Finalités, durées de conservation et droits relatifs à Mail by Yodev.",
+    intro:"Finalités, durées de conservation et droits relatifs à Yodev Mail.",
     sections:[
       ["Responsable et sous-traitant","Yodev, édité par Yoann Andrieux, entrepreneur individuel, est responsable des données de compte et d’administration. Pour le contenu et les destinataires transmis par un client, Yodev agit comme sous-traitant sur instructions documentées de ce client."],
       ["Données traitées","Le service traite les données de compte, paramètres de domaine, identifiants opaques, adresses nécessaires à la livraison, templates, contenu transactionnel, pièces jointes temporaires et événements techniques expurgés."],
@@ -30,10 +30,10 @@ const frPages:Record<string,LegalPage>={
   },
   cgu:{
     title:"Conditions générales d’utilisation",
-    intro:"Cadre d’utilisation de la bêta privée Mail by Yodev.",
+    intro:"Cadre d’utilisation de la bêta privée Yodev Mail.",
     sections:[
       ["Accès","L’accès est nominatif, sur invitation et après validation du dossier. Le client protège ses clés Yodev et les révoque sans délai en cas de doute."],
-      ["Service","Mail by Yodev fournit une API transactionnelle. Le fournisseur de transport est choisi par Yodev et peut évoluer sans modifier le contrat API, sous réserve de la liste des sous-traitants."],
+      ["Service","Yodev Mail fournit une API transactionnelle. Le fournisseur de transport est choisi par Yodev et peut évoluer sans modifier le contrat API, sous réserve de la liste des sous-traitants."],
       ["Obligations du client","Le client garantit la licéité du traitement, l’exactitude de son dossier, la relation légitime avec chaque destinataire et le caractère strictement transactionnel des contenus."],
       ["Prix","La bêta est facturée 29 € par mois, plus 0,0025 € par email accepté par le service de livraison. La TVA est appliquée selon le régime fiscal en vigueur au moment de la facturation. Les simulations et rejets antérieurs à l’acceptation ne sont pas facturés."],
       ["Suspension et résiliation","Yodev peut suspendre immédiatement un workspace, domaine, profil, template ou accès en cas de risque, de plainte, d’impayé, d’information inexacte ou de violation de la politique anti-abus."],
@@ -42,9 +42,9 @@ const frPages:Record<string,LegalPage>={
   },
   "mentions-legales":{
     title:"Mentions légales",
-    intro:"Informations relatives à l’éditeur de Mail by Yodev.",
+    intro:"Informations relatives à l’éditeur de Yodev Mail.",
     sections:[
-      ["Éditeur","Mail by Yodev est édité sous le nom commercial Yodev par Yoann Andrieux, entrepreneur individuel (EI)."],
+      ["Éditeur","Yodev Mail est édité sous le nom commercial Yodev par Yoann Andrieux, entrepreneur individuel (EI)."],
       ["Immatriculation et activité","Yoann Andrieux EI est immatriculé au Registre national des entreprises (RNE) et au Registre du commerce et des sociétés (RCS) de Paris sous le numéro SIREN 803 272 590. SIRET : 803 272 590 00024. Activité principale : programmation informatique (NAF/APE 62.01Z)."],
       ["Régime de TVA","TVA non applicable, article 293 B du Code général des impôts."],
       ["Adresse professionnelle","7 allée des Jonquilles, 95130 Franconville, France."],
@@ -55,7 +55,7 @@ const frPages:Record<string,LegalPage>={
   },
   dpa:{
     title:"Accord de sous-traitance (DPA)",
-    intro:"Conditions de traitement des données personnelles confiées à Mail by Yodev.",
+    intro:"Conditions de traitement des données personnelles confiées à Yodev Mail.",
     sections:[
       ["Objet et durée","Yodev traite, pendant la durée du service et les périodes de rétention définies, les données nécessaires à la livraison des messages transactionnels pour le compte du client responsable de traitement."],
       ["Instructions","Yodev n’agit que sur les instructions documentées résultant du contrat, du paramétrage du workspace et des requêtes API licites, sauf obligation légale contraire notifiée lorsque la loi le permet."],
@@ -67,7 +67,7 @@ const frPages:Record<string,LegalPage>={
   },
   "sous-traitants":{
     title:"Liste des sous-traitants",
-    intro:"Prestataires susceptibles de traiter des données pour fournir Mail by Yodev.",
+    intro:"Prestataires susceptibles de traiter des données pour fournir Yodev Mail.",
     sections:[
       ["Vercel","Hébergement de l’application web et des fonctions HTTP. Société américaine ; localisation et mécanismes de transfert selon le contrat Vercel applicable."],
       ["Neon","Base de données PostgreSQL managée, configurée dans une région européenne pour ce service."],

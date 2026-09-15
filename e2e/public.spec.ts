@@ -95,3 +95,25 @@ test("health endpoint remains useful before database provisioning", async ({ req
   expect(response.ok()).toBeTruthy();
   expect(await response.json()).toMatchObject({ status: "ok", database: "unconfigured" });
 });
+
+test('public appearance stays legible in both themes and at every breakpoint', async ({page},testInfo) => {
+  const {default:AxeBuilder}=await import('@axe-core/playwright');
+  await page.goto('/fr');
+  for (const width of [390,768,1440]) {
+    await page.setViewportSize({width,height:900});
+    for (const theme of ['dark','light']) {
+      if (!(await page.locator('html').getAttribute('class'))?.includes(theme)) await page.getByRole('button',{name:'Changer le thème',exact:true}).click();
+      await expect(page.locator('html')).toHaveClass(new RegExp(theme));
+      expect(await page.evaluate(()=>document.documentElement.scrollWidth<=innerWidth)).toBe(true);
+      const result=await new AxeBuilder({page}).withTags(['wcag2a','wcag2aa']).analyze();
+      expect(result.violations.map(v=>({id:v.id,nodes:v.nodes.map(n=>n.target)}))).toEqual([]);
+      await page.screenshot({path:testInfo.outputPath(`mail-public-${width}-${theme}.png`)});
+    }
+  }
+});
+
+test('brand image routes remain outside locale negotiation', async ({request}) => {
+  for (const path of ['/icon','/apple-icon','/opengraph-image']) {
+    const response=await request.get(path);expect(response.status()).toBe(200);expect(response.headers()['content-type']).toContain('image/png');
+  }
+});

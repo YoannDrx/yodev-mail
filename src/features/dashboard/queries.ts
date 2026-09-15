@@ -1,6 +1,7 @@
 import { and, desc, eq, gte, sql } from "drizzle-orm";
 import { requireDb } from "@/db";
 import {
+  domainProviderBindings,
   emailEvents,
   messageAttempts,
   messages,
@@ -17,7 +18,7 @@ export async function getDashboardData(workspaceId: string) {
   const now = new Date();
   const month = now.toISOString().slice(0, 7);
   const since = utcDay(new Date(now.getTime() - 29 * 864e5));
-  const [workspace, usage, today, activity, recentMessages, statusCounts, subscription] =
+  const [workspace, usage, today, activity, recentMessages, statusCounts, subscription, verifiedDomain, approvedProfile] =
     await Promise.all([
       db
         .select()
@@ -72,6 +73,8 @@ export async function getDashboardData(workspaceId: string) {
         .where(eq(subscriptions.workspaceId, workspaceId))
         .limit(1)
         .then((rows) => rows[0]),
+      db.select({ id: domainProviderBindings.id }).from(domainProviderBindings).where(and(eq(domainProviderBindings.workspaceId, workspaceId), eq(domainProviderBindings.isActive, true), eq(domainProviderBindings.status, "verified"))).limit(1),
+      db.select({ id: transactionalProfiles.id }).from(transactionalProfiles).where(and(eq(transactionalProfiles.workspaceId, workspaceId), eq(transactionalProfiles.status, "approved"))).limit(1),
     ]);
   if (!workspace) throw new Error("Workspace not found");
   const totals = activity.reduce(
@@ -84,6 +87,7 @@ export async function getDashboardData(workspaceId: string) {
     { accepted: 0, complaints: 0, delivered: 0, hardBounces: 0 },
   );
   return {
+    setup: { domainVerified: verifiedDomain.length > 0, profileApproved: approvedProfile.length > 0 },
     activity,
     currentMonthAccepted: usage?.acceptedEmails ?? 0,
     recentMessages,

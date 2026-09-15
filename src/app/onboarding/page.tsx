@@ -28,7 +28,7 @@ export default async function Page() {
     });
     return <main className="mx-auto min-h-screen max-w-3xl p-6 py-12">
       <div className="flex flex-wrap items-center justify-between gap-4"><BrandMark /><AccountMenu locale={locale} /></div>
-      <section className="mt-10 rounded-3xl border bg-white p-8 shadow-xl">
+      <section className="mt-10 rounded-md border bg-card p-8 ">
         <h1 className="text-3xl font-semibold">{accessCopy.title}</h1>
         <p className="mt-3 text-muted-foreground">{accessCopy.text}</p>
       </section>
@@ -51,7 +51,7 @@ export default async function Page() {
   return (
     <main className="mx-auto min-h-screen max-w-3xl p-6 py-12">
       <BrandMark />
-      <section className="mt-10 rounded-3xl border bg-white p-8 shadow-xl">
+      <section className="mt-10 rounded-md border bg-card p-8 ">
         <p className="text-sm font-medium text-primary">{copy.eyebrow}</p>
         <h1 className="mt-2 text-3xl font-semibold">{copy.title}</h1>
         <p className="mt-3 text-muted-foreground">{copy.intro}</p>
@@ -66,8 +66,8 @@ export default async function Page() {
           <div className="grid gap-4 sm:grid-cols-3"><Field name="expectedMonthlyVolume" label={copy.monthly} type="number" /><Field name="averageDailyVolume" label={copy.daily} type="number" /><Field name="dailyPeakVolume" label={copy.peak} type="number" /></div>
           <div className="grid gap-2"><Label htmlFor="exampleContent">{copy.examples}</Label><Textarea id="exampleContent" name="exampleContent" required /></div>
           <div className="grid gap-2"><Label htmlFor="errorPolicy">{copy.errors}</Label><Textarea id="errorPolicy" name="errorPolicy" required /></div>
-          <div className="grid gap-2 rounded-2xl border p-5">{copy.attestations.map(([name, label]) => <label className="flex gap-3 text-sm" key={name}><input name={name} type="checkbox" required /><span>{label}</span></label>)}</div>
-          <label className="flex gap-3 rounded-xl border p-4 text-sm"><input name="abuseAccepted" type="checkbox" required /><span><strong>{copy.abuse}</strong><br /><span className="text-muted-foreground">{copy.strict}</span></span></label>
+          <div className="grid gap-2 rounded-md border p-5">{copy.attestations.map(([name, label]) => <label className="flex gap-3 text-sm" key={name}><input name={name} type="checkbox" required /><span>{label}</span></label>)}</div>
+          <label className="flex gap-3 rounded-md border p-4 text-sm"><input name="abuseAccepted" type="checkbox" required /><span><strong>{copy.abuse}</strong><br /><span className="text-muted-foreground">{copy.strict}</span></span></label>
           <Button className="mt-2" type="submit">{copy.submit} <Check /></Button>
         </form>
       </section>

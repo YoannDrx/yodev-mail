@@ -24,7 +24,7 @@ export default async function Page() {
   return (
     <DashboardPage title={copy.title} description={copy.description}>
       <ApiKeyForm allowRaw={Boolean(context?.workspace.contentPolicy === "hybrid")} locale={locale} />
-      <div className="mt-6 rounded-2xl border bg-white shadow-sm">
+      <div className="mt-6 rounded-md border bg-card ">
         {keys.map((key) => (
           <div className="grid grid-cols-[1fr_auto] gap-4 border-b p-5 last:border-0 sm:grid-cols-5" key={key.id}>
             <div><p className="font-medium">{key.name}</p><p className="text-xs text-muted-foreground">{key.prefix}…</p></div>

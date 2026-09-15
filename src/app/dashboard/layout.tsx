@@ -22,7 +22,7 @@ export default async function DashboardLayout({ children }: { children: React.Re
   const plan = subscription?.pilotAccessExpiresAt && subscription.pilotAccessExpiresAt > new Date()
     ? "pilote"
     : context.workspace.plan;
-  return <div className="flex min-h-screen bg-[#f8f7fb]">
+  return <div className="flex min-h-screen bg-card">
     <DashboardSidebar locale={locale} plan={plan} workspaceName={context.workspace.name} />
     <div className="min-w-0 flex-1">
       <DashboardHeader locale={locale} />

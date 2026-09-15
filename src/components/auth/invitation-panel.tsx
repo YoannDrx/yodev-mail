@@ -8,8 +8,8 @@ import { localized, localizedPath, type Locale } from "@/i18n/config";
 
 export function InvitationPanel({ invitationId, locale }: { invitationId: string; locale: Locale }) {
   const copy = localized(locale, {
-    fr: { googleError: "La connexion Google n’a pas abouti.", invitationError: "Cette invitation est invalide, expirée ou destinée à une autre adresse.", eyebrow: "INVITATION PRIVÉE", title: "Rejoindre Mail by Yodev", intro: "Connectez-vous avec l’adresse exacte qui a reçu l’invitation.", accept: "Accepter l’invitation", google: "Continuer avec Google" },
-    en: { googleError: "Google sign-in failed.", invitationError: "This invitation is invalid, expired, or intended for another address.", eyebrow: "PRIVATE INVITATION", title: "Join Mail by Yodev", intro: "Sign in with the exact address that received the invitation.", accept: "Accept invitation", google: "Continue with Google" },
+    fr: { googleError: "La connexion Google n’a pas abouti.", invitationError: "Cette invitation est invalide, expirée ou destinée à une autre adresse.", eyebrow: "INVITATION PRIVÉE", title: "Rejoindre Yodev Mail", intro: "Connectez-vous avec l’adresse exacte qui a reçu l’invitation.", accept: "Accepter l’invitation", google: "Continuer avec Google" },
+    en: { googleError: "Google sign-in failed.", invitationError: "This invitation is invalid, expired, or intended for another address.", eyebrow: "PRIVATE INVITATION", title: "Join Yodev Mail", intro: "Sign in with the exact address that received the invitation.", accept: "Accept invitation", google: "Continue with Google" },
   });
   const router = useRouter();
   const session = authClient.useSession();
@@ -38,7 +38,7 @@ export function InvitationPanel({ invitationId, locale }: { invitationId: string
   }
 
   return (
-    <div className="w-full rounded-3xl border bg-white p-8 shadow-xl">
+    <div className="w-full rounded-md border bg-card p-8 ">
       <p className="text-sm font-medium text-primary">{copy.eyebrow}</p>
       <h1 className="mt-2 text-3xl font-semibold">{copy.title}</h1>
       <p className="mt-3 text-sm leading-6 text-muted-foreground">{copy.intro}</p>
