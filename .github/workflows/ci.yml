@@ -28,6 +28,12 @@ jobs:
       - run: npm audit --audit-level=high
       - run: npx drizzle-kit check
       - run: npm run infra:synth
+        # Main-workload compliance uses account-scoped IAM patterns and the
+        # existing OIDC provider. An offline runner needs a concrete fixture
+        # account, never an unresolved account token or production credentials.
+        env:
+          CDK_DEFAULT_ACCOUNT: "123456789012"
+          CDK_DEFAULT_REGION: eu-west-3
       - run: npm run infra:test:synth
         # Offline runners have no AWS profile; CDK otherwise defaults to us-east-1.
         # Keep the account/region guard intact and synthesize the pinned test region.
