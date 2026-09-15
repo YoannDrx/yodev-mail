@@ -1,3 +1,11 @@
 
 # Public SHA-256 of the versioned CSS design tokens, not a credential.
 4e4dd9dbe5ec26351e63ffa836d18fdee8f86a3c:src/brand/manifest.json:generic-api-key:63
+# The same public checksum in the squash merge on main.
+ec415115a8919f4864591e254bd4690e2a13d609:src/brand/manifest.json:generic-api-key:63
+# Historical mocked Stripe integration key, never a provider credential.
+3f6498720fbb421e705540b3aa9b88328e95d4fc:src/workers/report-stripe-usage.integration.test.ts:stripe-access-token:122
+a5ce4e2229d846b20d45e563e7ca1b9740ec111d:src/workers/report-stripe-usage.integration.test.ts:stripe-access-token:122
+# Historical public API documentation placeholder, ending in an ellipsis.
+2037f0615b8f6988bb0043f6bc5696c993965f6a:src/app/docs/page.tsx:curl-auth-header:4
+84e0640b0dca299fc2ed7f8763656ae6be25a596:src/app/docs/page.tsx:curl-auth-header:2
