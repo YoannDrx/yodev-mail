@@ -7,7 +7,8 @@ vi.mock("@/workers/runtime-secrets", () => ({ loadRuntimeSecrets: async () => {}
 vi.mock("@/lib/operational-metric", () => ({ emitOperationalMetric: metric }));
 
 import { databasePool, requireDb } from "@/db/runtime";
-import { domains, emailEvents, idempotencyKeys, messages, outboxJobs, suppressions, usageLedger, workspaces } from "@/db/schema";
+import { attachments, domains, emailEvents, idempotencyKeys, messages, outboxJobs, suppressions, usageLedger, workspaces } from "@/db/schema";
+import { workspaceReadinessSql } from "@/features/operations/readiness-query";
 import { handler, purgeWorkspaceRetention } from "./purge-retention";
 
 const db = requireDb();
@@ -46,6 +47,19 @@ afterEach(async () => {
 afterAll(async () => { await databasePool!.end(); });
 
 describe("bounded retention and tenant isolation", () => {
+  it("exposes retention backlog in the scoped GO audit and clears body counters after purging", async () => {
+    const id = await workspace();
+    await fixture(id);
+    await db.update(messages).set({ contentExpiresAt: new Date(Date.now() - 1000) }).where(eq(messages.workspaceId, id));
+    await db.insert(attachments).values({
+      workspaceId: id, fileName: "fixture.txt", declaredContentType: "text/plain", sizeBytes: 1,
+      expectedSha256: "0".repeat(64), storageKey: `pending/${randomUUID()}`, status: "clean", expiresAt: old,
+    });
+    expect((await databasePool!.query(workspaceReadinessSql, [id])).rows[0]).toMatchObject({ expired_bodies: "1", unredacted_old_messages: "1", expired_attachments: "1" });
+    expect((await databasePool!.query(workspaceReadinessSql, [randomUUID()])).rows[0]).toMatchObject({ expired_bodies: "0", unredacted_old_messages: "0", expired_attachments: "0" });
+    await purgeWorkspaceRetention(id, new Date());
+    expect((await databasePool!.query(workspaceReadinessSql, [id])).rows[0]).toMatchObject({ expired_bodies: "0", unredacted_old_messages: "0", expired_attachments: "1" });
+  });
   it("purges only workspace A, preserves its billing ledger and suppression hashes, and is reentrant", async () => {
     const a = await workspace();
     const b = await workspace();

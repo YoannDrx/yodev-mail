@@ -15,6 +15,11 @@ export const workspaceReadinessSql = `
     (select count(*) from messages where workspace_id = $1 and status in ('sending', 'unknown')) as ambiguous_messages,
     (select count(*) from outbox_jobs where workspace_id = $1 and status <> 'delivered') as pending_outbox,
     (select count(*) from webhook_deliveries where workspace_id = $1 and delivered_at is null and terminal_at is null) as pending_webhooks,
+    (select count(*) from messages where workspace_id = $1 and content_expires_at <= now()) as expired_bodies,
+    (select count(*) from messages where workspace_id = $1 and queued_at < now() - interval '90 days'
+      and to_email <> 'redacted@yodev.invalid') as unredacted_old_messages,
+    (select count(*) from attachments where workspace_id = $1 and expires_at <= now()
+      and deleted_at is null and status not in ('expired', 'deleted')) as expired_attachments,
     (select count(*) from workspaces where id = $1 and deleted_at is null and status = 'approved') as approved_workspaces,
     (select count(*) from workspace_provider_accounts where workspace_id = $1 and (status <> 'ready' or paused_at is not null)) as unready_providers,
     (select count(*) from domain_provider_bindings where workspace_id = $1 and is_active = true and status = 'verified') as active_verified_bindings

@@ -59,6 +59,9 @@ Une erreur 500 ne prouve pas l'absence d'acceptation. Classer également les aut
   Les erreurs et lots saturés sont signalés par métriques agrégées, sans contenu.
 - Le ledger reste conservé ; la suppression conserve le hash anti-réémission.
   Les anciens diagnostics de message sont effacés lors de l'anonymisation à 90 jours.
+- Le contrôle `internal-go:audit` vérifie maintenant les corps expirés, les anciens
+  messages non anonymisés et les pièces jointes expirées non supprimées, toujours
+  sur le workspace explicite. Un arriéré empêche le feu vert interne.
 
 Capacité : il s'agit d'un entretien borné, pas d'une certification à charge
 illimitée. Un lot saturé doit déclencher une investigation et un drainage borné.
@@ -94,8 +97,8 @@ global n'a été augmenté pour masquer les erreurs.
   correction de l'assertion CDK ; lignes 74,57 %, branches 66,87 %. Le dernier
   test ajouté sur le périmètre IAM est également vert dans `npm run check`.
 - Migration Drizzle appliquée sur les deux bases jetables locales, jamais en production.
-- Huit tests de rétention : isolation A/B, bornes, expiration, reprise,
-  concurrence, rotation, échec contrôlé et validation des entrées.
+- Neuf tests de rétention : isolation A/B, bornes, expiration, reprise,
+  concurrence, rotation, échec contrôlé, validation des entrées et compteurs du GO.
 - Parcours publics : **8/8**, avec un worker ; parcours authentifiés : **8/8**.
   Un premier passage public sous concurrence a expiré sur la navigation privée ;
   le même scénario ciblé puis les huit parcours séquentiels sont verts.
