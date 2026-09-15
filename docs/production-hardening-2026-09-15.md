@@ -7,9 +7,12 @@ Lot de code sur `codex/retention-postmark-hardening`, basé sur `main` (`100a917
 Ce document complète l'[audit du jour](production-readiness-audit-2026-09-15.md),
 sans transformer les constats externes datés en validations nouvelles.
 
-L'accès AWS SSO a expiré ; la reconnexion AWS et Stripe a été demandée.
+L'accès AWS SSO, initialement expiré, a été rétabli pendant cette intervention.
+Stripe reste à reconnecter. Les contrôles AWS frais sont consignés ci-dessous.
 Aucune migration distante, purge réelle, modification de droits pilote,
-activation d'envoi, paiement, demande SES ou suppression de branche Neon dans ce lot.
+activation d'envoi, paiement, nouvelle demande d'accès production SES ou suppression
+de branche Neon dans ce lot. Une tentative de correction des métadonnées SES a
+été refusée par l'API ; ces métadonnées restent inchangées.
 
 ## Corrections implémentées
 
@@ -109,15 +112,21 @@ global n'a été augmenté pour masquer les erreurs.
 - Synthèse CDK stricte des trois stacks applicatives : verte, sans déploiement.
 - Contrôle de conformité principal : **non vert**, détaillé ci-dessous.
 
-La CI distante sera vérifiée sur la pull request ; ces contrôles ne prouvent pas
+La [PR #50](https://github.com/YoannDrx/yodev-mail/pull/50) reste en brouillon.
+La [CI 34962727373](https://github.com/YoannDrx/yodev-mail/actions/runs/34962727373)
+est entièrement verte sur le commit de code `73f3e496350e1dc6a09557db9169eab1df22cb1c` :
+qualité, secrets, intégration PostgreSQL (**439 tests / 57 fichiers**), huit parcours
+publics et huit parcours authentifiés. GitGuardian et le déploiement Vercel de
+prévisualisation sont également verts ; aucune publication en production.
+Ces contrôles ne prouvent pas
 une livraison réelle SES/Postmark, une alerte SNS reçue ni un paiement réel Stripe.
 
 Migration additive `0010_retention_fair_sweep` : une colonne nullable et un index
 sur le registre des workspaces. Aucune donnée existante n'est supprimée par la
 migration. Les purges seront exécutées uniquement par les workers après activation.
 
-1. Retrouver les accès AWS/Stripe et vérifier de nouveau les gates, le compte,
-   les régions, les files et le drift. Ne pas réutiliser une ancienne preuve verte.
+1. AWS est reconnecté et ses gates relus ; reconnecter Stripe puis compléter
+   le contrôle des files et du drift. Ne pas réutiliser une ancienne preuve verte.
 2. Valider la capacité de sauvegarde/reprise Neon. Les dix branches existantes
    restent conservées ; ne pas en supprimer une arbitrairement pour faire de la place.
 3. Sauvegarde/préflight, puis migration Drizzle versionnée avant toute publication
@@ -147,6 +156,58 @@ précise ; d'autres peuvent être resserrées. La lecture globale DomainHealth a
 resserrée dans ce lot. Aucun contournement global de conformité n'a été ajouté.
 La vérification `cdk-nag` verte du compte de test ne certifie pas ces workloads.
 La levée de chaque constat principal doit précéder leur certification de conformité.
+
+## Contrôles externes frais après reconnexion
+
+### AWS SES et infrastructure
+
+Contrôles du 15 septembre 2026, compte `274319534967`, région `eu-west-3`,
+avec le rôle SSO existant `YoDevMailAdministrator`, sans root ni nouvelle clé statique :
+
+- SES : `ProductionAccessEnabled=false`, `SendingEnabled=true`,
+  `EnforcementStatus=HEALTHY`, quota sandbox 200 messages/jour et 1/seconde,
+  aucun envoi sur les dernières 24 heures. `SendingEnabled=true` ne lève pas
+  les restrictions du sandbox ni les gates applicatifs.
+- Suppression de compte active pour `BOUNCE` et `COMPLAINT`.
+- `mail.yodev.fr` vérifié ; DKIM activé, `SUCCESS`, RSA 2048 ; MAIL FROM
+  `bounce.mail.yodev.fr` en `SUCCESS`, comportement `REJECT_MESSAGE` si échec MX.
+- Les détails SES affichent encore `MARKETING`, l'ancienne URL
+  `https://vigie-mail.vercel.app` et `ReviewDetails.Status=DENIED`.
+- Une unique tentative `PutAccountDetails` pour indiquer le périmètre transactionnel
+  actuel et `https://mail.yodev.fr`, en conservant explicitement le sandbox, a échoué
+  avec `ConflictException`. La relecture confirme que rien n'a été corrigé.
+  La [documentation de l'API](https://docs.aws.amazon.com/ses/latest/APIReference-V2/API_PutAccountDetails.html)
+  décrit ce conflit lors d'une mise à jour sous examen ; cela ne permet pas de
+  déduire qu'un réexamen est en cours lorsque le statut observé reste `DENIED`.
+- Dossier Support `178463601800033`, relu dans la console : **Résolu**, bouton
+  de réouverture disponible. Dernière réponse AWS le 12 août : refus présenté
+  comme définitif. Le message transactionnel du 22 août est bien présent, sans
+  nouvelle réponse AWS visible. Aucune nouvelle correspondance envoyée ce jour.
+- L'API Support renvoie `SubscriptionRequiredException` avec le plan Basic ;
+  la console permet néanmoins de lire le dossier. Aucun abonnement acheté.
+- Les 26 workers dev/prod listés restent `standby`, `SES_ENABLED=false`,
+  `POSTMARK_ENABLED=false`. Toutes les règles EventBridge prod sont désactivées,
+  y compris les deux purges : la correction de ce lot n'est donc pas encore effective.
+- Foundation, Dev et Prod sont `UPDATE_COMPLETE`. Ce statut n'est pas un contrôle
+  de drift frais et ne certifie pas les constats de conformité restants.
+
+Un domaine vérifié est une brique technique valide, pas une autorisation commerciale.
+La prochaine communication AWS doit demander le chemin officiellement supporté
+pour corriger le dossier verrouillé, sans répéter une demande identique, contourner
+le refus avec un autre compte/région, ni prétendre la chaîne applicative certifiée.
+
+### Neon et Stripe
+
+- Neon : dix branches sur dix, état relu. La production n'est pas migrée.
+  Le guide `neon-postgres:neon-postgres` exige de tester la migration sur une
+  branche de production avant de l'appliquer en production.
+- Accord spécifique demandé pour supprimer uniquement la branche de test archivée
+  `test-pilot-readiness-20260813` (`br-restless-truth-as9zo1i6`), puis créer une
+  copie récente. Cette suppression serait définitive. **Aucun accord reçu et
+  aucune suppression effectuée** ; main, development et les sauvegardes sont conservés.
+- Le connecteur Stripe renvoie toujours `UNAUTHORIZED` / `invalid_grant`.
+  L'éligibilité courante du compte YoDevMail n'a donc pas été revalidée. Les
+  constats Stripe antérieurs ne sont pas présentés comme des preuves du jour.
 
 ## Reste obligatoire pour le GO commercial
 
