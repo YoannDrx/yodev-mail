@@ -3,16 +3,19 @@
 ## État et périmètre
 
 Lot de code sur `codex/retention-postmark-hardening`, basé sur `main` (`100a917`).
-**Pas encore appliqué en production. Le NO-GO commercial reste en vigueur.**
+**Migration 0010 appliquée sur Neon main ; publication application/infra encore
+en attente. Le NO-GO commercial reste en vigueur.**
 Ce document complète l'[audit du jour](production-readiness-audit-2026-09-15.md),
 sans transformer les constats externes datés en validations nouvelles.
 
 L'accès AWS SSO, initialement expiré, a été rétabli pendant cette intervention.
 Stripe reste à reconnecter. Les contrôles AWS frais sont consignés ci-dessous.
-Aucune migration distante, purge réelle, modification de droits pilote,
-activation d'envoi, paiement, nouvelle demande d'accès production SES ou suppression
-de branche Neon dans ce lot. Une tentative de correction des métadonnées SES a
-été refusée par l'API ; ces métadonnées restent inchangées.
+Après autorisation explicite, une ancienne branche Neon de test a été supprimée,
+la migration répétée sur un clone récent puis appliquée à main après snapshot.
+Aucune purge réelle, modification de droits pilote, activation d'envoi, paiement
+ou nouvelle demande d'accès production SES. Une tentative de correction des
+métadonnées SES a été refusée par l'API ; un dossier administratif lié demande
+maintenant à AWS le chemin supporté pour les corriger, sans lever le sandbox.
 
 ## Corrections implémentées
 
@@ -95,11 +98,13 @@ global n'a été augmenté pour masquer les erreurs.
 
 ### Preuves locales
 
-- `npm run check` : lint, TypeScript, **304 tests / 45 fichiers** et build Next.js verts.
+- `npm run check` : lint, TypeScript, **308 tests / 45 fichiers** et build Next.js verts,
+  y compris après le renforcement de la politique de livraison des journaux S3.
 - `npm run test:coverage:full` : suite unitaire et PostgreSQL locale verte après
   correction de l'assertion CDK ; lignes 74,57 %, branches 66,87 %. Le dernier
   test ajouté sur le périmètre IAM est également vert dans `npm run check`.
-- Migration Drizzle appliquée sur les deux bases jetables locales, jamais en production.
+- Migration Drizzle appliquée sur les bases jetables locales, puis sur le clone
+  récent et main Neon après vérification des hashes du journal et snapshot.
 - Neuf tests de rétention : isolation A/B, bornes, expiration, reprise,
   concurrence, rotation, échec contrôlé, validation des entrées et compteurs du GO.
 - Parcours publics : **8/8**, avec un worker ; parcours authentifiés : **8/8**.
@@ -110,7 +115,8 @@ global n'a été augmenté pour masquer les erreurs.
 - `npm audit --audit-level=high` : **0 vulnérabilité** remontée.
 - `npx drizzle-kit check` : cohérence des migrations verte.
 - Synthèse CDK stricte des trois stacks applicatives : verte, sans déploiement.
-- Contrôle de conformité principal : **non vert**, détaillé ci-dessous.
+- Contrôle de conformité principal Foundation/Dev/Prod : **vert** après corrections,
+  avant déploiement ; détail et limites ci-dessous.
 
 La [PR #50](https://github.com/YoannDrx/yodev-mail/pull/50) reste en brouillon.
 La [CI 34962727373](https://github.com/YoannDrx/yodev-mail/actions/runs/34962727373)
@@ -125,14 +131,17 @@ Migration additive `0010_retention_fair_sweep` : une colonne nullable et un inde
 sur le registre des workspaces. Aucune donnée existante n'est supprimée par la
 migration. Les purges seront exécutées uniquement par les workers après activation.
 
-1. AWS est reconnecté et ses gates relus ; reconnecter Stripe puis compléter
-   le contrôle des files et du drift. Ne pas réutiliser une ancienne preuve verte.
-2. Valider la capacité de sauvegarde/reprise Neon. Les dix branches existantes
-   restent conservées ; ne pas en supprimer une arbitrairement pour faire de la place.
-3. Sauvegarde/préflight, puis migration Drizzle versionnée avant toute publication
-   du nouveau code applicatif : les lectures ORM peuvent sélectionner la nouvelle colonne.
-4. CI verte et revue du diff ; publier application et workers en standby. Le diff
-   attendu n'ouvre que les deux règles de maintenance et ajoute leurs alarmes.
+1. AWS est reconnecté et ses gates relus. Drift Foundation/Prod relu le 15 septembre
+   vers 11:45 UTC : `IN_SYNC`, zéro ressource en dérive. Stripe reste à reconnecter.
+2. Branche archivée explicitement autorisée supprimée ; clone récent testé et
+   snapshot pré-migration créé. Les autres branches et sauvegardes sont conservées.
+3. Migration Drizzle 0010 appliquée sur main : journal 10 vers 11, colonne/index
+   présents, 39 messages et 35 lignes de ledger inchangés sur le workspace interne.
+4. Attendre la CI du dernier commit et revoir le diff ; publier en standby. Le diff
+   ne retire aucune ressource existante, ouvre seulement les deux règles de
+   maintenance et ajoute sept alarmes. Il resserre aussi IAM, ajoute les destinations
+   de logs S3 et met les treize workers prod à Node 24 avec SDK embarqué.
+   Dev n'est pas publié avant sa propre prévalidation/migration.
 5. Vérifier exécution réelle, erreurs SQL, heartbeat, SNS et compteur de contenus
    expirés du workspace interne. Réconcilier l'arriéré constaté dans l'audit.
 6. Vérifier de nouveau à la prochaine échéance ; mesurer compute Neon et temps SQL.
@@ -143,19 +152,30 @@ désactiverait la maintenance en standby : prévoir une procédure d'entretien c
 Une suppression de contenu déjà effectuée par la politique de rétention n'est pas
 réversible par un rollback de code.
 
-## Contrôle AWS supplémentaire : non certifié
+## Contrôle AWS supplémentaire : code conforme, exploitation à valider
 
-Un contrôle `AwsSolutionsChecks` a été exécuté sur Foundation et le workload prod
-standby synthétiques, et pas seulement sur le compte de test. Il n'est **pas vert**.
-Il signale notamment les familles IAM4/IAM5 (rôle de logs géré et wildcards), S1
-(journaux d'accès S3) et L1 (runtime différent du dernier recommandé).
+Le contrôle réel `AwsSolutionsChecks` v3 est maintenant exécuté explicitement par
+`infra/app.ts` sur Foundation/Dev/Prod ; un rapport plugin vide n'est pas considéré
+comme une preuve. La validation complète retourne `success=true`, sans violation.
 
-Ces résultats ne prouvent pas une compromission : certaines permissions à motif
-sont nécessaires aux ressources multi-tenant et doivent recevoir une justification
-précise ; d'autres peuvent être resserrées. La lecture globale DomainHealth a été
-resserrée dans ce lot. Aucun contournement global de conformité n'a été ajouté.
-La vérification `cdk-nag` verte du compte de test ne certifie pas ces workloads.
-La levée de chaque constat principal doit précéder leur certification de conformité.
+- Les treize rôles workers gardent leur identité, mais perdent la politique de
+  logs gérée globale : deux actions exactes, uniquement leur propre log group.
+- Les actions S3/KMS des politiques IAM ont été énumérées. Le rôle GuardDuty suit
+  les opérations de scan/validation documentées ; PUT limité à l'objet de validation.
+- Les buckets CloudTrail et pièces jointes envoient leurs journaux vers des
+  destinations privées distinctes, SSE-S3, rétention 90 jours, conservées au retrait
+  de stack. Livraison par service S3 avec SourceArn/SourceAccount ; ACL désactivées.
+- Node 24 stable et SDK AWS embarqué depuis le lockfile ; exécution Lambda réelle
+  à vérifier après publication, pas seulement compilation locale.
+- Les exceptions IAM5 concernent uniquement des motifs de ressources justifiés
+  (objets du bucket, paramètres/identités/tenants par environnement, règle GuardDuty
+  gérée). Aucune exception globale d'action IAM. Un test injecte `ses:*` dans un rôle
+  déjà revu et exige que la conformité échoue.
+- Seules les destinations finales de logs reçoivent une exception S1, pour éviter
+  une journalisation récursive. Le compte AWS partagé reste une limite d'isolation.
+
+Ce contrôle statique ne remplace pas la preuve d'exécution, la réception des alertes,
+une revue exhaustive de toutes les politiques de ressources ni un pentest.
 
 ## Contrôles externes frais après reconnexion
 
@@ -179,32 +199,48 @@ avec le rôle SSO existant `YoDevMailAdministrator`, sans root ni nouvelle clé 
   La [documentation de l'API](https://docs.aws.amazon.com/ses/latest/APIReference-V2/API_PutAccountDetails.html)
   décrit ce conflit lors d'une mise à jour sous examen ; cela ne permet pas de
   déduire qu'un réexamen est en cours lorsque le statut observé reste `DENIED`.
-- Dossier Support `178463601800033`, relu dans la console : **Résolu**, bouton
-  de réouverture disponible. Dernière réponse AWS le 12 août : refus présenté
-  comme définitif. Le message transactionnel du 22 août est bien présent, sans
-  nouvelle réponse AWS visible. Aucune nouvelle correspondance envoyée ce jour.
+- Ancien dossier Support `178463601800033` : refus définitif du 12 août, clarification
+  transactionnelle du 22 août sans réponse nouvelle. Le bouton de réouverture
+  affiche finalement une fermeture permanente après 14 jours et propose un dossier lié.
+- Dossier lié **`178947292100605`** envoyé le 15 septembre à **11:48:42 UTC** :
+  `SES account details locked after closed case - metadata correction only`.
+  Demande administrative pour corriger MARKETING/ancienne URL après ConflictException,
+  en conservant le sandbox. Le refus précédent est explicitement reconnu ; aucune
+  hausse de quota, exception ou nouvelle demande d'accès production. Envoi vérifié
+  dans la correspondance ; réponse AWS encore attendue.
 - L'API Support renvoie `SubscriptionRequiredException` avec le plan Basic ;
   la console permet néanmoins de lire le dossier. Aucun abonnement acheté.
 - Les 26 workers dev/prod listés restent `standby`, `SES_ENABLED=false`,
   `POSTMARK_ENABLED=false`. Toutes les règles EventBridge prod sont désactivées,
   y compris les deux purges : la correction de ce lot n'est donc pas encore effective.
-- Foundation, Dev et Prod sont `UPDATE_COMPLETE`. Ce statut n'est pas un contrôle
-  de drift frais et ne certifie pas les constats de conformité restants.
+- Foundation, Dev et Prod sont `UPDATE_COMPLETE`. Drift frais Foundation/Prod :
+  `DETECTION_COMPLETE`, `IN_SYNC`, zéro ressource en dérive avant cette publication.
 
 Un domaine vérifié est une brique technique valide, pas une autorisation commerciale.
-La prochaine communication AWS doit demander le chemin officiellement supporté
-pour corriger le dossier verrouillé, sans répéter une demande identique, contourner
-le refus avec un autre compte/région, ni prétendre la chaîne applicative certifiée.
+La communication AWS demande le chemin officiellement supporté pour corriger le
+dossier verrouillé, sans contourner le refus par un autre compte/région ni prétendre
+la chaîne applicative certifiée. La décision d'accès production reste négative.
 
 ### Neon et Stripe
 
-- Neon : dix branches sur dix, état relu. La production n'est pas migrée.
-  Le guide `neon-postgres:neon-postgres` exige de tester la migration sur une
-  branche de production avant de l'appliquer en production.
-- Accord spécifique demandé pour supprimer uniquement la branche de test archivée
-  `test-pilot-readiness-20260813` (`br-restless-truth-as9zo1i6`), puis créer une
-  copie récente. Cette suppression serait définitive. **Aucun accord reçu et
-  aucune suppression effectuée** ; main, development et les sauvegardes sont conservés.
+- Projet Neon `round-star-39482619`. Autorisation utilisateur reçue : seule la
+  branche archivée `test-pilot-readiness-20260813` (`br-restless-truth-as9zo1i6`)
+  a été supprimée, puis son absence vérifiée. Suppression définitive.
+- Clone récent de main : `codex-retention-0010-rehearsal-20260915`
+  (`br-still-cloud-asdgw723`, parent LSN `0/3DBEA10`), compute 0,25 CU,
+  suspension par défaut. Une tentative de paramétrage explicite de suspension a
+  été refusée par le forfait ; aucun changement de forfait effectué.
+- Répétition Drizzle réussie : hashes/horodatages des dix migrations préexistantes
+  conformes, puis journal à onze entrées ; diff de schéma limité à la colonne
+  nullable `retention_attempted_at` et l'index `workspaces_retention_idx`.
+- Snapshot préproduction `snap-aged-truth-aseb4ly7`, nommé
+  `backup-pre-retention-0010-prod-20260915`, créé à 11:47:42 UTC puis relu.
+- Main `br-sweet-haze-aso0rivg` migrée avec le même mécanisme Drizzle : onze migrations,
+  colonne/index présents. Les 39 messages et 35 lignes du ledger du workspace
+  interne restent inchangés. Aucune purge n'a été déclenchée par la migration.
+- Dix branches à nouveau, dont le clone conservé. `.env.local` et les connexions
+  applicatives n'ont pas changé. La répétition de migration et le snapshot ne
+  constituent pas encore un exercice complet de restauration/bascule mesuré.
 - Le connecteur Stripe renvoie toujours `UNAUTHORIZED` / `invalid_grant`.
   L'éligibilité courante du compte YoDevMail n'a donc pas été revalidée. Les
   constats Stripe antérieurs ne sont pas présentés comme des preuves du jour.
@@ -213,7 +249,7 @@ le refus avec un autre compte/région, ni prétendre la chaîne applicative cert
 
 | Domaine | Condition de sortie |
 | --- | --- |
-| Rétention | Migration et déploiement réels, arriéré nul, alarmes reçues et cadence observée |
+| Rétention | Migration main faite ; déploiement, arriéré nul, alarmes reçues et cadence à observer |
 | AWS SES | État compte/région relu ; binding applicatif SES ; chaîne API-outbox-SQS-Lambda-SES-événements-DB-ledger certifiée en sandbox |
 | Autorisation AWS | Dossier transactionnel exact, réexamen sans contournement et accès production explicitement accordé |
 | Stripe | Compte éligible, fiscalité confirmée, cycle Checkout-webhook-abonnement-usage-facture certifié |

@@ -1,4 +1,4 @@
-import { CfnOutput, Duration, RemovalPolicy, Stack, type StackProps, Tags } from "aws-cdk-lib";
+import { CfnOutput, Duration, RemovalPolicy, Stack, type StackProps, Tags, Validations } from "aws-cdk-lib";
 import { CfnBudget } from "aws-cdk-lib/aws-budgets";
 import { TreatMissingData } from "aws-cdk-lib/aws-cloudwatch";
 import { SnsAction } from "aws-cdk-lib/aws-cloudwatch-actions";
@@ -12,7 +12,7 @@ import {
 } from "aws-cdk-lib/aws-iam";
 import { Key } from "aws-cdk-lib/aws-kms";
 import { FilterPattern, LogGroup, MetricFilter, RetentionDays } from "aws-cdk-lib/aws-logs";
-import { BlockPublicAccess, Bucket, BucketEncryption } from "aws-cdk-lib/aws-s3";
+import { BlockPublicAccess, Bucket, BucketEncryption, ObjectOwnership } from "aws-cdk-lib/aws-s3";
 import { Topic } from "aws-cdk-lib/aws-sns";
 import { EmailSubscription } from "aws-cdk-lib/aws-sns-subscriptions";
 import type { Construct } from "constructs";
@@ -31,6 +31,8 @@ export class YodevMailFoundationStack extends Stack {
 
   constructor(scope: Construct, id: string, props: YodevMailFoundationStackProps) {
     super(scope, id, props);
+    // Use source-scoped service policies for log delivery, never legacy S3 ACLs.
+    this.node.setContext("@aws-cdk/aws-s3:serverAccessLogsUseBucketPolicy", true);
 
     const issuerUrl = `https://oidc.vercel.com/${props.vercelTeam}`;
     const audience = `https://vercel.com/${props.vercelTeam}`;
@@ -116,6 +118,18 @@ export class YodevMailFoundationStack extends Stack {
       topicName: "yodev-mail-operations-alerts",
     });
 
+    const accessLogs = new Bucket(this, "S3AccessLogs", {
+      objectOwnership: ObjectOwnership.BUCKET_OWNER_ENFORCED,
+      blockPublicAccess: BlockPublicAccess.BLOCK_ALL,
+      encryption: BucketEncryption.S3_MANAGED,
+      enforceSSL: true,
+      lifecycleRules: [{ expiration: Duration.days(90) }],
+      removalPolicy: RemovalPolicy.RETAIN,
+    });
+    Validations.of(accessLogs).acknowledge({
+      id: "AwsSolutions-S1",
+      reason: "Dedicated S3 access-log destination. Logging its own deliveries would create recursive logs. Source CloudTrail bucket logging is enabled; this private SSE-S3 sink retains logs for 90 days.",
+    });
     const trailBucket = new Bucket(this, "CloudTrailLogs", {
       blockPublicAccess: BlockPublicAccess.BLOCK_ALL,
       encryption: BucketEncryption.KMS,
@@ -124,6 +138,8 @@ export class YodevMailFoundationStack extends Stack {
       lifecycleRules: [{ expiration: Duration.days(365) }],
       removalPolicy: RemovalPolicy.RETAIN,
       versioned: true,
+      serverAccessLogsBucket: accessLogs,
+      serverAccessLogsPrefix: "cloudtrail/",
     });
     const trailLogGroup = new LogGroup(this, "CloudTrailLogGroup", {
       encryptionKey: auditKey,
@@ -147,7 +163,7 @@ export class YodevMailFoundationStack extends Stack {
       trailLogsRole,
       "kms:DescribeKey",
       "kms:Encrypt",
-      "kms:GenerateDataKey*",
+      "kms:GenerateDataKey",
     );
     const rootUsage = new MetricFilter(this, "RootAccountUsageMetric", {
       filterPattern: FilterPattern.literal(

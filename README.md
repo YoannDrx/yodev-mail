@@ -145,7 +145,13 @@ npm run infra:deploy:prod
 
 The infrastructure scripts load the same ignored `.env.local` as the application and database scripts. Before every diff or deployment, keep `YODEV_MAIL_VERCEL_OIDC_PROVIDER_ARN` set to the existing provider and set `YODEV_MAIL_AWS_OPERATING_MODE_DEV` and `YODEV_MAIL_AWS_OPERATING_MODE_PROD` explicitly to `standby`, `certification` or `live`. Both environments are currently in `standby`; this is the safe default while no real client is active. `YODEV_MAIL_AWS_ACTIVE_ENVIRONMENTS` remains only as a backwards-compatible fallback when no explicit mode is set.
 
-`standby` removes SQS event-source mappings, disables every workload EventBridge rule, closes provider and billing runtime gates, and suppresses workload alarms. `certification` and `live` activate the transport; the independent product gates still determine which synthetic or commercial traffic may enter the system. Scheduled invocations are not retried by EventBridge because the next scheduled run is the bounded recovery attempt.
+`standby` removes SQS event-source mappings, disables business EventBridge rules,
+and closes provider and billing runtime gates. Attachment and retention purge
+schedules remain enabled, with their production maintenance alarms; other workload
+alarms are suppressed. `certification` and `live` activate the transport; the
+independent product gates still determine which synthetic or commercial traffic
+may enter the system. Scheduled invocations are not retried by EventBridge because
+the next scheduled run is the bounded recovery attempt.
 
 Set `YODEV_MAIL_BUDGET_ALERT_EMAILS` to the comma-separated operational
 recipients that must receive account budget alerts. This is distinct from

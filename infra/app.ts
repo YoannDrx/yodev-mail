@@ -1,9 +1,12 @@
 #!/usr/bin/env node
-import { App } from "aws-cdk-lib";
+import { App, Validations } from "aws-cdk-lib";
+import { AwsSolutionsChecks } from "cdk-nag";
 import { YodevMailFoundationStack } from "./foundation-stack";
 import { YodevMailStack } from "./yodev-mail-stack";
 
 const app = new App();
+const checks = new AwsSolutionsChecks(app, { verbose: true, writeSuppressionsToCloudFormation: true });
+Validations.of(app).addPlugins(checks);
 const region = "eu-west-3";
 const account = process.env.CDK_DEFAULT_ACCOUNT;
 const vercelTeam = String(app.node.tryGetContext("vercelTeam") ?? "yoanndrxs-projects");
@@ -72,3 +75,9 @@ for (const environment of ["dev", "prod"] as const) {
   );
   stack.addStackDependency(foundation);
 }
+
+app.synth();
+// Do not treat an empty CDK plugin report as a pass: execute the v3 checker.
+const compliance = checks.validateScope(app);
+console.log(JSON.stringify({ scope: "foundation-dev-prod", compliance }));
+if (!compliance.success) throw new Error("Main workload compliance checks failed");
