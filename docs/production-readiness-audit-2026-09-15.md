@@ -14,8 +14,11 @@ Postmark incertaines ; terminer la certification applicative SES ; obtenir une
 décision AWS favorable ; certifier facturation, restauration et exploitation.
 L'acceptation AWS et la délivrabilité à 100 % ne peuvent pas être promises.
 
-Ce rapport est la synthèse courante. Les anciens rapports restent des preuves
-datées, pas des états actuels à additionner. En particulier, la checklist du
+Ce rapport conserve la photographie initiale de l'audit, avant les actions
+autorisées ensuite. Pour l'état après reconnexion AWS, suppression Neon, migration,
+correctifs et publication, lire le [suivi d'implémentation](production-hardening-2026-09-15.md).
+Les anciens rapports restent des preuves datées, pas des états actuels à additionner.
+En particulier, la checklist du
 21 août mentionne un transport actif et des validations antérieures à plusieurs
 changements : elle ne doit pas servir seule de feu vert aujourd'hui.
 

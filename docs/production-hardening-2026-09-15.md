@@ -2,9 +2,11 @@
 
 ## État et périmètre
 
-Lot de code sur `codex/retention-postmark-hardening`, basé sur `main` (`100a917`).
-**Migration 0010 appliquée sur Neon main ; publication application/infra encore
-en attente. Le NO-GO commercial reste en vigueur.**
+Lot intégré par la [PR #50](https://github.com/YoannDrx/yodev-mail/pull/50), commit
+`17ee1576e88059e4959066beddc8176d0801bf8d`, le 15 septembre à 12:12:19 UTC.
+**Migration 0010 appliquée sur Neon main ; application, fondation et workers AWS
+prod publiés ; arriéré de contenus expirés résorbé.
+Le NO-GO commercial reste en vigueur.**
 Ce document complète l'[audit du jour](production-readiness-audit-2026-09-15.md),
 sans transformer les constats externes datés en validations nouvelles.
 
@@ -12,10 +14,55 @@ L'accès AWS SSO, initialement expiré, a été rétabli pendant cette intervent
 Stripe reste à reconnecter. Les contrôles AWS frais sont consignés ci-dessous.
 Après autorisation explicite, une ancienne branche Neon de test a été supprimée,
 la migration répétée sur un clone récent puis appliquée à main après snapshot.
-Aucune purge réelle, modification de droits pilote, activation d'envoi, paiement
-ou nouvelle demande d'accès production SES. Une tentative de correction des
+Aucune modification de droits pilote, activation d'envoi, paiement ou nouvelle
+demande d'accès production SES. Une tentative de correction des
 métadonnées SES a été refusée par l'API ; un dossier administratif lié demande
 maintenant à AWS le chemin supporté pour les corriger, sans lever le sandbox.
+
+## Résultat de publication vérifié
+
+- Vercel production `dpl_BW6LEXHinaTTwg4CPDi1zMLGeaSC`, `READY` depuis
+  12:13:04 UTC, commit `17ee157`, build environ 41 secondes, Next.js/Node 24.
+  `mail.yodev.fr/api/health` et `api.mail.yodev.fr/health` : HTTP 200,
+  `status=ok`, `database=ok`, version `17ee157`. Le placement retourné reste `iad1`.
+- Scan des logs `error`/`fatal` de ce déploiement depuis READY : aucun résultat
+  au contrôle initial. Ce n'est pas une observation de 72 h ni une preuve de
+  collecte exhaustive ; les drains externes n'ont pas été revalidés dans ce lot.
+- Foundation `UPDATE_COMPLETE` à 12:12:55 UTC ; Prod `UPDATE_COMPLETE` à 12:14:48 UTC.
+  Changesets préparés puis exécutés séparément, sans hotswap. Aucun remplacement
+  de données, clés, files ou rôles. Les seuls remplacements conditionnels signalés
+  concernaient les références des permissions Lambda et les métadonnées CDK.
+- Après déploiement, drift Foundation et Prod : `IN_SYNC`, zéro ressource en dérive.
+  Treize workers prod Node 24, tous `standby`, SES/Postmark désactivés ; seules
+  les règles AttachmentPurge et RetentionPurge sont actives, toutes les 30 minutes.
+  Dev reste sur son déploiement précédent, sans nouvelle maintenance activée.
+- Le paramètre runtime DB prod est un SecureString et pointe bien vers main Neon
+  migrée, comparaison effectuée en mémoire sans afficher de connexion/secrets.
+- Invocation réelle du worker de rétention : HTTP 200, un workspace traité,
+  zéro échec, zéro saturation. Deux passages réussis sont visibles dans les logs,
+  avec heartbeat et métriques d'échec/retard à zéro ; durées environ 470 et 222 ms.
+  EventBridge rapporte une invocation planifiée à 12:14 UTC.
+- Worker de pièces jointes : invocation HTTP 200, zéro objet expiré à traiter,
+  environ 384 ms. Cela ne prouve pas encore la suppression réelle d'une pièce jointe
+  S3 ni une première exécution de sa règle planifiée.
+- Contrôle du workspace interne après nettoyage : **3 vers 0 contenus expirés**,
+  zéro ancien message non anonymisé et zéro pièce jointe expirée ; **35 acceptations,
+  35 lignes de ledger, zéro discordance**, zéro réservation/outbox/callback en attente.
+  Les corps périmés ont été effacés conformément à la rétention. Un rollback de code
+  ne les rétablit pas ; le snapshot pré-migration est conservé pour la reprise.
+- Huit files prod vides. Sept alarmes actives, toutes OK après vérification.
+  Test direct SNS reçu dans Gmail à 12:10:16 UTC, puis test contrôlé d'une alarme
+  Lambda reçu à **12:17:34 UTC** (`yodev-cloudwatch-20260915-17ee157`). L'état
+  a été temporairement forcé avec `SetAlarmState`, sans erreur applicative injectée
+  ni modification de seuil/action. Retour automatique à OK observé.
+- La [CI main 34967513058](https://github.com/YoannDrx/yodev-mail/actions/runs/34967513058)
+  est entièrement verte. `internal-go:audit --baseline --expected-version=17ee157`
+  passe santé, rétention, cohérence DB, files et alarmes. Il reste `NOT_READY` :
+  le transport est volontairement en veille, zéro consommateur actif sur quatre.
+
+Limites restantes : répétition de cadence/consommation Neon, livraison effective
+des journaux d'accès S3, test complet des pièces jointes, transport SES applicatif,
+droits commerciaux AWS, Stripe, restauration/bascule mesurée et observation active.
 
 ## Corrections implémentées
 
@@ -82,7 +129,9 @@ Sept alarmes de maintenance existent en production, y compris standby :
 deux erreurs d'invocation EventBridge, deux erreurs Lambda, échecs de purge,
 saturation/interruption de lot et absence de heartbeat de rétention sur une heure.
 Les actions pointent vers le topic d'exploitation existant. Leur existence dans
-le template ne prouve pas la livraison des notifications : test SNS requis.
+le template ne prouve pas la livraison des notifications. Les tests réels SNS puis
+CloudWatch vers Gmail ont réussi ; la cadence durable et les scénarios de panne
+réelle restent à exercer.
 
 La permission `ses:GetEmailIdentity` de DomainHealth est limitée aux identités
 du compte et de la région du workload, au lieu de `Resource: *`.
@@ -118,14 +167,19 @@ global n'a été augmenté pour masquer les erreurs.
 - Contrôle de conformité principal Foundation/Dev/Prod : **vert** après corrections,
   avant déploiement ; détail et limites ci-dessous.
 
-La [PR #50](https://github.com/YoannDrx/yodev-mail/pull/50) reste en brouillon.
+La [PR #50](https://github.com/YoannDrx/yodev-mail/pull/50) est fusionnée.
 La [CI 34962727373](https://github.com/YoannDrx/yodev-mail/actions/runs/34962727373)
 est entièrement verte sur le commit de code `73f3e496350e1dc6a09557db9169eab1df22cb1c` :
 qualité, secrets, intégration PostgreSQL (**439 tests / 57 fichiers**), huit parcours
 publics et huit parcours authentifiés. GitGuardian et le déploiement Vercel de
-prévisualisation sont également verts ; aucune publication en production.
-Ces contrôles ne prouvent pas
-une livraison réelle SES/Postmark, une alerte SNS reçue ni un paiement réel Stripe.
+prévisualisation sont également verts. Ces preuves sont antérieures au dernier lot IAM.
+La [CI finale 34967184199](https://github.com/YoannDrx/yodev-mail/actions/runs/34967184199)
+du commit `5309af6` est entièrement verte : **443 tests / 57 fichiers**, **8 parcours
+publics + 8 authentifiés**, qualité, secrets, GitGuardian et preview Vercel.
+Un premier passage CI a exposé un compte non résolu dans les exceptions IAM du
+runner sans AWS ; la synthèse CI utilise désormais le compte fictif explicite
+`123456789012`, sans credential production et sans désactiver le contrôle.
+Ces contrôles ne prouvent pas une livraison réelle SES/Postmark ni un paiement Stripe.
 
 Migration additive `0010_retention_fair_sweep` : une colonne nullable et un index
 sur le registre des workspaces. Aucune donnée existante n'est supprimée par la
@@ -137,13 +191,13 @@ migration. Les purges seront exécutées uniquement par les workers après activ
    snapshot pré-migration créé. Les autres branches et sauvegardes sont conservées.
 3. Migration Drizzle 0010 appliquée sur main : journal 10 vers 11, colonne/index
    présents, 39 messages et 35 lignes de ledger inchangés sur le workspace interne.
-4. Attendre la CI du dernier commit et revoir le diff ; publier en standby. Le diff
+4. CI finale verte et diff revu ; application/Foundation/Prod publiés en standby. Le diff
    ne retire aucune ressource existante, ouvre seulement les deux règles de
    maintenance et ajoute sept alarmes. Il resserre aussi IAM, ajoute les destinations
    de logs S3 et met les treize workers prod à Node 24 avec SDK embarqué.
    Dev n'est pas publié avant sa propre prévalidation/migration.
-5. Vérifier exécution réelle, erreurs SQL, heartbeat, SNS et compteur de contenus
-   expirés du workspace interne. Réconcilier l'arriéré constaté dans l'audit.
+5. Exécution réelle, heartbeat, SNS et arriéré du workspace interne vérifiés :
+   trois contenus expirés effacés, invariants conservés. Tests S3 complets restants.
 6. Vérifier de nouveau à la prochaine échéance ; mesurer compute Neon et temps SQL.
 
 Rollback : conserver la colonne additive et revenir au code précédent si besoin.
@@ -166,7 +220,8 @@ comme une preuve. La validation complète retourne `success=true`, sans violatio
   destinations privées distinctes, SSE-S3, rétention 90 jours, conservées au retrait
   de stack. Livraison par service S3 avec SourceArn/SourceAccount ; ACL désactivées.
 - Node 24 stable et SDK AWS embarqué depuis le lockfile ; exécution Lambda réelle
-  à vérifier après publication, pas seulement compilation locale.
+  vérifiée sur les deux workers de maintenance après publication. Les autres
+  workers restent désactivés et leur certification d'intégration est distincte.
 - Les exceptions IAM5 concernent uniquement des motifs de ressources justifiés
   (objets du bucket, paramètres/identités/tenants par environnement, règle GuardDuty
   gérée). Aucune exception globale d'action IAM. Un test injecte `ses:*` dans un rôle
@@ -210,11 +265,11 @@ avec le rôle SSO existant `YoDevMailAdministrator`, sans root ni nouvelle clé 
   dans la correspondance ; réponse AWS encore attendue.
 - L'API Support renvoie `SubscriptionRequiredException` avec le plan Basic ;
   la console permet néanmoins de lire le dossier. Aucun abonnement acheté.
-- Les 26 workers dev/prod listés restent `standby`, `SES_ENABLED=false`,
-  `POSTMARK_ENABLED=false`. Toutes les règles EventBridge prod sont désactivées,
-  y compris les deux purges : la correction de ce lot n'est donc pas encore effective.
+- Les transports dev/prod restent en standby, `SES_ENABLED=false`,
+  `POSTMARK_ENABLED=false`. Après publication, les deux règles de purge prod sont
+  actives ; les huit autres règles prod restent désactivées.
 - Foundation, Dev et Prod sont `UPDATE_COMPLETE`. Drift frais Foundation/Prod :
-  `DETECTION_COMPLETE`, `IN_SYNC`, zéro ressource en dérive avant cette publication.
+  `DETECTION_COMPLETE`, `IN_SYNC`, zéro ressource en dérive avant et après publication.
 
 Un domaine vérifié est une brique technique valide, pas une autorisation commerciale.
 La communication AWS demande le chemin officiellement supporté pour corriger le
@@ -249,7 +304,7 @@ la chaîne applicative certifiée. La décision d'accès production reste négat
 
 | Domaine | Condition de sortie |
 | --- | --- |
-| Rétention | Migration main faite ; déploiement, arriéré nul, alarmes reçues et cadence à observer |
+| Rétention | Migration/déploiement faits, arriéré nul, alertes reçues ; cadence durable et pièces jointes à certifier |
 | AWS SES | État compte/région relu ; binding applicatif SES ; chaîne API-outbox-SQS-Lambda-SES-événements-DB-ledger certifiée en sandbox |
 | Autorisation AWS | Dossier transactionnel exact, réexamen sans contournement et accès production explicitement accordé |
 | Stripe | Compte éligible, fiscalité confirmée, cycle Checkout-webhook-abonnement-usage-facture certifié |
