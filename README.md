@@ -227,7 +227,7 @@ Runtime database, webhook and Stripe secrets are stored under `/yodev-mail-{envi
 
 The foundation stack creates an encrypted multi-region management CloudTrail, one-year CloudWatch/S3 retention, an immediate root-account alarm and staged account cost alerts. It does not record email data events.
 
-Better Auth uses a distinct `BETTER_AUTH_SECRET` and Google OAuth client in every environment. Public organization creation is disabled; the first organization is rebound to the existing workspace only for `AUTH_BOOTSTRAP_EMAIL`. Email/password stays disabled until the Postmark system Server is approved and configured.
+Better Auth uses a distinct `BETTER_AUTH_SECRET` and Google OAuth client in every environment. Public organization creation is disabled; the first organization is rebound to the existing workspace only for `AUTH_BOOTSTRAP_EMAIL`, which is required wherever sign-in runs and has no default. Email/password stays disabled until the Postmark system Server is approved and configured.
 
 See [architecture](docs/architecture.md), the [production runbook](docs/production-runbook.md)
 and the dated [production/commercial GO checklist](docs/archive/commercial-go-checklist-2026-08-18.md).
