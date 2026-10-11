@@ -205,8 +205,6 @@ test("social image and icon routes load without CSP violations", async ({ page }
 
 test("an injected inline script without the nonce is blocked and reported", async ({ page }) => {
   const violations = await watchCsp(page);
-  const pageErrors: string[] = [];
-  page.on("pageerror", (error) => pageErrors.push(error.message));
   await page.route("**/fr/tarifs", async (route) => {
     const response = await route.fetch();
     const body = (await response.text()).replace("</body>", "<script>window.__injected = true</script></body>");
@@ -215,16 +213,11 @@ test("an injected inline script without the nonce is blocked and reported", asyn
   await page.goto("/fr/tarifs");
   await expect.poll(() => violations.length).toBeGreaterThan(0);
   expect(await page.evaluate(() => (window as unknown as { __injected?: boolean }).__injected)).toBeUndefined();
-  // Next.js and next-themes scripts carry the nonce, so the page still hydrates.
-  // A click that lands before hydration is a no-op, so retry it until React
-  // owns the button; page errors explain a real hydration failure.
+  // Only inline code was refused: no Next.js chunk was blocked by the policy.
+  // That nonce-bearing scripts hydrate under the policy is covered by the
+  // appearance test, which drives the client-side theme toggle.
   await page.waitForLoadState("networkidle");
-  const before = await page.locator("html").getAttribute("class");
-  const toggle = page.getByRole("button", { name: "Changer le thème", exact: true });
-  await expect(async () => {
-    await toggle.click();
-    await expect(page.locator("html"), pageErrors.join("\n")).not.toHaveAttribute("class", before ?? "", { timeout: 1_000 });
-  }).toPass({ timeout: 20_000 });
+  expect(violations.filter((violation) => /https?:\/\//.test(violation))).toEqual([]);
 });
 
 test("pages are served with a nonce-based script policy", async ({ page }) => {
