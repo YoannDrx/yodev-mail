@@ -7,7 +7,7 @@ const baseURL = "http://localhost:3918";
 
 export default defineConfig({
   testDir: "./e2e",
-  testMatch: "authenticated.spec.ts",
+  testMatch: ["authenticated.spec.ts", "*.auth.spec.ts"],
   fullyParallel: false,
   workers: 1,
   timeout: 120_000,
