@@ -33,7 +33,7 @@ export default defineConfig({
       BETTER_AUTH_EMAIL_PASSWORD_ENABLED: "true",
       AUTH_BOOTSTRAP_EMAIL: "unused-bootstrap@example.invalid",
       API_KEY_PEPPER: randomBytes(32).toString("hex"),
-      WEBHOOK_SIGNING_SECRET: "",
+      WEBHOOK_SIGNING_SECRET: randomBytes(32).toString("hex"),
       AWS_PROFILE: "", AWS_ACCESS_KEY_ID: "", AWS_SECRET_ACCESS_KEY: "", AWS_SESSION_TOKEN: "",
       AWS_ROLE_ARN: "", AWS_ACCOUNT_ID: "", AWS_OIDC_AUDIENCE: "", AWS_EC2_METADATA_DISABLED: "true",
       AWS_EMAIL_QUEUE_URL: "", AWS_PROVIDER_EVENTS_QUEUE_URL: "", AWS_PROVIDER_PROVISIONING_QUEUE_URL: "",
