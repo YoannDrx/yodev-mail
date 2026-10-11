@@ -13,7 +13,8 @@ const schema = z.object({
   BETTER_AUTH_GOOGLE_CLIENT_ID: z.string().optional(),
   BETTER_AUTH_GOOGLE_CLIENT_SECRET: z.string().optional(),
   BETTER_AUTH_EMAIL_PASSWORD_ENABLED: z.enum(["true", "false"]).default("false"),
-  AUTH_BOOTSTRAP_EMAIL: z.string().email().default("yoann.andrieux@gmail.com"),
+  // No default: required lazily by the auth path (workers load this module too).
+  AUTH_BOOTSTRAP_EMAIL: z.string().trim().email().optional().or(z.literal("")),
   API_KEY_PEPPER: optionalSecret16,
   WEBHOOK_SIGNING_SECRET: optionalSecret16,
   AWS_REGION: z.string().default("eu-west-3"),

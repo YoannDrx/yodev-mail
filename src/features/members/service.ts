@@ -12,16 +12,29 @@ import {
   workspaces,
 } from "@/db/schema";
 import { sendAuthEmail } from "@/lib/auth-emails";
-import { env } from "@/lib/env";
 import { planCatalog } from "@/lib/plans";
+import { invitationUrl } from "@/features/members/invitation-link";
 
 type Database = ReturnType<typeof requireDb>;
 
 export const workspaceMemberLimit = planCatalog.beta.members;
 
-function invitationUrl(invitationId: string) {
-  const baseUrl = (env.NEXT_PUBLIC_APP_URL || "http://localhost:3000").replace(/\/$/, "");
-  return `${baseUrl}/fr/invitation?id=${encodeURIComponent(invitationId)}`;
+export type MemberErrorCode =
+  | "workspace_not_approved"
+  | "already_member"
+  | "seat_limit"
+  | "invitation_not_found"
+  | "member_not_found"
+  | "cannot_remove_self"
+  | "cannot_remove_owner"
+  | "member_already_removed";
+
+/** An expected refusal the interface explains; anything else is a failure. */
+export class MemberServiceError extends Error {
+  constructor(readonly code: MemberErrorCode, message: string) {
+    super(message);
+    this.name = "MemberServiceError";
+  }
 }
 
 export async function inviteWorkspaceMember(input: {
@@ -44,7 +57,9 @@ export async function inviteWorkspaceMember(input: {
         and ${workspaces.status} = 'approved'
       for update
     `);
-    if (!locked.rowCount) throw new Error("An approved workspace linked to Better Auth is required.");
+    if (!locked.rowCount) {
+      throw new MemberServiceError("workspace_not_approved", "An approved workspace linked to Better Auth is required.");
+    }
 
     const [existingMember] = await tx
       .select({ id: authMembers.id })
@@ -55,7 +70,7 @@ export async function inviteWorkspaceMember(input: {
         sql`lower(${authUsers.email}) = ${email}`,
       ))
       .limit(1);
-    if (existingMember) throw new Error("Cette adresse appartient déjà au workspace.");
+    if (existingMember) throw new MemberServiceError("already_member", "Cette adresse appartient déjà au workspace.");
 
     const [existingInvitation] = await tx
       .select({ id: authInvitations.id })
@@ -85,7 +100,7 @@ export async function inviteWorkspaceMember(input: {
       )),
     ]);
     if (members.total + pendingInvitations.total >= workspaceMemberLimit) {
-      throw new Error(`La limite de ${workspaceMemberLimit} membres, invitations en attente incluses, est atteinte.`);
+      throw new MemberServiceError("seat_limit", `La limite de ${workspaceMemberLimit} membres, invitations en attente incluses, est atteinte.`);
     }
 
     const id = randomUUID();
@@ -109,6 +124,7 @@ export async function inviteWorkspaceMember(input: {
     return { id, created: true };
   });
 
+  let delivered = true;
   try {
     await sendAuthEmail({
       actionUrl: invitationUrl(invitation.id),
@@ -116,26 +132,22 @@ export async function inviteWorkspaceMember(input: {
       kind: "organization_invitation",
       to: email,
     });
-    await input.db.insert(auditEvents).values({
-      workspaceId: input.workspaceId,
-      actorUserId: input.actorUserId,
-      action: "workspace.member_invitation_sent",
-      entityType: "auth_invitation",
-      entityId: invitation.id,
-      metadata: { role: "member", resent: !invitation.created },
-    });
   } catch {
-    await input.db.insert(auditEvents).values({
-      workspaceId: input.workspaceId,
-      actorUserId: input.actorUserId,
-      action: "workspace.member_invitation_delivery_failed",
-      entityType: "auth_invitation",
-      entityId: invitation.id,
-      metadata: { errorCode: "invitation_delivery_failed" },
-    });
-    throw new Error("L’invitation est enregistrée, mais son email n’a pas pu être envoyé. Vous pouvez la renvoyer.");
+    delivered = false;
   }
-  return invitation;
+  // The invitation is recorded either way: when the system email is off or
+  // fails, the caller offers the audited copy-link fallback instead.
+  await input.db.insert(auditEvents).values({
+    workspaceId: input.workspaceId,
+    actorUserId: input.actorUserId,
+    action: delivered ? "workspace.member_invitation_sent" : "workspace.member_invitation_delivery_failed",
+    entityType: "auth_invitation",
+    entityId: invitation.id,
+    metadata: delivered
+      ? { role: "member", resent: !invitation.created }
+      : { errorCode: "invitation_delivery_failed" },
+  });
+  return { ...invitation, delivered };
 }
 
 export async function cancelWorkspaceMemberInvitation(input: {
@@ -152,7 +164,7 @@ export async function cancelWorkspaceMemberInvitation(input: {
       eq(authInvitations.status, "pending"),
       sql`exists(select 1 from ${workspaces} where ${workspaces.id} = ${input.workspaceId} and ${workspaces.authOrganizationId} = ${input.organizationId})`,
     )).returning({ id: authInvitations.id });
-    if (!canceled.length) throw new Error("Invitation introuvable ou déjà traitée.");
+    if (!canceled.length) throw new MemberServiceError("invitation_not_found", "Invitation introuvable ou déjà traitée.");
     await tx.insert(auditEvents).values({
       workspaceId: input.workspaceId,
       actorUserId: input.actorUserId,
@@ -181,16 +193,18 @@ export async function removeWorkspaceMember(input: {
         eq(authMembers.organizationId, input.organizationId),
       ))
       .limit(1);
-    if (!target) throw new Error("Membre introuvable.");
-    if (target.userId === input.actorUserId) throw new Error("Vous ne pouvez pas vous retirer vous-même du workspace.");
+    if (!target) throw new MemberServiceError("member_not_found", "Membre introuvable.");
+    if (target.userId === input.actorUserId) {
+      throw new MemberServiceError("cannot_remove_self", "Vous ne pouvez pas vous retirer vous-même du workspace.");
+    }
     if (target.role.split(",").map((role) => role.trim()).includes("owner")) {
-      throw new Error("Le propriétaire du workspace ne peut pas être retiré.");
+      throw new MemberServiceError("cannot_remove_owner", "Le propriétaire du workspace ne peut pas être retiré.");
     }
     const removed = await tx.delete(authMembers).where(and(
       eq(authMembers.id, input.memberId),
       eq(authMembers.organizationId, input.organizationId),
     )).returning({ id: authMembers.id });
-    if (!removed.length) throw new Error("Le membre a déjà été retiré.");
+    if (!removed.length) throw new MemberServiceError("member_already_removed", "Le membre a déjà été retiré.");
     await tx.insert(auditEvents).values({
       workspaceId: input.workspaceId,
       actorUserId: input.actorUserId,

@@ -12,6 +12,7 @@ import * as schema from "@/db/schema";
 import { authInvitations } from "@/db/schema";
 import { reconcileAcceptedOwnerInvitation } from "@/features/onboarding/reconcile-owner";
 import { sendAuthEmail } from "@/lib/auth-emails";
+import { disabledAuthPaths, INVITATION_REQUIRED } from "@/lib/auth-policy";
 import { env } from "@/lib/env";
 import { emitOperationalMetric } from "@/lib/operational-metric";
 
@@ -31,9 +32,19 @@ function trustedOrigins() {
   return Array.from(new Set([appUrl(), ...configured]));
 }
 
-async function mayCreateUser(email: string) {
+/**
+ * The platform administrator's Google address. Required by the auth path only:
+ * the Lambda workers load the same env module without setting it.
+ */
+export function bootstrapEmail() {
+  const value = env.AUTH_BOOTSTRAP_EMAIL?.trim().toLowerCase();
+  if (!value) throw new Error("AUTH_BOOTSTRAP_EMAIL is required for authentication.");
+  return value;
+}
+
+export async function mayCreateUser(email: string) {
   const normalizedEmail = email.trim().toLowerCase();
-  if (normalizedEmail === env.AUTH_BOOTSTRAP_EMAIL.toLowerCase()) return true;
+  if (normalizedEmail === bootstrapEmail()) return true;
   const invitation = await requireDb()
     .select({ id: authInvitations.id })
     .from(authInvitations)
@@ -55,6 +66,7 @@ function createAuth() {
   if (!env.BETTER_AUTH_GOOGLE_CLIENT_ID || !env.BETTER_AUTH_GOOGLE_CLIENT_SECRET) {
     throw new Error("Google OAuth credentials are required for authentication.");
   }
+  bootstrapEmail();
 
   const baseURL = appUrl();
   const hostname = new URL(baseURL).hostname;
@@ -64,6 +76,11 @@ function createAuth() {
     appName: "Mail by Yodev",
     baseURL,
     secret: env.BETTER_AUTH_SECRET,
+    // Every OAuth failure Better Auth cannot attribute to a request (missing or
+    // expired state, cancelled consent) lands on the sign-in page with its code
+    // instead of `/?error=`. The proxy adds the visitor's locale.
+    onAPIError: { errorURL: `${baseURL}/connexion` },
+    disabledPaths: disabledAuthPaths({ emailPasswordEnabled }),
     database: drizzleAdapter(requireDb(), {
       provider: "pg",
       schema,
@@ -99,19 +116,26 @@ function createAuth() {
     },
     emailAndPassword: {
       enabled: emailPasswordEnabled,
+      // Local accounts are never self-registered: an unverified password
+      // account could otherwise pre-empt the invited owner's Google sign-in.
+      disableSignUp: true,
       minPasswordLength: 12,
       maxPasswordLength: 128,
       requireEmailVerification: true,
       resetPasswordTokenExpiresIn: 60 * 15,
       revokeSessionsOnPasswordReset: true,
-      sendResetPassword: async ({ user, url }) => {
-        await sendAuthEmail({
-          actionUrl: url,
-          intro: "Une réinitialisation de mot de passe a été demandée pour votre compte.",
-          kind: "password_reset",
-          to: user.email,
-        });
-      },
+      // Better Auth only checks that this callback exists before sending a
+      // reset email, so it must not exist while passwords are disabled.
+      sendResetPassword: emailPasswordEnabled
+        ? async ({ user, url }) => {
+            await sendAuthEmail({
+              actionUrl: url,
+              intro: "Une réinitialisation de mot de passe a été demandée pour votre compte.",
+              kind: "password_reset",
+              to: user.email,
+            });
+          }
+        : undefined,
     },
     emailVerification: {
       expiresIn: 60 * 15,
@@ -132,8 +156,11 @@ function createAuth() {
         create: {
           before: async (user) => {
             if (!(await mayCreateUser(user.email))) {
+              // Better Auth turns this message into the `error` code of the
+              // OAuth redirect, so it must stay a stable machine code.
               throw new APIError("FORBIDDEN", {
-                message: "L’accès à Mail by Yodev se fait uniquement sur invitation.",
+                code: INVITATION_REQUIRED,
+                message: INVITATION_REQUIRED,
               });
             }
           },

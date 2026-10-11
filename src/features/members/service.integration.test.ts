@@ -117,6 +117,38 @@ describe("workspace member lifecycle", () => {
     expect(dependencies.sendAuthEmail).toHaveBeenCalledTimes(3);
   });
 
+  it("keeps the invitation and reports the failed delivery instead of throwing", async () => {
+    const context = await seedWorkspace();
+    dependencies.sendAuthEmail.mockRejectedValue(new Error("System authentication emails are not enabled."));
+    const invitation = await inviteWorkspaceMember({
+      actorUserId: context.ownerUserId,
+      db,
+      email: "member@example.test",
+      organizationId: context.organizationId,
+      workspaceId: context.workspaceId,
+    });
+    expect(invitation).toMatchObject({ created: true, delivered: false });
+    expect(await db.select().from(authInvitations).where(eq(authInvitations.id, invitation.id))).toHaveLength(1);
+    const audits = await db.select().from(auditEvents).where(eq(auditEvents.workspaceId, context.workspaceId));
+    expect(audits.map((event) => event.action).sort()).toEqual([
+      "workspace.member_invitation_created",
+      "workspace.member_invitation_delivery_failed",
+    ]);
+  });
+
+  it("refuses an unapproved workspace with a stable code", async () => {
+    const context = await seedWorkspace();
+    await db.update(workspaces).set({ status: "pending_review" }).where(eq(workspaces.id, context.workspaceId));
+    await expect(inviteWorkspaceMember({
+      actorUserId: context.ownerUserId,
+      db,
+      email: "member@example.test",
+      organizationId: context.organizationId,
+      workspaceId: context.workspaceId,
+    })).rejects.toMatchObject({ code: "workspace_not_approved" });
+    expect(await db.select().from(authInvitations)).toHaveLength(0);
+  });
+
   it("cancels a pending invitation and frees its reserved seat", async () => {
     const context = await seedWorkspace();
     const invitation = await inviteWorkspaceMember({
