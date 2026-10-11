@@ -513,6 +513,33 @@ describe("Mail by Yodev AWS infrastructure", () => {
     );
   });
 
+  test("alarms on Postmark bounce and complaint rates through the operations topic", () => {
+    const alarms = Object.values(activeProductionWorkload.findResources("AWS::CloudWatch::Alarm"));
+    const byExpression = (fragment: string) => alarms.filter((alarm) => (alarm.Properties.Metrics ?? [])
+      .some((metric: { Expression?: string }) => metric.Expression?.includes(fragment)));
+    const [bounce] = byExpression("FILL(bounces, 0) / FILL(accepted, 1)");
+    const [complaint] = byExpression("FILL(complaints, 0) / FILL(accepted, 1)");
+    expect(bounce?.Properties).toMatchObject({ Threshold: 0.05, EvaluationPeriods: 1, TreatMissingData: "notBreaching" });
+    expect(complaint?.Properties).toMatchObject({ Threshold: 0.001, ComparisonOperator: "GreaterThanOrEqualToThreshold" });
+    for (const alarm of [bounce, complaint]) {
+      expect(alarm.Properties.AlarmActions).toHaveLength(1);
+      const counters = alarm.Properties.Metrics.filter((metric: { MetricStat?: unknown }) => metric.MetricStat);
+      expect(counters.map((metric: { MetricStat: { Metric: { MetricName: string } } }) => metric.MetricStat.Metric.MetricName).sort())
+        .toEqual(["ProviderAccepted", "ProviderComplaint", "ProviderHardBounce"]);
+      for (const metric of counters) {
+        expect(metric.MetricStat.Metric.Namespace).toBe("Yodev/Mail");
+        expect(metric.MetricStat.Metric.Dimensions).toEqual([
+          { Name: "Environment", Value: "prod" },
+          { Name: "Provider", Value: "postmark" },
+        ]);
+      }
+    }
+    // SES stays frozen, not removed: its account reputation alarms remain.
+    activeProductionWorkload.hasResourceProperties("AWS::CloudWatch::Alarm", Match.objectLike({ MetricName: "Reputation.BounceRate", Namespace: "AWS/SES" }));
+    expect(Object.values(standbyProductionWorkload.findResources("AWS::CloudWatch::Alarm"))
+      .filter((alarm) => JSON.stringify(alarm.Properties.Metrics ?? []).includes("ProviderHardBounce"))).toHaveLength(0);
+  });
+
   test("uses two-out-of-three error-rate alarms for active workers", () => {
     activeProductionWorkload.hasResourceProperties(
       "AWS::CloudWatch::Alarm",
