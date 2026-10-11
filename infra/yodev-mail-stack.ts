@@ -437,7 +437,55 @@ export class YodevMailStack extends Stack {
     const unknownOutcomes = new Metric({ metricName: "ProviderOutcomeUnknown", namespace: "Yodev/Mail", dimensionsMap: { Environment: props.environment }, period: Duration.minutes(5), statistic: "Sum" });
     const webhookTerminalFailures = new Metric({ metricName: "CustomerWebhookTerminalFailure", namespace: "Yodev/Mail", dimensionsMap: { Environment: props.environment }, period: Duration.minutes(5), statistic: "Sum" });
     const purgeFailures = new Metric({ metricName: "AttachmentPurgeFailure", namespace: "Yodev/Mail", dimensionsMap: { Environment: props.environment }, period: Duration.minutes(5), statistic: "Sum" });
+    // Postmark exposes no CloudWatch reputation metrics. The provider-events
+    // and send workers emit platform-wide counters per provider (EMF, no tenant
+    // or address dimension); see src/features/providers/reputation-metrics.ts.
+    const providerReputation = (provider: "postmark") => {
+      const period = Duration.hours(1);
+      const counter = (metricName: string) => new Metric({
+        namespace: "Yodev/Mail",
+        metricName,
+        dimensionsMap: { Environment: props.environment, Provider: provider },
+        period,
+        statistic: "Sum",
+      });
+      const usingMetrics = {
+        accepted: counter("ProviderAccepted"),
+        bounces: counter("ProviderHardBounce"),
+        complaints: counter("ProviderComplaint"),
+      };
+      return {
+        // Postmark reviews accounts above a 10% bounce rate: alert at half of
+        // it once the hour has enough volume, or on 10 hard bounces below it.
+        bounceRate: new MathExpression({
+          expression: "IF(FILL(accepted, 0) >= 200, FILL(bounces, 0) / FILL(accepted, 1), IF(FILL(bounces, 0) >= 10, 1, 0))",
+          label: `${provider} hard-bounce rate`,
+          period,
+          usingMetrics,
+        }),
+        // Postmark expects complaints below 0.1%. Under 1,000 accepted emails
+        // in the hour, a single complaint already crosses it.
+        complaintRate: new MathExpression({
+          expression: "IF(FILL(accepted, 0) >= 1000, FILL(complaints, 0) / FILL(accepted, 1), IF(FILL(complaints, 0) >= 1, 1, 0))",
+          label: `${provider} complaint rate`,
+          period,
+          usingMetrics,
+        }),
+      };
+    };
+    const postmarkReputation = providerReputation("postmark");
     if (monitoringEnabled) {
+      const postmarkBounce = postmarkReputation.bounceRate.createAlarm(this, "PostmarkBounceRateAlarm", {
+        alarmDescription: "Postmark hard-bounce rate over 5% in one hour (or 10 hard bounces at low volume).",
+        evaluationPeriods: 1, threshold: 0.05, treatMissingData: TreatMissingData.NOT_BREACHING,
+      });
+      const postmarkComplaint = postmarkReputation.complaintRate.createAlarm(this, "PostmarkComplaintRateAlarm", {
+        alarmDescription: "Postmark spam-complaint rate at or over 0.1% in one hour (any complaint at low volume).",
+        comparisonOperator: ComparisonOperator.GREATER_THAN_OR_EQUAL_TO_THRESHOLD,
+        evaluationPeriods: 1, threshold: 0.001, treatMissingData: TreatMissingData.NOT_BREACHING,
+      });
+      postmarkBounce.addAlarmAction(new SnsAction(props.alertTopic));
+      postmarkComplaint.addAlarmAction(new SnsAction(props.alertTopic));
       const bounce = bounceRate.createAlarm(this, "SesBounceRateAlarm", { evaluationPeriods: 1, threshold: 0.02, treatMissingData: TreatMissingData.IGNORE });
       const complaint = complaintRate.createAlarm(this, "SesComplaintRateAlarm", { evaluationPeriods: 1, threshold: 0.001, treatMissingData: TreatMissingData.IGNORE });
       bounce.addAlarmAction(new SnsAction(props.alertTopic));
@@ -478,6 +526,7 @@ export class YodevMailStack extends Stack {
       new GraphWidget({ left: queues.map((pair) => pair.main.metricApproximateAgeOfOldestMessage()), title: "Provider-neutral queue age", width: 12 }),
       new GraphWidget({ left: workerFunctions.map((fn) => fn.metricErrors()), title: "Lambda errors", width: 12 }),
       new GraphWidget({ left: [bounceRate, complaintRate], title: "SES account reputation", width: 12 }),
+      new GraphWidget({ left: [postmarkReputation.bounceRate, postmarkReputation.complaintRate], title: "Postmark reputation (hourly)", width: 12 }),
       new GraphWidget({ left: [attachmentRejections, clientProvisioningFailures, unknownOutcomes, purgeFailures, webhookTerminalFailures], title: "Security and ambiguous outcomes", width: 12 }),
     );
 
