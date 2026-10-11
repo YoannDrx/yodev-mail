@@ -1,0 +1,38 @@
+name: Uptime
+# External availability probe. A failed scheduled run emails whoever last
+# changed this schedule (GitHub notification settings), which is the alert.
+on:
+  schedule:
+    - cron: "*/10 * * * *"
+  workflow_dispatch:
+permissions:
+  contents: read
+concurrency:
+  group: uptime
+  cancel-in-progress: false
+jobs:
+  probe:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    strategy:
+      fail-fast: false
+      matrix:
+        url:
+          - https://mail.yodev.fr/api/health
+          - https://api.mail.yodev.fr/health
+    steps:
+      - name: Probe ${{ matrix.url }}
+        env:
+          URL: ${{ matrix.url }}
+        run: |
+          # Three attempts absorb a single cold start or network blip; the
+          # body must report a reachable database, not just an HTTP 200.
+          for attempt in 1 2 3; do
+            if body=$(curl -fsS --max-time 15 "$URL") && echo "$body" | grep -q '"database":"ok"'; then
+              echo "ok: $body"
+              exit 0
+            fi
+            echo "attempt $attempt failed: ${body:-no response}"
+            sleep 20
+          done
+          exit 1
