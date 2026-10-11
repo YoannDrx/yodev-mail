@@ -12,8 +12,7 @@ import {
   authUsers,
   workspaces,
 } from "@/db/schema";
-import { getAuth } from "@/lib/auth";
-import { env } from "@/lib/env";
+import { bootstrapEmail, getAuth } from "@/lib/auth";
 
 type AuthSession = {
   session: {
@@ -34,8 +33,20 @@ export class WorkspaceAccessError extends Error {
   }
 }
 
+/**
+ * The bootstrap administrator signed in for the first time while several
+ * workspaces already exist: which one to attach is an operator decision, so
+ * the account is left unattached and the sign-in page explains it.
+ */
+export class BootstrapWorkspaceAmbiguousError extends WorkspaceAccessError {
+  constructor() {
+    super("The bootstrap workspace could not be identified unambiguously.");
+    this.name = "BootstrapWorkspaceAmbiguousError";
+  }
+}
+
 async function bootstrapOwner(session: AuthSession) {
-  if (session.user.email.toLowerCase() !== env.AUTH_BOOTSTRAP_EMAIL.toLowerCase()) {
+  if (session.user.email.trim().toLowerCase() !== bootstrapEmail()) {
     return null;
   }
 
@@ -53,9 +64,7 @@ async function bootstrapOwner(session: AuthSession) {
       .from(workspaces)
       .where(isNull(workspaces.deletedAt))
       .limit(2);
-    if (candidates.length !== 1) {
-      throw new Error("The bootstrap workspace could not be identified unambiguously.");
-    }
+    if (candidates.length !== 1) throw new BootstrapWorkspaceAmbiguousError();
 
     let organizationId = candidates[0].authOrganizationId;
     if (!organizationId) {

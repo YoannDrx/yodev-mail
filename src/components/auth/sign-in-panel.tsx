@@ -1,12 +1,14 @@
 "use client";
 
 import { useState } from "react";
+import { useHydrated } from "@/components/auth/use-hydrated";
 import { KeyRound } from "lucide-react";
 import Link from "next/link";
 import { authClient } from "@/lib/auth-client";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
+import { FormStatus } from "@/components/form-status";
 import { localized, localizedPath, type Locale } from "@/i18n/config";
 
 export function SignInPanel({
@@ -23,17 +25,20 @@ export function SignInPanel({
     en: { oauthError: "Sign-in failed. Check that you have an invitation.", passkeyError: "No valid passkey was found for this domain.", credentialsError: "Invalid credentials or unverified email address.", eyebrow: "PRIVATE CONSOLE", title: "Sign in to Yodev Mail", intro: "Access is limited to the administrator account and invited members.", google: "Continue with Google", passkey: "Use a passkey", email: "Email address", password: "Password", emailSignIn: "Sign in with email", forgot: "Forgot your password?" },
   });
   const localizedCallbackURL = localizedPath(locale, callbackURL);
-  const [email, setEmail] = useState("");
-  const [password, setPassword] = useState("");
+  // Keep the requested page if Google sends the visitor back with an error.
+  const errorCallbackURL = `${localizedPath(locale, "/connexion")}?erreur=oauth${
+    callbackURL === "/dashboard" ? "" : `&next=${encodeURIComponent(callbackURL)}`
+  }`;
   const [error, setError] = useState("");
   const [pending, setPending] = useState(false);
+  const hydrated = useHydrated();
 
   async function google() {
     setPending(true);
     setError("");
     const result = await authClient.signIn.social({
       callbackURL: localizedCallbackURL,
-      errorCallbackURL: `${localizedPath(locale, "/connexion")}?erreur=oauth`,
+      errorCallbackURL,
       provider: "google",
     });
     if (result.error) {
@@ -54,11 +59,18 @@ export function SignInPanel({
     window.location.assign(localizedCallbackURL);
   }
 
-  async function passwordSignIn(event: React.FormEvent) {
+  // Read the fields from the form itself: a password manager or a fast user may
+  // fill them before hydration, when React state would still be empty.
+  async function passwordSignIn(event: React.FormEvent<HTMLFormElement>) {
     event.preventDefault();
+    const fields = new FormData(event.currentTarget);
     setPending(true);
     setError("");
-    const result = await authClient.signIn.email({ email, password, callbackURL: localizedCallbackURL });
+    const result = await authClient.signIn.email({
+      email: String(fields.get("email") ?? ""),
+      password: String(fields.get("password") ?? ""),
+      callbackURL: localizedCallbackURL,
+    });
     if (result.error) {
       setError(copy.credentialsError);
       setPending(false);
@@ -72,27 +84,28 @@ export function SignInPanel({
       <p className="mt-3 text-sm leading-6 text-muted-foreground">
         {copy.intro}
       </p>
-      <Button className="mt-7 w-full" disabled={pending} onClick={google} type="button">
+      <Button className="mt-7 w-full" disabled={pending || !hydrated} onClick={google} type="button">
         {copy.google}
       </Button>
-      <Button className="mt-3 w-full" disabled={pending} onClick={passkey} type="button" variant="outline">
+      <Button className="mt-3 w-full" disabled={pending || !hydrated} onClick={passkey} type="button" variant="outline">
         <KeyRound /> {copy.passkey}
       </Button>
       {emailPasswordEnabled ? (
-        <form className="mt-6 grid gap-4 border-t pt-6" onSubmit={passwordSignIn}>
+        // POST so that a submit before hydration never puts the password in the URL.
+        <form className="mt-6 grid gap-4 border-t pt-6" method="post" onSubmit={passwordSignIn}>
           <div className="grid gap-2">
             <Label htmlFor="email">{copy.email}</Label>
-            <Input autoComplete="email" id="email" onChange={(event) => setEmail(event.target.value)} required type="email" value={email} />
+            <Input autoComplete="email" id="email" name="email" required type="email" />
           </div>
           <div className="grid gap-2">
             <Label htmlFor="password">{copy.password}</Label>
-            <Input autoComplete="current-password" id="password" minLength={12} onChange={(event) => setPassword(event.target.value)} required type="password" value={password} />
+            <Input autoComplete="current-password" id="password" minLength={12} name="password" required type="password" />
           </div>
-          <Button disabled={pending} type="submit" variant="secondary">{copy.emailSignIn}</Button>
+          <Button disabled={pending || !hydrated} type="submit" variant="secondary">{copy.emailSignIn}</Button>
           <Link className="text-center text-sm text-primary underline-offset-4 hover:underline" href={localizedPath(locale, "/mot-de-passe-oublie")}>{copy.forgot}</Link>
         </form>
       ) : null}
-      {error ? <p aria-live="polite" className="mt-4 text-sm text-destructive">{error}</p> : null}
+      <FormStatus className="mt-4" message={error} ok={false} />
     </div>
   );
 }
