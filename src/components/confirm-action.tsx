@@ -1,6 +1,6 @@
 "use client";
 
-import type { ReactNode } from "react";
+import { useState, type ReactNode } from "react";
 import { useFormStatus } from "react-dom";
 import {
   AlertDialog,
@@ -48,8 +48,15 @@ export function ConfirmAction({
   pendingLabel: string;
   cancelLabel: string;
 }) {
+  const [open, setOpen] = useState(false);
+  // Close once the action settles: the trigger usually stays on the page after
+  // revalidation, so an uncontrolled dialog would remain open over the result.
+  const submit = async (formData: FormData) => {
+    await action(formData);
+    setOpen(false);
+  };
   return (
-    <AlertDialog>
+    <AlertDialog onOpenChange={setOpen} open={open}>
       <AlertDialogTrigger asChild>
         <Button disabled={disabled} size="sm" type="button" variant={triggerVariant}>
           {trigger}
@@ -60,7 +67,7 @@ export function ConfirmAction({
           <AlertDialogTitle>{title}</AlertDialogTitle>
           <AlertDialogDescription>{description}</AlertDialogDescription>
         </AlertDialogHeader>
-        <form action={action}>
+        <form action={submit}>
           {Object.entries(fields).map(([name, value]) => (
             <input key={name} name={name} type="hidden" value={value} />
           ))}
