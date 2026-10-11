@@ -131,8 +131,8 @@ All externally consequential capabilities are fail-closed. New environments star
 - Queue bodies, object keys, SES tags and operational logs contain opaque identifiers only.
 - Message bodies are scheduled to expire two hours before the 30-day maximum; attachments before the 24-hour maximum. Recipient/sender fields and suppression addresses are redacted after 90 days, and normalized technical events are deleted after 90 days. Privacy maintenance runs every thirty minutes even in standby; retention sweeps are bounded and rotate by workspace. Production alarms cover failures, backlog and missing retention heartbeats. Apply migration `0010_retention_fair_sweep` before deploying the updated app or retention worker.
 - No open pixel or link rewriting is enabled.
-- A first complaint, three hard bounces, or a hard-bounce rate of at least 2% after 50 accepted messages pauses the workspace.
-- Initial quotas are 50/day, 200/day after three clean days and 500/day after seven clean days.
+- Automatic pause is evaluated on the last 7 days (`reputationPolicy` in `src/features/sending/policy.ts`): below 1,000 accepted messages a single complaint pauses, above it a complaint rate of 0.1%; below 150 accepted messages three hard bounces pause, above it a hard-bounce rate of 2%.
+- Daily limits start at 50/day and progress through warmup tiers up to 10,000/day after clean samples (`src/features/sending/warmup.ts`). An operator can pin a limit from the admin console; the warmup worker and billing events never overwrite a pinned limit.
 
 ## AWS activation
 

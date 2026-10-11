@@ -23,6 +23,7 @@ export function enLegalPages({ plan, vat, support, abuse }: LegalFacts): Record<
           "Sessions: IP address and browser associated with each sign-in session.",
           "Workspace and billing: company name, domains, settings, subscription, and Stripe identifiers. Card data is processed directly by Stripe.",
           "Security: log of administrative decisions and rate-limit counters.",
+          "Beta applications: company, name, work email address, website, use case, expected volume, and a non-reversible fingerprint of the IP address to limit abuse.",
           "On behalf of customers: sender and recipient addresses and names, transactional content, temporary attachments, and sanitized technical events.",
         ]],
         ["Purposes and legal bases", [
@@ -30,6 +31,7 @@ export function enLegalPages({ plan, vat, support, abuse }: LegalFacts): Record<
           "Securing the service, preventing abuse, and protecting sending reputation: legitimate interest of Yodev, its customers, and recipients (Art. 6(1)(f)).",
           "Billing usage and keeping accounts: performance of the contract and legal obligation (Art. 6(1)(b) and 6(1)(c)).",
           "Answering support requests and reports: performance of the contract or legitimate interest.",
+          "Reviewing a beta application: pre-contractual steps taken at your request (Art. 6(1)(b)).",
           "Delivering customers’ messages: processing carried out as a processor; the legal basis is determined by the customer acting as controller.",
         ]],
         ["Retention periods", [
@@ -38,7 +40,9 @@ export function enLegalPages({ plan, vat, support, abuse }: LegalFacts): Record<
           "Addresses and names linked to messages: replaced after 90 days; technical events: deleted after 90 days.",
           "Suppressions (bounces, complaints): the clear-text address is removed after 90 days; only a non-reversible fingerprint is kept to prevent another send.",
           "Sign-in sessions: 7 days, extended on use; verification and reset links: 15 minutes.",
-          "Account and workspace data: for as long as the service is used, then deleted on request, subject to the obligations below.",
+          "Account and workspace data: for as long as the service is used. The owner can export and then delete the workspace, and anyone can delete their own account, from the console settings, subject to the obligations below.",
+          "Beta applications: 12 months; the IP address fingerprint is erased after 30 days.",
+          "Administrative decision log: 13 months. Sending attempts: 90 days. Daily usage counters: 25 months.",
           "Invoices and accounting records: 10 years (Article L123-22 of the French Commercial Code).",
         ]],
         ["Cookies and local storage", [
@@ -49,7 +53,7 @@ export function enLegalPages({ plan, vat, support, abuse }: LegalFacts): Record<
           "No audience measurement, advertising, or third-party tracking cookie is set. Because these items are strictly necessary or store a preference the user asked for, no consent is required and no banner is shown. Google sign-in and Stripe payment pages apply their own policies.",
         ]],
         ["Recipients and transfers", "Data is accessible to Yodev and to the providers listed on the subprocessor page, together with their location. Some are established in the United States; any transfer outside the European Economic Area is governed by those providers’ data processing agreements."],
-        ["Your rights", `You may request access, correction, deletion, restriction, or portability of your data, or object to processing based on legitimate interest, by writing to ${support}. Requests are answered within one month. For messages sent by a customer, contact that customer first; Yodev forwards your request to them. You may lodge a complaint with the CNIL, the French data protection authority.`],
+        ["Your rights", `From the console settings, a workspace owner can export and delete the workspace, and every member can delete their own account. You may also request access, correction, deletion, restriction, or portability of your data, or object to processing based on legitimate interest, by writing to ${support}. Requests are answered within one month. For messages sent by a customer, contact that customer first; Yodev forwards your request to them. You may lodge a complaint with the CNIL, the French data protection authority.`],
       ],
     },
     cgu: {

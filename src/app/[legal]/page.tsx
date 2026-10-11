@@ -31,6 +31,7 @@ function frPages({ plan, vat, support, abuse }: LegalFacts): Record<string, Lega
           "Sessions : adresse IP et navigateur associés à chaque session de connexion.",
           "Workspace et facturation : raison sociale, domaines, paramètres, abonnement et identifiants Stripe. Les données de carte sont traitées directement par Stripe.",
           "Sécurité : journal des décisions administratives et compteurs de limitation de débit.",
+          "Candidature à la bêta : entreprise, nom, adresse email professionnelle, site, cas d’usage, volume attendu, et une empreinte non réversible de l’adresse IP pour limiter les abus.",
           "Pour le compte des clients : adresses et noms d’expéditeur et de destinataire, contenu transactionnel, pièces jointes temporaires et événements techniques expurgés.",
         ]],
         ["Finalités et bases légales", [
@@ -38,6 +39,7 @@ function frPages({ plan, vat, support, abuse }: LegalFacts): Record<string, Lega
           "Sécuriser le service, prévenir les abus et protéger la réputation d’envoi : intérêt légitime de Yodev, de ses clients et des destinataires (art. 6.1.f).",
           "Facturer l’usage et tenir la comptabilité : exécution du contrat et obligation légale (art. 6.1.b et 6.1.c).",
           "Répondre aux demandes de support et aux signalements : exécution du contrat ou intérêt légitime.",
+          "Étudier une candidature à la bêta : mesures précontractuelles prises à votre demande (art. 6.1.b).",
           "Livrer les messages des clients : traitement réalisé en tant que sous-traitant ; la base légale relève du client responsable de traitement.",
         ]],
         ["Durées de conservation", [
@@ -46,7 +48,9 @@ function frPages({ plan, vat, support, abuse }: LegalFacts): Record<string, Lega
           "Adresses et noms liés aux messages : remplacés après 90 jours ; événements techniques : supprimés après 90 jours.",
           "Suppressions (bounces, plaintes) : l’adresse en clair est retirée après 90 jours ; seule une empreinte non réversible est conservée pour empêcher un nouvel envoi.",
           "Sessions de connexion : 7 jours, prolongées à l’usage ; liens de vérification et de réinitialisation : 15 minutes.",
-          "Données de compte et de workspace : pendant la durée d’utilisation du service, puis supprimées sur demande, sous réserve des obligations ci-dessous.",
+          "Données de compte et de workspace : pendant la durée d’utilisation du service. Le propriétaire peut exporter puis supprimer le workspace, et chacun peut supprimer son compte, depuis les paramètres de la console, sous réserve des obligations ci-dessous.",
+          "Candidatures à la bêta : 12 mois ; l’empreinte de l’adresse IP est effacée après 30 jours.",
+          "Journal des décisions administratives : 13 mois. Tentatives d’envoi : 90 jours. Compteurs d’usage quotidien : 25 mois.",
           "Factures et pièces comptables : 10 ans (article L123-22 du Code de commerce).",
         ]],
         ["Cookies et stockage local", [
@@ -57,7 +61,7 @@ function frPages({ plan, vat, support, abuse }: LegalFacts): Record<string, Lega
           "Aucun cookie de mesure d’audience, de publicité ni traceur tiers n’est déposé. Ces éléments étant strictement nécessaires ou liés à une préférence demandée par l’utilisateur, aucun consentement n’est requis et aucun bandeau n’est affiché. Les pages de connexion Google et de paiement Stripe appliquent leur propre politique.",
         ]],
         ["Destinataires et transferts", "Les données sont accessibles à Yodev et aux prestataires listés sur la page des sous-traitants, avec leur localisation. Certains sont établis aux États-Unis ; les transferts éventuels hors de l’Espace économique européen sont encadrés par les accords de traitement de données de ces prestataires."],
-        ["Vos droits", `Vous pouvez demander l’accès, la rectification, l’effacement, la limitation, la portabilité de vos données ou vous opposer à un traitement fondé sur l’intérêt légitime en écrivant à ${support}. Une réponse est apportée dans un délai d’un mois. Pour les messages envoyés par un client, adressez-vous d’abord à ce client ; Yodev lui transmet votre demande. Vous pouvez introduire une réclamation auprès de la CNIL.`],
+        ["Vos droits", `Depuis les paramètres de la console, le propriétaire d’un workspace peut en exporter les données et le supprimer, et chaque membre peut supprimer son compte. Vous pouvez aussi demander l’accès, la rectification, l’effacement, la limitation, la portabilité de vos données ou vous opposer à un traitement fondé sur l’intérêt légitime en écrivant à ${support}. Une réponse est apportée dans un délai d’un mois. Pour les messages envoyés par un client, adressez-vous d’abord à ce client ; Yodev lui transmet votre demande. Vous pouvez introduire une réclamation auprès de la CNIL.`],
       ],
     },
     cgu: {
