@@ -34,6 +34,25 @@ const webhookSchema = z.object({
   ? payload.DeliveredAt : payload.BouncedAt),
 { message: "Missing lifecycle timestamp" });
 
+// Postmark bounce types (https://postmarkapp.com/developer/api/bounce-api).
+// Only the types proving that the recipient address itself can never receive
+// mail are hard: they suppress the recipient and count toward auto-pause.
+// - HardBounce (1): unknown user or mailbox not found.
+// - BadEmailAddress (100000): the address is not a valid email address.
+// Deliberately soft: Blocked (100006) is an ISP block caused by content or a
+// blacklisted sending IP, not by the recipient, so suppressing would punish a
+// valid address; ManuallyDeactivated, DnsError, SoftBounce, Transient and the
+// notification types are temporary or not about the address either.
+const PERMANENT_RECIPIENT_BOUNCES = new Map<number, string>([
+  [1, "HardBounce"],
+  [100000, "BadEmailAddress"],
+]);
+
+function isPermanentRecipientBounce(payload: { Type?: string; TypeCode?: number }) {
+  return (payload.TypeCode !== undefined && PERMANENT_RECIPIENT_BOUNCES.has(payload.TypeCode))
+    || [...PERMANENT_RECIPIENT_BOUNCES.values()].includes(payload.Type ?? "");
+}
+
 export function parsePostmarkWebhook(value: unknown): PostmarkWebhook {
   return webhookSchema.parse(value);
 }
@@ -49,7 +68,7 @@ export function normalizePostmarkEvent(value: PostmarkWebhook): NormalizedProvid
     : recordType === "spamcomplaint"
       ? "complained"
       : recordType === "bounce"
-        ? payload.TypeCode === 1 || payload.Type === "HardBounce" ? "hard_bounced" : "soft_bounced"
+        ? isPermanentRecipientBounce(payload) ? "hard_bounced" : "soft_bounced"
         : null;
   if (!type) return null;
   // Postmark complaints, like bounces, use BouncedAt (not ReceivedAt).

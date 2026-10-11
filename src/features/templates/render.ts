@@ -2,11 +2,28 @@ export type TemplateVariables = Record<string, string | number | boolean | null>
 
 const placeholderPattern = /{{\s*([\w.]+)\s*}}/g;
 
+// Variables fill the slots of an approved template; they must never be able
+// to carry a whole message past the template-only policy. 2,048 characters
+// still fit a long signed URL (password reset, invoice, presigned download).
+export const MAX_TEMPLATE_VARIABLE_LENGTH = 2_048;
+export const MAX_TEMPLATE_VARIABLES_TOTAL_LENGTH = 8_192;
+
 export class TemplateVariablesMissingError extends Error {
   constructor(readonly missingVariables: string[]) {
     super("Required template variables are missing");
     this.name = "TemplateVariablesMissingError";
   }
+}
+
+export class TemplateVariablesTooLongError extends Error {
+  constructor(readonly variables: string[]) {
+    super("Template variables exceed the allowed length");
+    this.name = "TemplateVariablesTooLongError";
+  }
+}
+
+export function templateVariableLength(value: TemplateVariables[string]) {
+  return value === null ? 0 : String(value).length;
 }
 
 export function extractTemplateVariables(...values: string[]) {
@@ -28,7 +45,7 @@ function escapeHtml(value: string) {
 
 function replace(value: string, variables: TemplateVariables, html: boolean) {
   return value.replace(placeholderPattern, (_placeholder, name: string) => {
-    const rendered = String(variables[name] ?? "");
+    const rendered = Object.hasOwn(variables, name) ? String(variables[name] ?? "") : "";
     return html ? escapeHtml(rendered) : rendered;
   });
 }
@@ -40,8 +57,18 @@ export function renderApprovedTemplate(input: {
   variables: TemplateVariables;
 }) {
   const required = extractTemplateVariables(input.subject, input.html, input.plainText);
-  const missing = required.filter((name) => !(name in input.variables));
+  // `in` would accept inherited names such as `constructor` or `toString`.
+  const missing = required.filter((name) => !Object.hasOwn(input.variables, name));
   if (missing.length) throw new TemplateVariablesMissingError(missing);
+  const entries = Object.entries(input.variables);
+  const tooLong = entries
+    .filter(([, value]) => templateVariableLength(value) > MAX_TEMPLATE_VARIABLE_LENGTH)
+    .map(([name]) => name)
+    .sort();
+  const total = entries.reduce((sum, [, value]) => sum + templateVariableLength(value), 0);
+  if (tooLong.length || total > MAX_TEMPLATE_VARIABLES_TOTAL_LENGTH) {
+    throw new TemplateVariablesTooLongError(tooLong);
+  }
 
   return {
     subject: replace(input.subject, input.variables, false).replace(/[\r\n]+/g, " ").trim(),

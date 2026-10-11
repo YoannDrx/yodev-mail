@@ -6,7 +6,8 @@ import { parseWebhookDeliveryJob } from "@/features/webhooks/delivery-job";
 import { nextWebhookAttemptAt } from "@/features/webhooks/retry-policy";
 import { postWebhookSafely } from "@/features/webhooks/safe-http";
 import { validateWebhookUrl } from "@/features/webhooks/validate-url";
-import { decryptSecret, hmac } from "@/lib/crypto";
+import { signedWebhookHeaders } from "@/features/webhooks/sign";
+import { decryptSecret } from "@/lib/crypto";
 import { emitOperationalMetric } from "@/lib/operational-metric";
 import { logWorkerResult } from "@/lib/worker-log";
 import { loadRuntimeSecrets } from "@/workers/runtime-secrets";
@@ -104,7 +105,6 @@ export async function deliverWebhook(deliveryId: string, workspaceId: string, no
     id: row.event.id,
     type: row.event.type,
   });
-  const timestamp = Math.floor(now.getTime() / 1000);
   const attempt = row.delivery.attempt + 1;
 
   let safeUrl: string;
@@ -119,13 +119,7 @@ export async function deliverWebhook(deliveryId: string, workspaceId: string, no
     const statusCode = await postWebhookSafely({
       url: safeUrl,
       body,
-      headers: {
-        "content-type": "application/json",
-        "content-length": String(Buffer.byteLength(body)),
-        "user-agent": "Yodev-Mail-Webhooks/1.0",
-        "x-yodev-mail-signature": hmac(`${timestamp}.${body}`, signingSecret),
-        "x-yodev-mail-timestamp": String(timestamp),
-      },
+      headers: signedWebhookHeaders(body, signingSecret, now),
       timeoutMs: 10_000,
     });
     if (statusCode < 200 || statusCode >= 300) {

@@ -11,6 +11,7 @@ import { enqueueProviderEvent } from "@/lib/aws";
 import { getSecureParameter } from "@/workers/runtime-secrets";
 
 const MAX_BODY_BYTES = 64 * 1024;
+const UUID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 const POSTMARK_WEBHOOK_IPS = new Set(["3.134.147.250", "50.31.156.6", "50.31.156.77", "18.217.206.57"]);
 
 function equal(left: string, right: string) {
@@ -25,6 +26,8 @@ async function ingestPostmarkWebhook(request: Request, { params }: { params: Pro
   const contentLength = Number(request.headers.get("content-length") ?? 0);
   if (contentLength > MAX_BODY_BYTES) return new NextResponse(null, { status: 413 });
   const { bindingId } = await params;
+  // The column is a UUID: anything else would fail inside PostgreSQL as a 500.
+  if (!UUID_PATTERN.test(bindingId)) return new NextResponse(null, { status: 404 });
   const db = requireDb();
   const [binding] = await db.select().from(domainProviderBindings).where(and(
     eq(domainProviderBindings.id, bindingId),

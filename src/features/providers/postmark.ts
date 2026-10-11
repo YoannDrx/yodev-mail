@@ -1,10 +1,7 @@
 import { getSecureParameter } from "@/workers/runtime-secrets";
 import type { DeliveryProvider, ProviderSendInput } from "@/features/providers/types";
 import { ProviderSendError } from "@/features/providers/types";
-
-function mailbox(value: { email: string; name?: string | null }) {
-  return value.name ? `${value.name.replace(/[<>]/g, "")} <${value.email}>` : value.email;
-}
+import { formatMailbox } from "@/features/providers/mailbox";
 
 export class PostmarkDeliveryProvider implements DeliveryProvider {
   async send(input: ProviderSendInput) {
@@ -26,8 +23,8 @@ export class PostmarkDeliveryProvider implements DeliveryProvider {
           "X-Postmark-Server-Token": token,
         },
         body: JSON.stringify({
-          From: mailbox(input.from),
-          To: mailbox(input.to),
+          From: formatMailbox(input.from),
+          To: formatMailbox(input.to),
           ReplyTo: input.replyTo ?? undefined,
           Subject: input.subject,
           HtmlBody: input.html,
