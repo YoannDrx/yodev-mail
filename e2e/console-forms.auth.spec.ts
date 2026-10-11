@@ -238,6 +238,18 @@ test("templates show their ID, a test call that returns 202 simulated, and new v
   await expect(page.getByText("Clé ym_test_ active", { exact: true })).toBeVisible();
 
   await page.goto(`/fr/dashboard/templates/${templateId}`);
+  // React hydration restores a textarea's server value: fill only once it settled.
+  await page.waitForLoadState("networkidle");
+  await page.getByLabel("Variables (JSON)").fill("not json");
+  await submitWithoutBrowserValidation(page, "Envoyer le test");
+  await expect(page.getByText("Objet JSON attendu", { exact: false })).toBeVisible();
+  await expect(page.getByLabel("Variables (JSON)")).toHaveValue("not json");
+  await page.getByLabel("Variables (JSON)").fill(JSON.stringify({ firstName: "Ada", orderId: "A-42" }));
+  await page.getByRole("button", { name: "Envoyer le test" }).click();
+  await expect(page.getByRole("status").filter({ hasText: "Envoi de test accepté" })).toBeVisible();
+  await expect(page.getByRole("link", { name: "Voir le message" })).toBeVisible();
+  expect((await pool.query("SELECT status, source FROM messages WHERE workspace_id=$1 AND source='console'", [target.id])).rows).toEqual([{ status: "simulated", source: "console" }]);
+
   const preview = page.locator("iframe").first();
   await expect(preview).toHaveAttribute("sandbox", "");
   await expect(page.frameLocator("iframe").first().getByText("Bonjour [firstName]")).toBeVisible();

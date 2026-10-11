@@ -8,8 +8,9 @@ import { CopyButton } from "@/components/copy-button";
 import { DashboardPage } from "@/components/dashboard-page";
 import { Badge } from "@/components/ui/badge";
 import { requireDb } from "@/db";
-import { domains, templates, templateVersions, transactionalProfiles } from "@/db/schema";
+import { authUsers, domains, templates, templateVersions, transactionalProfiles } from "@/db/schema";
 import { apiBaseUrl, templateCurlExample, testKeyPlaceholder } from "@/features/templates/api-example";
+import { sampleVariables } from "@/features/templates/document";
 import { extractTemplateVariables } from "@/features/templates/render";
 import { dateTimeFormatter } from "@/lib/date-time";
 import { requirePageWorkspace } from "@/lib/page-auth";
@@ -18,6 +19,7 @@ import { localized, localizedPath } from "@/i18n/config";
 import { statusLabel } from "@/i18n/format";
 import { getLocale } from "@/i18n/server";
 import { TemplateForm, TemplatePreview } from "../template-form";
+import { TestSendForm } from "./test-send-form";
 
 export const dynamic = "force-dynamic";
 
@@ -50,6 +52,7 @@ export default async function Page({ params }: { params: Promise<{ id: string }>
     db.select({ name: domains.name }).from(domains).where(and(eq(domains.workspaceId, context.workspace.id), eq(domains.status, "verified"))).orderBy(desc(domains.createdAt)).limit(1),
     getWorkspaceTimeZone(context.workspace.id),
   ]);
+  const [user] = await db.select({ email: authUsers.email }).from(authUsers).where(eq(authUsers.id, context.userId)).limit(1);
   const latest = versions[0];
   const variables = latest ? extractTemplateVariables(template.subject, latest.html, latest.plainText) : [];
   const curl = templateCurlExample({
@@ -91,6 +94,14 @@ export default async function Page({ params }: { params: Promise<{ id: string }>
       </section>
     </div>
     {latest ? <section className="mt-6 rounded-md border bg-card p-6"><TemplatePreview body={latest.plainText} html={latest.html} locale={locale} subject={template.subject} title={`${copy.current} (${latest.version})`} /></section> : null}
+    {canManage ? <TestSendForm
+      defaultFrom={`notifications@${verifiedDomains[0]?.name ?? "votre-domaine.fr"}`}
+      defaultTo={user?.email ?? ""}
+      defaultVariables={JSON.stringify(sampleVariables(variables), null, 2)}
+      disabledReason={missing.length ? `${copy.prerequisites} ${missing.join(", ")}.` : undefined}
+      locale={locale}
+      templateId={template.id}
+    /> : null}
     <section aria-labelledby="template-edit-title" className="mt-6 grid gap-4">
       <h2 className="text-xl font-semibold" id="template-edit-title">{copy.edit}</h2>
       <TemplateForm canManage={canManage && template.reviewStatus !== "disabled"} locale={locale} template={{ id: template.id, name: template.name, subject: template.subject, body: latest?.plainText ?? "" }} />
