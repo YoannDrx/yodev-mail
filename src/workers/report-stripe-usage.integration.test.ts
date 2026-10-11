@@ -411,6 +411,57 @@ describe("Stripe usage reporting", () => {
     expect(job.status).toBe("unknown");
     expect(dependencies.createMeterEvent).not.toHaveBeenCalled();
   });
+
+  it("refuses to run without the Stripe usage secret", async () => {
+    delete process.env.STRIPE_USAGE_SECRET_KEY;
+    await expect(reportStripeUsage()).rejects.toThrow("not configured");
+    expect(dependencies.createMeterEvent).not.toHaveBeenCalled();
+  });
+
+  it("closes a pending aggregate whose meter timestamp aged past the Stripe limit", async () => {
+    const context = await seedUsageJob();
+    await reportStripeUsage(undefined, { getRemainingTimeInMillis: () => 20_000 });
+    await db.update(stripeUsageReports).set({ eventTimestamp: new Date(Date.now() - 36 * 864e5) })
+      .where(eq(stripeUsageReports.workspaceId, context.workspaceId));
+
+    await expect(reportStripeUsage()).rejects.toThrow("ambiguous or unreportable");
+
+    const [report] = await db.select().from(stripeUsageReports).where(eq(stripeUsageReports.workspaceId, context.workspaceId));
+    const [job] = await db.select().from(stripeUsageReportJobs).where(eq(stripeUsageReportJobs.id, context.job.id));
+    expect(report).toMatchObject({ status: "unreportable", lastErrorCode: "meter_timestamp_too_old" });
+    expect(job).toMatchObject({ status: "unreportable", lastErrorCode: "meter_timestamp_too_old" });
+    expect(dependencies.createMeterEvent).not.toHaveBeenCalled();
+  });
+
+  it("marks the aggregate unknown, never resent, when local accounting fails after Stripe accepted it", async () => {
+    const context = await seedUsageJob();
+    dependencies.createMeterEvent.mockResolvedValue({});
+    const transaction = vi.spyOn(db, "transaction").mockRejectedValueOnce(new Error("connection lost"));
+    try {
+      await expect(reportStripeUsage()).rejects.toThrow("ambiguous or unreportable");
+    } finally {
+      transaction.mockRestore();
+    }
+    const [report] = await db.select().from(stripeUsageReports).where(eq(stripeUsageReports.workspaceId, context.workspaceId));
+    const [job] = await db.select().from(stripeUsageReportJobs).where(eq(stripeUsageReportJobs.id, context.job.id));
+    expect(report).toMatchObject({ status: "unknown", lastErrorCode: "database_commit_after_stripe_failed", claimedAt: null });
+    expect(job).toMatchObject({ status: "unknown", lastErrorCode: "database_commit_after_stripe_failed" });
+    expect(dependencies.createMeterEvent).toHaveBeenCalledTimes(1);
+  });
+
+  it("stops between aggregates when the Lambda runs out of time", async () => {
+    await seedUsageJob();
+    await seedUsageJob();
+    dependencies.createMeterEvent.mockResolvedValue({});
+    let calls = 0;
+    const context = { getRemainingTimeInMillis: () => (++calls <= 2 ? 120_000 : 20_000) };
+
+    await expect(reportStripeUsage(undefined, context)).resolves.toMatchObject({ reported: 1, reports: 1 });
+
+    expect(dependencies.createMeterEvent).toHaveBeenCalledTimes(1);
+    const reports = await db.select().from(stripeUsageReports);
+    expect(reports.map((report) => report.status).sort()).toEqual(["pending", "reported"]);
+  });
 });
 
 describe("Stripe usage error classification", () => {
@@ -423,5 +474,6 @@ describe("Stripe usage error classification", () => {
     expect(classifyStripeUsageError(new StripeError({ type: "StripePermissionError", statusCode: 403 }))).toBe("configuration");
     expect(classifyStripeUsageError(new StripeError({ type: "StripeInvalidRequestError", statusCode: 400 }))).toBe("rejected");
     expect(classifyStripeUsageError(new Error("socket hang up"))).toBe("ambiguous");
+    expect(classifyStripeUsageError(new StripeError({ type: "StripeError" }))).toBe("ambiguous");
   });
 });
