@@ -143,7 +143,7 @@ test("API key creation, cross-tenant reads and immediate revocation", async ({ p
   await signIn(page, a.owner, a);
   await page.goto("/fr/dashboard/api-keys");
   await page.locator('input[name="name"]').fill("Certification key");
-  await page.getByRole("button", { name: "Créer", exact: true }).click();
+  await page.getByRole("button", { name: "Créer la clé", exact: true }).click();
   const tokenElement = page.locator("code").filter({ hasText: /^ym_test_/ });
   await expect(tokenElement).toBeVisible();
   const token = (await tokenElement.textContent())!;
@@ -155,6 +155,7 @@ test("API key creation, cross-tenant reads and immediate revocation", async ({ p
   await page.reload();
   await expect(page.getByText(token, { exact: true })).toHaveCount(0);
   await page.getByRole("button", { name: "Révoquer", exact: true }).click();
+  await page.getByRole("alertdialog").getByRole("button", { name: "Révoquer la clé", exact: true }).click();
   await expect(page.getByRole("button", { name: "Révoquée", exact: true })).toBeDisabled();
   expect((await page.request.get(`/v1/emails/${a.messageId}`, { headers })).status()).toBe(401);
   expect((await pool.query("SELECT id FROM api_keys WHERE workspace_id=$1", [b.id])).rowCount).toBe(0);
@@ -165,9 +166,11 @@ test("member cannot create privileged API keys through a server action", async (
   await member(a, reader);
   await signIn(page, reader, a);
   await page.goto("/fr/dashboard/api-keys");
+  // The form is read-only for members; re-enable it to prove the server refuses too.
+  await page.locator("form:has(input[name=\"name\"]) :disabled").evaluateAll((elements) => elements.forEach((element) => element.removeAttribute("disabled")));
   await page.locator('input[name="name"]').fill("Forbidden key");
-  await page.getByRole("button", { name: "Créer", exact: true }).click();
-  await expect(page.getByText("Workspace administrator role required.", { exact: true })).toBeVisible();
+  await page.getByRole("button", { name: "Créer la clé", exact: true }).click();
+  await expect(page.getByRole("alert").filter({ hasText: "Seuls les propriétaires et administrateurs du workspace peuvent effectuer cette action." })).toBeVisible();
   expect((await pool.query("SELECT id FROM api_keys WHERE workspace_id=$1", [a.id])).rowCount).toBe(0);
 });
 
