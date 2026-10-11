@@ -1,28 +1,29 @@
+import type { Metadata } from "next";
 import { and, asc, eq, gt } from "drizzle-orm";
-import { UserPlus, Users } from "lucide-react";
 import { DashboardPage } from "@/components/dashboard-page";
-import { Badge } from "@/components/ui/badge";
-import { Button } from "@/components/ui/button";
-import { Input } from "@/components/ui/input";
 import { requireDb } from "@/db";
 import { authInvitations, authMembers, authUsers, workspaces } from "@/db/schema";
-import {
-  cancelMemberInvitationAction,
-  inviteMemberAction,
-  removeMemberAction,
-} from "@/features/members/actions";
 import { workspaceMemberLimit } from "@/features/members/service";
 import { requirePageWorkspace } from "@/lib/page-auth";
 import { localized } from "@/i18n/config";
 import { localeCode } from "@/i18n/format";
 import { getLocale } from "@/i18n/server";
+import { MembersPanel } from "./members-panel";
 
 export const dynamic = "force-dynamic";
+
+export async function generateMetadata(): Promise<Metadata> {
+  return { title: (await getLocale()) === "fr" ? "Membres" : "Members" };
+}
+
+function hasRole(role: string, expected: string) {
+  return role.split(",").map((value) => value.trim()).includes(expected);
+}
 
 export default async function MembersPage() {
   const locale = await getLocale();
   const formatLocale = localeCode(locale);
-  const copy = localized(locale, { fr: { title: "Membres", active: "membre(s) actif(s)", pending: "invitation(s) en attente", max: "places maximum", email: "Email du membre", invite: "Inviter", owner: "propriétaire", member: "membre", remove: "Retirer", validUntil: "Invitation valable jusqu’au", waiting: "en attente", cancel: "Annuler" }, en: { title: "Members", active: "active member(s)", pending: "pending invitation(s)", max: "maximum seats", email: "Member email", invite: "Invite", owner: "owner", member: "member", remove: "Remove", validUntil: "Invitation valid until", waiting: "pending", cancel: "Cancel" } });
+  const copy = localized(locale, { fr: { title: "Membres", active: "membre(s) actif(s)", pending: "invitation(s) en attente", max: "places maximum" }, en: { title: "Members", active: "active member(s)", pending: "pending invitation(s)", max: "maximum seats" } });
   const context = await requirePageWorkspace();
   const db = requireDb();
   const [members, invitations] = await Promise.all([
@@ -59,33 +60,30 @@ export default async function MembersPage() {
       .orderBy(asc(authInvitations.createdAt)),
   ]);
   const seatsUsed = members.length + invitations.length;
+  // Mirrors currentWorkspace({ admin: true }), which the actions re-check.
+  const canManage = hasRole(context.role, "owner") || hasRole(context.role, "admin");
 
   return <DashboardPage
     title={copy.title}
     description={`${members.length} ${copy.active}, ${invitations.length} ${copy.pending} · ${workspaceMemberLimit} ${copy.max}.`}
-    action={<form action={inviteMemberAction} className="flex gap-2">
-      <Input aria-label={copy.email} disabled={seatsUsed >= workspaceMemberLimit} name="email" placeholder="member@example.com" required type="email" />
-      <Button disabled={seatsUsed >= workspaceMemberLimit} type="submit"><UserPlus />{copy.invite}</Button>
-    </form>}
   >
-    <div className="grid gap-4">
-      {members.map((member) => {
-        const isOwner = member.role.split(",").map((role) => role.trim()).includes("owner");
-        return <article className="flex flex-wrap items-center justify-between gap-4 rounded-md border bg-card p-5" key={member.id}>
-          <div className="flex items-center gap-3">
-            <div className="grid size-10 place-items-center rounded-md bg-violet-100 text-primary"><Users className="size-5" /></div>
-            <div><p className="font-medium">{member.name}</p><p className="text-sm text-muted-foreground">{member.email}</p></div>
-            <Badge variant={isOwner ? "default" : "secondary"}>{isOwner ? copy.owner : copy.member}</Badge>
-          </div>
-          {!isOwner && member.userId !== context.userId && <form action={removeMemberAction.bind(null, member.id)}>
-            <Button size="sm" type="submit" variant="destructive">{copy.remove}</Button>
-          </form>}
-        </article>;
-      })}
-      {invitations.map((invitation) => <article className="flex flex-wrap items-center justify-between gap-4 rounded-md border border-dashed bg-card p-5" key={invitation.id}>
-        <div><p className="font-medium">{invitation.email}</p><p className="text-sm text-muted-foreground">{copy.validUntil} {invitation.expiresAt.toLocaleString(formatLocale)}</p></div>
-        <div className="flex items-center gap-2"><Badge variant="outline">{copy.waiting}</Badge><form action={cancelMemberInvitationAction.bind(null, invitation.id)}><Button size="sm" type="submit" variant="outline">{copy.cancel}</Button></form></div>
-      </article>)}
-    </div>
+    <MembersPanel
+      canManage={canManage}
+      invitations={invitations.map((invitation) => ({
+        id: invitation.id,
+        email: invitation.email,
+        validUntil: invitation.expiresAt.toLocaleString(formatLocale, { day: "numeric", month: "long", year: "numeric", hour: "2-digit", minute: "2-digit", timeZone: "Europe/Paris", timeZoneName: "short" }),
+      }))}
+      locale={locale}
+      members={members.map((member) => ({
+        id: member.id,
+        name: member.name,
+        email: member.email,
+        isOwner: hasRole(member.role, "owner"),
+        isSelf: member.userId === context.userId,
+      }))}
+      seatsFull={seatsUsed >= workspaceMemberLimit}
+      workspaceApproved={context.workspace.status === "approved"}
+    />
   </DashboardPage>;
 }
