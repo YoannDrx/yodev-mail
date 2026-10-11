@@ -2,6 +2,7 @@ import { and, eq, lt, sql } from "drizzle-orm";
 import { requireDb } from "@/db/runtime";
 import { messages, usageDays } from "@/db/schema";
 import { utcDay } from "@/features/sending/eligibility";
+import { expireQueuedPastDeadline } from "@/features/sending/expire-queued";
 import { emitOperationalMetric } from "@/lib/operational-metric";
 import { loadRuntimeSecrets } from "@/workers/runtime-secrets";
 
@@ -42,5 +43,8 @@ export async function recoverStaleSending(limit = 100, now = new Date()) {
 
 export async function handler() {
   await loadRuntimeSecrets();
-  return recoverStaleSending();
+  const sending = await recoverStaleSending();
+  // Same schedule: queued messages stranded by the DLQ past their deadline.
+  const queued = await expireQueuedPastDeadline();
+  return { ...sending, ...queued };
 }
