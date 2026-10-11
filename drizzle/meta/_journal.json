@@ -99,6 +99,13 @@
       "when": 1791739344864,
       "tag": "0013_drop_retired_marketing_tables",
       "breakpoints": true
+    },
+    {
+      "idx": 14,
+      "version": "7",
+      "when": 1791741713083,
+      "tag": "0014_workspace_purge_requests",
+      "breakpoints": true
     }
   ]
 }

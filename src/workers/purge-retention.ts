@@ -2,6 +2,7 @@ import { eq, sql } from "drizzle-orm";
 import { z } from "zod";
 import { requireDb } from "@/db/runtime";
 import { workspaces } from "@/db/schema";
+import { pendingWorkspacePurges, purgeDeletedWorkspace } from "@/features/workspace-data/purge";
 import { emitOperationalMetric } from "@/lib/operational-metric";
 import { loadRuntimeSecrets } from "@/workers/runtime-secrets";
 
@@ -169,6 +170,19 @@ export async function handler(_event?: unknown, context?: { getRemainingTimeInMi
   let checked = 0;
   let failed = 0;
   let saturated = 0;
+  let unfinishedPurges = 0;
+  const outOfTime = () => Date.now() >= deadline || Boolean(context && context.getRemainingTimeInMillis() < 20_000);
+  // Finish workspace deletions requested by owners before routine retention.
+  for (const workspaceId of await pendingWorkspacePurges(3)) {
+    if (outOfTime()) { unfinishedPurges++; continue; }
+    try {
+      const { done } = await purgeDeletedWorkspace(workspaceId, { budgetMs: Math.min(10_000, deadline - Date.now()) });
+      if (!done) unfinishedPurges++;
+    } catch {
+      failed++;
+      unfinishedPurges++;
+    }
+  }
   // Control-plane enumeration only: opaque IDs, including paused/deleted tenants.
   // Durable oldest-attempt ordering prevents a large or failing tenant from
   // starving others. Business data is accessed only by the scoped helper above.
@@ -196,7 +210,7 @@ export async function handler(_event?: unknown, context?: { getRemainingTimeInMi
     }
   }
   emitOperationalMetric("RetentionPurgeFailure", failed);
-  emitOperationalMetric("RetentionPurgeBacklog", saturated + Number(checked < candidates.length) + Number(globalSaturated));
+  emitOperationalMetric("RetentionPurgeBacklog", saturated + Number(checked < candidates.length) + Number(globalSaturated) + unfinishedPurges);
   emitOperationalMetric("RetentionPurgeCompleted");
   return { checked, failed, saturated };
 }

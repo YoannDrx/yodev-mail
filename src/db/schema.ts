@@ -299,9 +299,15 @@ export const workspaces = pgTable(
     pausedAt: timestamp("paused_at", { withTimezone: true }),
     pauseReason: varchar("pause_reason", { length: 120 }),
     deletedAt: timestamp("deleted_at", { withTimezone: true }),
+    // Set when the owner deletes the workspace: access is removed at once and
+    // the data is purged in bounded batches until the row itself is deleted.
+    purgeRequestedAt: timestamp("purge_requested_at", { withTimezone: true }),
     ...timestamps,
   },
   (table) => [
+    index("workspaces_purge_requested_idx")
+      .on(table.purgeRequestedAt)
+      .where(sql`${table.purgeRequestedAt} is not null`),
     uniqueIndex("workspaces_clerk_org_idx").on(table.clerkOrganizationId),
     uniqueIndex("workspaces_auth_org_idx").on(table.authOrganizationId),
     uniqueIndex("workspaces_slug_idx").on(table.slug),
@@ -801,6 +807,8 @@ export const outboxJobs = pgTable(
   },
   (table) => [
     index("outbox_kind_aggregate_idx").on(table.kind, table.aggregateId),
+    // Retention and workspace purges select one workspace's jobs.
+    index("outbox_workspace_updated_idx").on(table.workspaceId, table.updatedAt),
     index("outbox_pending_idx").on(table.status, table.availableAt),
   ],
 );
