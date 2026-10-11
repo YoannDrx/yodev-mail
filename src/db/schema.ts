@@ -7,7 +7,6 @@ import {
   jsonb,
   pgEnum,
   pgTable,
-  primaryKey,
   text,
   timestamp,
   uniqueIndex,
@@ -143,9 +142,8 @@ export const authInvitations = pgTable(
     role: varchar("role", { length: 32 }).default("member").notNull(),
     status: varchar("status", { length: 32 }).default("pending").notNull(),
     expiresAt: timestamp("expires_at", { withTimezone: true }).notNull(),
-    inviterId: text("inviter_id")
-      .references(() => authUsers.id, { onDelete: "cascade" })
-      .notNull(),
+    // Invitation history outlives the administrator who sent it.
+    inviterId: text("inviter_id").references(() => authUsers.id, { onDelete: "set null" }),
     createdAt: timestamp("created_at", { withTimezone: true }).defaultNow().notNull(),
   },
   (table) => [
@@ -204,33 +202,6 @@ export const domainStatusEnum = pgEnum("domain_status", [
   "verified",
   "failed",
   "disabled",
-]);
-export const contactStatusEnum = pgEnum("contact_status", [
-  "active",
-  "unsubscribed",
-  "suppressed",
-  "anonymized",
-]);
-export const consentKindEnum = pgEnum("consent_kind", [
-  "marketing",
-  "tracking",
-  "legal_basis",
-]);
-export const consentActionEnum = pgEnum("consent_action", [
-  "granted",
-  "withdrawn",
-  "objected",
-  "imported",
-]);
-export const campaignStatusEnum = pgEnum("campaign_status", [
-  "draft",
-  "scheduled",
-  "dispatching",
-  "sending",
-  "paused",
-  "sent",
-  "canceled",
-  "failed",
 ]);
 export const messageStreamEnum = pgEnum("message_stream", ["transactional", "marketing"]);
 export const messageStatusEnum = pgEnum("message_status", [
@@ -321,6 +292,8 @@ export const workspaces = pgTable(
     dailyLimit: integer("daily_limit").default(200).notNull(),
     warmupStage: integer("warmup_stage").default(0).notNull(),
     warmupAdvancedAt: timestamp("warmup_advanced_at", { withTimezone: true }),
+    // Set when an operator pins dailyLimit; the warmup worker then leaves it alone.
+    dailyLimitOverriddenAt: timestamp("daily_limit_overridden_at", { withTimezone: true }),
     retentionAttemptedAt: timestamp("retention_attempted_at", { withTimezone: true }),
     approvedAt: timestamp("approved_at", { withTimezone: true }),
     pausedAt: timestamp("paused_at", { withTimezone: true }),
@@ -396,6 +369,42 @@ export const usageMonths = pgTable(
   (table) => [uniqueIndex("usage_workspace_month_idx").on(table.workspaceId, table.month)],
 );
 
+// One Stripe meter event per customer and reporting window. Its identifier is
+// also the Stripe idempotency key, so a retry can never be counted twice.
+export const stripeUsageReports = pgTable(
+  "stripe_usage_reports",
+  {
+    id: uuid("id").defaultRandom().primaryKey(),
+    workspaceId: uuid("workspace_id")
+      .references(() => workspaces.id, { onDelete: "cascade" })
+      .notNull(),
+    stripeCustomerId: varchar("stripe_customer_id", { length: 64 }).notNull(),
+    stripeSubscriptionId: varchar("stripe_subscription_id", { length: 64 }).notNull(),
+    windowStartsAt: timestamp("window_starts_at", { withTimezone: true }).notNull(),
+    eventTimestamp: timestamp("event_timestamp", { withTimezone: true }).notNull(),
+    quantity: integer("quantity").notNull(),
+    stripeIdentifier: varchar("stripe_identifier", { length: 100 }).notNull(),
+    status: varchar("status", { length: 24 }).default("pending").notNull(),
+    attemptCount: integer("attempt_count").default(0).notNull(),
+    firstAttemptedAt: timestamp("first_attempted_at", { withTimezone: true }),
+    claimedAt: timestamp("claimed_at", { withTimezone: true }),
+    nextAttemptAt: timestamp("next_attempt_at", { withTimezone: true }).defaultNow().notNull(),
+    reportedAt: timestamp("reported_at", { withTimezone: true }),
+    lastErrorCode: varchar("last_error_code", { length: 120 }),
+    ...timestamps,
+  },
+  (table) => [
+    uniqueIndex("stripe_usage_reports_identifier_idx").on(table.stripeIdentifier),
+    index("stripe_usage_reports_due_idx").on(table.status, table.nextAttemptAt),
+    index("stripe_usage_reports_workspace_idx").on(table.workspaceId, table.createdAt),
+    check("stripe_usage_reports_quantity_positive", sql`${table.quantity} > 0`),
+    check(
+      "stripe_usage_reports_status_valid",
+      sql`${table.status} in ('pending', 'processing', 'reported', 'failed', 'unknown', 'unreportable')`,
+    ),
+  ],
+);
+
 export const stripeUsageReportJobs = pgTable(
   "stripe_usage_report_jobs",
   {
@@ -413,10 +422,12 @@ export const stripeUsageReportJobs = pgTable(
     reportedAt: timestamp("reported_at", { withTimezone: true }),
     attemptCount: integer("attempt_count").default(0).notNull(),
     lastErrorCode: varchar("last_error_code", { length: 120 }),
+    reportId: uuid("report_id").references(() => stripeUsageReports.id, { onDelete: "set null" }),
     ...timestamps,
   },
   (table) => [
     uniqueIndex("stripe_usage_report_identifier_idx").on(table.stripeIdentifier),
+    index("stripe_usage_report_report_idx").on(table.reportId),
     uniqueIndex("stripe_usage_report_message_idx").on(table.messageId),
     index("stripe_usage_report_pending_idx").on(table.status, table.createdAt),
     index("stripe_usage_report_workspace_idx").on(table.workspaceId, table.createdAt),
@@ -586,98 +597,6 @@ export const sesResources = pgTable(
   (table) => [uniqueIndex("ses_resource_workspace_name_idx").on(table.workspaceId, table.resourceType, table.resourceName)],
 );
 
-export const contacts = pgTable(
-  "contacts",
-  {
-    id: uuid("id").defaultRandom().primaryKey(),
-    workspaceId: uuid("workspace_id")
-      .references(() => workspaces.id, { onDelete: "cascade" })
-      .notNull(),
-    email: varchar("email", { length: 320 }).notNull(),
-    normalizedEmail: varchar("normalized_email", { length: 320 }).notNull(),
-    firstName: varchar("first_name", { length: 120 }),
-    lastName: varchar("last_name", { length: 120 }),
-    company: varchar("company", { length: 180 }),
-    locale: varchar("locale", { length: 8 }).default("fr").notNull(),
-    status: contactStatusEnum("status").default("active").notNull(),
-    marketingConsent: boolean("marketing_consent").default(false).notNull(),
-    trackingConsent: boolean("tracking_consent").default(false).notNull(),
-    legalBasis: varchar("legal_basis", { length: 64 }),
-    consentSource: text("consent_source"),
-    consentedAt: timestamp("consented_at", { withTimezone: true }),
-    unsubscribedAt: timestamp("unsubscribed_at", { withTimezone: true }),
-    tags: text("tags").array().default([]).notNull(),
-    customFields: jsonb("custom_fields").$type<Record<string, string | number | boolean | null>>().default({}).notNull(),
-    ...timestamps,
-  },
-  (table) => [
-    uniqueIndex("contacts_workspace_email_idx").on(table.workspaceId, table.normalizedEmail),
-    index("contacts_workspace_status_idx").on(table.workspaceId, table.status),
-    index("contacts_workspace_consent_idx").on(table.workspaceId, table.marketingConsent),
-  ],
-);
-
-export const contactLists = pgTable(
-  "contact_lists",
-  {
-    id: uuid("id").defaultRandom().primaryKey(),
-    workspaceId: uuid("workspace_id")
-      .references(() => workspaces.id, { onDelete: "cascade" })
-      .notNull(),
-    name: varchar("name", { length: 140 }).notNull(),
-    description: text("description"),
-    ...timestamps,
-  },
-  (table) => [uniqueIndex("lists_workspace_name_idx").on(table.workspaceId, table.name)],
-);
-
-export const contactListMembers = pgTable(
-  "contact_list_members",
-  {
-    workspaceId: uuid("workspace_id")
-      .references(() => workspaces.id, { onDelete: "cascade" })
-      .notNull(),
-    listId: uuid("list_id").references(() => contactLists.id, { onDelete: "cascade" }).notNull(),
-    contactId: uuid("contact_id").references(() => contacts.id, { onDelete: "cascade" }).notNull(),
-    addedAt: timestamp("added_at", { withTimezone: true }).defaultNow().notNull(),
-  },
-  (table) => [primaryKey({ columns: [table.listId, table.contactId] }), index("list_members_contact_idx").on(table.contactId)],
-);
-
-export const segments = pgTable(
-  "segments",
-  {
-    id: uuid("id").defaultRandom().primaryKey(),
-    workspaceId: uuid("workspace_id")
-      .references(() => workspaces.id, { onDelete: "cascade" })
-      .notNull(),
-    name: varchar("name", { length: 140 }).notNull(),
-    filters: jsonb("filters").$type<{ operator: "and" | "or"; rules: Array<Record<string, unknown>> }>().notNull(),
-    ...timestamps,
-  },
-  (table) => [uniqueIndex("segments_workspace_name_idx").on(table.workspaceId, table.name)],
-);
-
-export const consentEvents = pgTable(
-  "consent_events",
-  {
-    id: uuid("id").defaultRandom().primaryKey(),
-    workspaceId: uuid("workspace_id")
-      .references(() => workspaces.id, { onDelete: "cascade" })
-      .notNull(),
-    contactId: uuid("contact_id").references(() => contacts.id, { onDelete: "cascade" }).notNull(),
-    kind: consentKindEnum("kind").notNull(),
-    action: consentActionEnum("action").notNull(),
-    source: text("source"),
-    consentText: text("consent_text"),
-    ipAddress: varchar("ip_address", { length: 64 }),
-    userAgent: text("user_agent"),
-    metadata: jsonb("metadata").$type<Record<string, unknown>>().default({}).notNull(),
-    createdAt: timestamp("created_at", { withTimezone: true }).defaultNow().notNull(),
-  },
-  (table) => [index("consent_workspace_contact_idx").on(table.workspaceId, table.contactId, table.createdAt)],
-);
-
 export const suppressions = pgTable(
   "suppressions",
   {
@@ -696,6 +615,9 @@ export const suppressions = pgTable(
   (table) => [
     uniqueIndex("suppressions_workspace_hash_idx").on(table.workspaceId, table.emailHash),
     index("suppressions_workspace_reason_idx").on(table.workspaceId, table.reason),
+    index("suppressions_redaction_idx")
+      .on(table.workspaceId, table.createdAt)
+      .where(sql`${table.normalizedEmail} is not null`),
   ],
 );
 
@@ -732,8 +654,10 @@ export const templates = pgTable(
     workspaceId: uuid("workspace_id")
       .references(() => workspaces.id, { onDelete: "cascade" })
       .notNull(),
+    // NO ACTION (not RESTRICT): still blocks deleting a referenced profile on
+    // its own, but is checked after a workspace cascade has removed both rows.
     transactionalProfileId: uuid("transactional_profile_id").references(() => transactionalProfiles.id, {
-      onDelete: "restrict",
+      onDelete: "no action",
     }),
     name: varchar("name", { length: 160 }).notNull(),
     subject: varchar("subject", { length: 255 }).notNull(),
@@ -768,59 +692,6 @@ export const templateVersions = pgTable(
   (table) => [uniqueIndex("template_version_idx").on(table.templateId, table.version)],
 );
 
-export const campaigns = pgTable(
-  "campaigns",
-  {
-    id: uuid("id").defaultRandom().primaryKey(),
-    workspaceId: uuid("workspace_id")
-      .references(() => workspaces.id, { onDelete: "cascade" })
-      .notNull(),
-    domainId: uuid("domain_id").references(() => domains.id, { onDelete: "restrict" }),
-    templateId: uuid("template_id").references(() => templates.id, { onDelete: "set null" }),
-    listId: uuid("list_id").references(() => contactLists.id, { onDelete: "set null" }),
-    segmentId: uuid("segment_id").references(() => segments.id, { onDelete: "set null" }),
-    name: varchar("name", { length: 180 }).notNull(),
-    subject: varchar("subject", { length: 255 }).notNull(),
-    fromName: varchar("from_name", { length: 140 }).notNull(),
-    fromEmail: varchar("from_email", { length: 320 }).notNull(),
-    replyTo: varchar("reply_to", { length: 320 }),
-    status: campaignStatusEnum("status").default("draft").notNull(),
-    trackingOpens: boolean("tracking_opens").default(false).notNull(),
-    trackingClicks: boolean("tracking_clicks").default(false).notNull(),
-    scheduledAt: timestamp("scheduled_at", { withTimezone: true }),
-    dispatchClaimedAt: timestamp("dispatch_claimed_at", { withTimezone: true }),
-    sentAt: timestamp("sent_at", { withTimezone: true }),
-    recipientCount: integer("recipient_count").default(0).notNull(),
-    deliveredCount: integer("delivered_count").default(0).notNull(),
-    bouncedCount: integer("bounced_count").default(0).notNull(),
-    complaintCount: integer("complaint_count").default(0).notNull(),
-    unsubscribeCount: integer("unsubscribe_count").default(0).notNull(),
-    acceptedCount: integer("accepted_count").default(0).notNull(),
-    suppressedCount: integer("suppressed_count").default(0).notNull(),
-    failedCount: integer("failed_count").default(0).notNull(),
-    createdBy: varchar("created_by", { length: 64 }).notNull(),
-    ...timestamps,
-  },
-  (table) => [index("campaigns_workspace_status_idx").on(table.workspaceId, table.status, table.scheduledAt)],
-);
-
-export const campaignRecipients = pgTable(
-  "campaign_recipients",
-  {
-    workspaceId: uuid("workspace_id")
-      .references(() => workspaces.id, { onDelete: "cascade" })
-      .notNull(),
-    campaignId: uuid("campaign_id").references(() => campaigns.id, { onDelete: "cascade" }).notNull(),
-    contactId: uuid("contact_id").references(() => contacts.id, { onDelete: "restrict" }).notNull(),
-    messageId: uuid("message_id"),
-    eligibilitySnapshot: jsonb("eligibility_snapshot").$type<Record<string, unknown>>().default({}).notNull(),
-    excludedAt: timestamp("excluded_at", { withTimezone: true }),
-    exclusionReason: varchar("exclusion_reason", { length: 100 }),
-    createdAt: timestamp("created_at", { withTimezone: true }).defaultNow().notNull(),
-  },
-  (table) => [primaryKey({ columns: [table.campaignId, table.contactId] }), index("campaign_recipients_message_idx").on(table.messageId)],
-);
-
 export const messages = pgTable(
   "messages",
   {
@@ -828,11 +699,14 @@ export const messages = pgTable(
     workspaceId: uuid("workspace_id")
       .references(() => workspaces.id, { onDelete: "cascade" })
       .notNull(),
-    campaignId: uuid("campaign_id").references(() => campaigns.id, { onDelete: "set null" }),
-    contactId: uuid("contact_id").references(() => contacts.id, { onDelete: "set null" }),
-    domainId: uuid("domain_id").references(() => domains.id, { onDelete: "restrict" }).notNull(),
+    // Retired marketing references, always null. Kept (without foreign keys)
+    // until no deployed build selects them; drop them in a later migration.
+    campaignId: uuid("campaign_id"),
+    contactId: uuid("contact_id"),
+    // NO ACTION (not RESTRICT) so deleting a whole workspace cascades cleanly.
+    domainId: uuid("domain_id").references(() => domains.id, { onDelete: "no action" }).notNull(),
     transactionalProfileId: uuid("transactional_profile_id").references(() => transactionalProfiles.id, {
-      onDelete: "restrict",
+      onDelete: "no action",
     }),
     provider: emailProviderEnum("provider"),
     providerMessageId: varchar("provider_message_id", { length: 180 }),
@@ -874,7 +748,18 @@ export const messages = pgTable(
     uniqueIndex("messages_ses_id_idx").on(table.sesMessageId),
     uniqueIndex("messages_provider_id_idx").on(table.provider, table.providerMessageId),
     index("messages_workspace_status_idx").on(table.workspaceId, table.status, table.createdAt),
-    index("messages_campaign_idx").on(table.campaignId, table.status),
+    // Console lists sort a workspace's messages by creation time.
+    index("messages_workspace_created_idx").on(table.workspaceId, table.createdAt),
+    // Workers only ever scan the small in-flight subsets.
+    index("messages_sending_claim_idx").on(table.sendingClaimedAt).where(sql`${table.status} = 'sending'`),
+    index("messages_queued_deadline_idx").on(table.sendDeadlineAt, table.queuedAt).where(sql`${table.status} = 'queued'`),
+    // Retention sweeps run under a 2 s statement timeout.
+    index("messages_content_expiry_idx")
+      .on(table.workspaceId, table.contentExpiresAt)
+      .where(sql`${table.contentExpiresAt} is not null`),
+    index("messages_redaction_idx")
+      .on(table.workspaceId, table.queuedAt)
+      .where(sql`${table.toEmail} <> 'redacted@yodev.invalid'`),
   ],
 );
 
@@ -936,7 +821,10 @@ export const messageAttempts = pgTable(
     errorMessage: text("error_message"),
     createdAt: timestamp("created_at", { withTimezone: true }).defaultNow().notNull(),
   },
-  (table) => [uniqueIndex("message_attempt_unique_idx").on(table.messageId, table.attempt)],
+  (table) => [
+    uniqueIndex("message_attempt_unique_idx").on(table.messageId, table.attempt),
+    index("message_attempts_workspace_created_idx").on(table.workspaceId, table.createdAt),
+  ],
 );
 
 export const emailEvents = pgTable(
@@ -957,6 +845,7 @@ export const emailEvents = pgTable(
   (table) => [
     uniqueIndex("email_events_provider_external_idx").on(table.provider, table.externalEventId),
     index("email_events_workspace_message_idx").on(table.workspaceId, table.messageId, table.occurredAt),
+    index("email_events_workspace_occurred_idx").on(table.workspaceId, table.occurredAt),
   ],
 );
 
@@ -1030,7 +919,10 @@ export const idempotencyKeys = pgTable(
     response: jsonb("response").$type<{ ids: string[] }>().notNull(),
     createdAt: timestamp("created_at", { withTimezone: true }).defaultNow().notNull(),
   },
-  (table) => [uniqueIndex("idempotency_workspace_key_idx").on(table.workspaceId, table.key)],
+  (table) => [
+    uniqueIndex("idempotency_workspace_key_idx").on(table.workspaceId, table.key),
+    index("idempotency_workspace_created_idx").on(table.workspaceId, table.createdAt),
+  ],
 );
 
 export const webhookEndpoints = pgTable(
@@ -1071,42 +963,24 @@ export const webhookDeliveries = pgTable(
   (table) => [uniqueIndex("webhook_delivery_event_idx").on(table.endpointId, table.eventId), index("webhook_delivery_retry_idx").on(table.deliveredAt, table.nextAttemptAt)],
 );
 
-export const importJobs = pgTable(
-  "import_jobs",
+export const stripeEvents = pgTable(
+  "stripe_events",
   {
-    id: uuid("id").defaultRandom().primaryKey(),
-    workspaceId: uuid("workspace_id")
-      .references(() => workspaces.id, { onDelete: "cascade" })
-      .notNull(),
-    objectKey: text("object_key").notNull(),
-    listId: uuid("list_id").references(() => contactLists.id, { onDelete: "set null" }),
-    status: varchar("status", { length: 32 }).default("pending").notNull(),
-    mapping: jsonb("mapping").$type<Record<string, string>>().default({}).notNull(),
-    processedRows: integer("processed_rows").default(0).notNull(),
-    importedRows: integer("imported_rows").default(0).notNull(),
-    rejectedRows: integer("rejected_rows").default(0).notNull(),
-    errorSummary: jsonb("error_summary").$type<Array<Record<string, unknown>>>().default([]).notNull(),
-    createdBy: varchar("created_by", { length: 64 }).notNull(),
-    completedAt: timestamp("completed_at", { withTimezone: true }),
+    eventId: varchar("event_id", { length: 64 }).primaryKey(),
+    type: varchar("type", { length: 100 }).notNull(),
+    stripeCreatedAt: timestamp("stripe_created_at", { withTimezone: true }),
+    livemode: boolean("livemode"),
+    objectType: varchar("object_type", { length: 64 }),
+    objectId: varchar("object_id", { length: 180 }),
+    customerId: varchar("customer_id", { length: 64 }),
+    subscriptionId: varchar("subscription_id", { length: 64 }),
+    status: varchar("status", { length: 24 }).default("received").notNull(),
+    processedAt: timestamp("processed_at", { withTimezone: true }),
+    lastErrorCode: varchar("last_error_code", { length: 120 }),
     ...timestamps,
   },
-  (table) => [index("import_jobs_workspace_status_idx").on(table.workspaceId, table.status)],
+  (table) => [index("stripe_events_created_idx").on(table.createdAt)],
 );
-
-export const stripeEvents = pgTable("stripe_events", {
-  eventId: varchar("event_id", { length: 64 }).primaryKey(),
-  type: varchar("type", { length: 100 }).notNull(),
-  stripeCreatedAt: timestamp("stripe_created_at", { withTimezone: true }),
-  livemode: boolean("livemode"),
-  objectType: varchar("object_type", { length: 64 }),
-  objectId: varchar("object_id", { length: 180 }),
-  customerId: varchar("customer_id", { length: 64 }),
-  subscriptionId: varchar("subscription_id", { length: 64 }),
-  status: varchar("status", { length: 24 }).default("received").notNull(),
-  processedAt: timestamp("processed_at", { withTimezone: true }),
-  lastErrorCode: varchar("last_error_code", { length: 120 }),
-  ...timestamps,
-});
 
 export const auditEvents = pgTable(
   "audit_events",
@@ -1120,7 +994,10 @@ export const auditEvents = pgTable(
     metadata: jsonb("metadata").$type<Record<string, unknown>>().default({}).notNull(),
     createdAt: timestamp("created_at", { withTimezone: true }).defaultNow().notNull(),
   },
-  (table) => [index("audit_workspace_created_idx").on(table.workspaceId, table.createdAt)],
+  (table) => [
+    index("audit_workspace_created_idx").on(table.workspaceId, table.createdAt),
+    index("audit_global_created_idx").on(table.createdAt).where(sql`${table.workspaceId} is null`),
+  ],
 );
 
 export const adminReviews = pgTable(
@@ -1167,5 +1044,35 @@ export const clientProvisioningRuns = pgTable(
       "client_provisioning_status_valid",
       sql`${table.status} in ('pending_email', 'sending_email', 'invitation_sent', 'email_failed', 'accepted')`,
     ),
+  ],
+);
+
+// Public beta applications are not tied to a workspace. The work email is
+// personal data: it is never logged and the row is purged by retention.
+export const betaApplications = pgTable(
+  "beta_applications",
+  {
+    id: uuid("id").defaultRandom().primaryKey(),
+    company: varchar("company", { length: 180 }).notNull(),
+    contactName: varchar("contact_name", { length: 140 }).notNull(),
+    workEmail: varchar("work_email", { length: 320 }).notNull(),
+    websiteUrl: text("website_url"),
+    useCase: text("use_case").notNull(),
+    expectedMonthlyVolume: integer("expected_monthly_volume").notNull(),
+    locale: varchar("locale", { length: 8 }).default("fr").notNull(),
+    consentedAt: timestamp("consented_at", { withTimezone: true }).notNull(),
+    // Keyed hash of the client IP, used only for rate limiting and erased early.
+    ipHash: varchar("ip_hash", { length: 64 }),
+    status: varchar("status", { length: 24 }).default("new").notNull(),
+    reviewedAt: timestamp("reviewed_at", { withTimezone: true }),
+    reviewedBy: varchar("reviewed_by", { length: 64 }),
+    ...timestamps,
+  },
+  (table) => [
+    index("beta_applications_status_idx").on(table.status, table.createdAt),
+    index("beta_applications_ip_idx").on(table.ipHash, table.createdAt),
+    index("beta_applications_created_idx").on(table.createdAt),
+    check("beta_applications_status_valid", sql`${table.status} in ('new', 'reviewed')`),
+    check("beta_applications_volume_valid", sql`${table.expectedMonthlyVolume} >= 0`),
   ],
 );

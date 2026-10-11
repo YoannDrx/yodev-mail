@@ -13,7 +13,6 @@ import {
   StripeSubscriptionRejectedError,
 } from "@/features/billing/stripe-state";
 import { env } from "@/lib/env";
-import { planCatalog } from "@/lib/plans";
 import { stripe } from "@/lib/stripe";
 
 function eventObject(event: Stripe.Event) {
@@ -164,8 +163,9 @@ async function ingestStripeWebhook(request: Request) {
           lastReconciledAt: new Date(),
           updatedAt: new Date(),
         }).where(eq(subscriptions.workspaceId, snapshot.workspaceId));
+        // Billing never touches dailyLimit: it is owned by the warmup worker
+        // and audited operator overrides, and every invoice would reset it.
         await tx.update(workspaces).set({
-          dailyLimit: planCatalog[snapshot.plan].dailyLimit,
           plan: snapshot.plan,
           updatedAt: new Date(),
         }).where(eq(workspaces.id, snapshot.workspaceId));
