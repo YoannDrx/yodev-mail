@@ -40,7 +40,9 @@ export default defineConfig({
       AWS_ATTACHMENTS_BUCKET: "", POSTMARK_SYSTEM_SERVER_TOKEN_PARAMETER: "",
       SES_ENABLED: "false", POSTMARK_ENABLED: "false",
       STRIPE_SECRET_KEY: "", STRIPE_WEBHOOK_SECRET: "", STRIPE_PRICE_PLATFORM: "", STRIPE_PRICE_USAGE: "",
-      STRIPE_TAX_MODE: "unconfigured", COMMERCIAL_ONBOARDING_ENABLED: "false",
+      STRIPE_TAX_MODE: "unconfigured",
+      // Opens the admin client-creation form for the copied-invitation-link journey.
+      COMMERCIAL_ONBOARDING_ENABLED: "true",
       LIVE_CHECKOUT_ENABLED: "false", STRIPE_USAGE_REPORTING_ENABLED: "false",
       ATTACHMENTS_ENABLED: "false", RAW_EMAIL_ENABLED: "false",
       LIVE_EMAIL_ACCEPTANCE_ENABLED: "false", CUSTOMER_WEBHOOKS_ENABLED: "false",
