@@ -485,12 +485,12 @@ export async function reviewWorkspaceAction(workspaceId: string, decision: "appr
     if (verdict === "approved" && current.status !== "pending_review") throw new AdminRefusal(refusals.notReviewed);
     await db.transaction(async (tx) => {
       if (verdict === "approved") {
-        await tx.update(workspaces).set({ approvedAt: new Date(), dailyLimit: 50, pauseReason: null, pausedAt: null, status: "approved", warmupAdvancedAt: new Date(), warmupStage: 1, updatedAt: new Date() }).where(eq(workspaces.id, id));
+        await tx.update(workspaces).set({ approvedAt: new Date(), dailyLimit: 50, dailyLimitOverriddenAt: null, pauseReason: null, pausedAt: null, status: "approved", warmupAdvancedAt: new Date(), warmupStage: 1, updatedAt: new Date() }).where(eq(workspaces.id, id));
         await tx.update(subscriptions).set({ plan: "beta", status: "inactive", graceEndsAt: null, updatedAt: new Date() }).where(eq(subscriptions.workspaceId, id));
       } else if (verdict === "rejected") {
         await tx.update(workspaces).set({ pauseReason: "admin_rejected", status: "rejected", updatedAt: new Date() }).where(eq(workspaces.id, id));
       } else {
-        await tx.update(workspaces).set({ dailyLimit: 50, pauseReason: "admin_limited", pausedAt: new Date(), status: "paused", updatedAt: new Date() }).where(eq(workspaces.id, id));
+        await tx.update(workspaces).set({ dailyLimit: 50, dailyLimitOverriddenAt: null, pauseReason: "admin_limited", pausedAt: new Date(), status: "paused", updatedAt: new Date() }).where(eq(workspaces.id, id));
       }
       const [review] = await tx.select().from(adminReviews).where(eq(adminReviews.workspaceId, id)).orderBy(adminReviews.createdAt).limit(1);
       if (review) await tx.update(adminReviews).set({ decision: verdict === "limited" ? "pending" : verdict, reviewedAt: new Date(), reviewedBy: userId, updatedAt: new Date() }).where(and(eq(adminReviews.id, review.id), eq(adminReviews.workspaceId, id)));

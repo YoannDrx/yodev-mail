@@ -34,6 +34,9 @@ import {
   setWorkspaceContentPolicyAction,
 } from "@/features/admin/actions";
 import { AdminActionButton, AdminInviteMemberForm, ClientProvisioningForm } from "@/features/admin/admin-forms";
+import { DailyLimitForm, ReviewApplicationButton } from "@/features/admin/admin-ops-forms";
+import { listBetaApplications } from "@/features/applications/admin";
+import { warmupLimitForStage } from "@/features/sending/warmup";
 import { requireAdmin } from "@/lib/page-auth";
 import { isFeatureEnabled } from "@/lib/env";
 import { localized, localizedPath } from "@/i18n/config";
@@ -53,7 +56,7 @@ export default async function Page() {
   const locale = await getLocale();
   const formatLocale = localeCode(locale);
   const copy = localized(locale, {
-    fr: { eyebrow:"CONSOLE INTERNE YODEV",title:"Validation transactionnelle et fournisseurs",intro:"Le fournisseur reste invisible côté client. Toute activation est auditée et débute à 50 emails par jour.",newClient:"Nouveau client",company:"Entreprise",ownerEmail:"Email du propriétaire",website:"Site web",monthly:"Volume mensuel attendu",useCase:"Cas d’usage transactionnel",create:"Créer et inviter le propriétaire",creating:"Création…",gate:"Le gate COMMERCIAL_ONBOARDING_ENABLED est fermé. Activez-le uniquement après migration et validation du parcours A/B en environnement isolé.",deleted:"Workspace supprimé",attempts:"tentative(s)",resend:"Renvoyer l’invitation",copyLink:"Copier le lien d’invitation",reconcile:"Réconcilier le propriétaire",workspaces:"Workspaces",siteMissing:"Site non renseigné",perMonth:"emails/mois",limit:"limite",perDay:"jour",useCaseMissing:"Cas d’usage non renseigné",pilot:"Droit pilote",until:"jusqu’au",inactive:"inactif",approve:"Approuver",pause:"Suspendre",reject:"Refuser",templatesOnly:"Templates seuls",allowRaw:"Autoriser raw",pilot30:"Pilote 30 jours",revokePilot:"Révoquer pilote",inviteMember:"Inviter un membre",inviteInto:"Inviter dans",reviewWarning:"Vérifier identité, site, application, déclencheurs et relation destinataire avant approbation.",useCases:"Cas d’usage",disable:"Désactiver",templates:"Templates",providerAccounts:"Comptes fournisseurs",reactivate:"Réactiver",domainsProviders:"Domaines et fournisseurs",activeProvider:"fournisseur actif",noActiveProvider:"aucun fournisseur actif",provision:"Provisionner",prepareSes:"Préparer SES",active:"actif",activate:"Activer",signOut:"Se déconnecter",signingOut:"Déconnexion…",dashboard:"Console client",
+    fr: { eyebrow:"CONSOLE INTERNE YODEV",title:"Validation transactionnelle et fournisseurs",intro:"Le fournisseur reste invisible côté client. Toute activation est auditée et débute à 50 emails par jour.",newClient:"Nouveau client",company:"Entreprise",ownerEmail:"Email du propriétaire",website:"Site web",monthly:"Volume mensuel attendu",useCase:"Cas d’usage transactionnel",create:"Créer et inviter le propriétaire",creating:"Création…",gate:"Le gate COMMERCIAL_ONBOARDING_ENABLED est fermé. Activez-le uniquement après migration et validation du parcours A/B en environnement isolé.",deleted:"Workspace supprimé",attempts:"tentative(s)",resend:"Renvoyer l’invitation",copyLink:"Copier le lien d’invitation",reconcile:"Réconcilier le propriétaire",workspaces:"Workspaces",siteMissing:"Site non renseigné",perMonth:"emails/mois",limit:"limite",perDay:"jour",useCaseMissing:"Cas d’usage non renseigné",pilot:"Droit pilote",until:"jusqu’au",inactive:"inactif",approve:"Approuver",pause:"Suspendre",reject:"Refuser",templatesOnly:"Templates seuls",allowRaw:"Autoriser raw",pilot30:"Pilote 30 jours",revokePilot:"Révoquer pilote",inviteMember:"Inviter un membre",inviteInto:"Inviter dans",reviewWarning:"Vérifier identité, site, application, déclencheurs et relation destinataire avant approbation.",useCases:"Cas d’usage",disable:"Désactiver",templates:"Templates",providerAccounts:"Comptes fournisseurs",reactivate:"Réactiver",domainsProviders:"Domaines et fournisseurs",activeProvider:"fournisseur actif",noActiveProvider:"aucun fournisseur actif",provision:"Provisionner",prepareSes:"Préparer SES",active:"actif",activate:"Activer",signOut:"Se déconnecter",signingOut:"Déconnexion…",dashboard:"Console client",applications:"Candidatures bêta",noApplications:"Aucune candidature.",reviewed:"traitée",received:"reçue le",volume:"emails/mois annoncés",
       confirm: {
         pauseWorkspace: ["Suspendre ce workspace ?", "Les envois du workspace sont suspendus immédiatement et sa limite revient à 50 emails par jour."],
         rejectWorkspace: ["Refuser ce workspace ?", "Le dossier est refusé et le workspace ne peut plus envoyer d’emails."],
@@ -67,7 +70,7 @@ export default async function Page() {
         disableBinding: ["Désactiver cette liaison fournisseur ?", "Si elle est active, le domaine n’aura plus de fournisseur et ses envois s’arrêteront."],
       },
     },
-    en: { eyebrow:"YODEV INTERNAL CONSOLE",title:"Transactional and provider review",intro:"The provider remains invisible to customers. Every activation is audited and starts at 50 emails per day.",newClient:"New client",company:"Company",ownerEmail:"Owner email",website:"Website",monthly:"Expected monthly volume",useCase:"Transactional use case",create:"Create and invite owner",creating:"Creating…",gate:"The COMMERCIAL_ONBOARDING_ENABLED gate is closed. Enable it only after migration and A/B journey validation in an isolated environment.",deleted:"Deleted workspace",attempts:"attempt(s)",resend:"Resend invitation",copyLink:"Copy invitation link",reconcile:"Reconcile owner",workspaces:"Workspaces",siteMissing:"Website not provided",perMonth:"emails/month",limit:"limit",perDay:"day",useCaseMissing:"Use case not provided",pilot:"Pilot entitlement",until:"until",inactive:"inactive",approve:"Approve",pause:"Pause",reject:"Reject",templatesOnly:"Templates only",allowRaw:"Allow raw",pilot30:"30-day pilot",revokePilot:"Revoke pilot",inviteMember:"Invite member",inviteInto:"Invite into",reviewWarning:"Verify identity, website, application, triggers, and recipient relationship before approval.",useCases:"Use cases",disable:"Disable",templates:"Templates",providerAccounts:"Provider accounts",reactivate:"Reactivate",domainsProviders:"Domains and providers",activeProvider:"active provider",noActiveProvider:"no active provider",provision:"Provision",prepareSes:"Prepare SES",active:"active",activate:"Activate",signOut:"Sign out",signingOut:"Signing out…",dashboard:"Customer console",
+    en: { eyebrow:"YODEV INTERNAL CONSOLE",title:"Transactional and provider review",intro:"The provider remains invisible to customers. Every activation is audited and starts at 50 emails per day.",newClient:"New client",company:"Company",ownerEmail:"Owner email",website:"Website",monthly:"Expected monthly volume",useCase:"Transactional use case",create:"Create and invite owner",creating:"Creating…",gate:"The COMMERCIAL_ONBOARDING_ENABLED gate is closed. Enable it only after migration and A/B journey validation in an isolated environment.",deleted:"Deleted workspace",attempts:"attempt(s)",resend:"Resend invitation",copyLink:"Copy invitation link",reconcile:"Reconcile owner",workspaces:"Workspaces",siteMissing:"Website not provided",perMonth:"emails/month",limit:"limit",perDay:"day",useCaseMissing:"Use case not provided",pilot:"Pilot entitlement",until:"until",inactive:"inactive",approve:"Approve",pause:"Pause",reject:"Reject",templatesOnly:"Templates only",allowRaw:"Allow raw",pilot30:"30-day pilot",revokePilot:"Revoke pilot",inviteMember:"Invite member",inviteInto:"Invite into",reviewWarning:"Verify identity, website, application, triggers, and recipient relationship before approval.",useCases:"Use cases",disable:"Disable",templates:"Templates",providerAccounts:"Provider accounts",reactivate:"Reactivate",domainsProviders:"Domains and providers",activeProvider:"active provider",noActiveProvider:"no active provider",provision:"Provision",prepareSes:"Prepare SES",active:"active",activate:"Activate",signOut:"Sign out",signingOut:"Signing out…",dashboard:"Customer console",applications:"Beta applications",noApplications:"No applications.",reviewed:"reviewed",received:"received on",volume:"emails/month expected",
       confirm: {
         pauseWorkspace: ["Pause this workspace?", "The workspace stops sending immediately and its limit returns to 50 emails per day."],
         rejectWorkspace: ["Reject this workspace?", "The application is rejected and the workspace can no longer send email."],
@@ -95,6 +98,7 @@ export default async function Page() {
     db.select().from(subscriptions).orderBy(desc(subscriptions.createdAt)),
     db.select().from(clientProvisioningRuns).orderBy(desc(clientProvisioningRuns.createdAt)),
   ]);
+  const applications = await listBetaApplications({ limit: 100 });
   const commercialOnboardingEnabled = isFeatureEnabled("COMMERCIAL_ONBOARDING_ENABLED");
 
   return <main className="mx-auto min-h-screen max-w-7xl p-8">
@@ -125,6 +129,17 @@ export default async function Page() {
       })}
     </Section>
 
+    <Section title={copy.applications}>
+      {applications.length ? applications.map((application) => <article className="flex flex-wrap items-start justify-between gap-4 rounded-md border bg-card p-5" key={application.id}>
+        <div className="max-w-3xl">
+          <div className="flex items-center gap-2"><h3 className="font-semibold">{application.company}</h3>{application.status === "reviewed" && <Badge variant="secondary">{copy.reviewed}</Badge>}</div>
+          <p className="text-sm text-muted-foreground">{application.contactName} · {application.workEmail}{application.websiteUrl ? ` · ${application.websiteUrl}` : ""} · {application.expectedMonthlyVolume.toLocaleString(formatLocale)} {copy.volume} · {copy.received} {application.createdAt.toLocaleString(formatLocale, { timeZone: "Europe/Paris", timeZoneName: "short" })}</p>
+          <p className="mt-2 whitespace-pre-wrap text-sm">{application.useCase}</p>
+        </div>
+        {application.status === "new" && <ReviewApplicationButton applicationId={application.id} locale={locale} />}
+      </article>) : <p className="text-sm text-muted-foreground">{copy.noApplications}</p>}
+    </Section>
+
     <Section title={copy.workspaces}>
       {workspaceRows.map((workspace) => {
         const subscription = subscriptionRows.find((row) => row.workspaceId === workspace.id);
@@ -145,6 +160,7 @@ export default async function Page() {
             {subscription?.pilotAccessExpiresAt && <AdminActionButton action={setPilotAccessAction.bind(null, workspace.id, null)} confirm={confirm("revokePilot", copy.revokePilot)} locale={locale} variant="destructive">{copy.revokePilot}</AdminActionButton>}
           </div>
         </div>
+        {!workspace.deletedAt && <DailyLimitForm automatic={warmupLimitForStage(workspace.warmupStage)} current={workspace.dailyLimit} locale={locale} overridden={Boolean(workspace.dailyLimitOverriddenAt)} workspaceId={workspace.id} />}
         {workspace.status === "approved" && <AdminInviteMemberForm action={inviteWorkspaceMemberAction.bind(null, workspace.id)} inputLabel={`${copy.inviteInto} ${workspace.name}`} label={copy.inviteMember} locale={locale} />}
         {workspace.status === "pending_review" && <p className="mt-4 rounded-md y-status-warning p-3 text-sm text-[var(--y-warning)]"><AlertTriangle className="mr-2 inline size-4" />{copy.reviewWarning}</p>}
       </article>;})}

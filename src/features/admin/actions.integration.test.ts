@@ -160,4 +160,14 @@ describe("admin action parameters are validated at runtime", () => {
     expect(await reviewWorkspaceAction(id, "approved")).toMatchObject({ ok: true, message: "Action enregistrée." });
     expect((await db.select().from(workspaces).where(eq(workspaces.id, id)))[0].status).toBe("approved");
   });
+
+  it("hands a pinned daily limit back to warmup on approval and on pause", async () => {
+    const id = await workspace("pending_review");
+    await db.update(workspaces).set({ dailyLimit: 5_000, dailyLimitOverriddenAt: new Date() }).where(eq(workspaces.id, id));
+    expect(await reviewWorkspaceAction(id, "approved")).toMatchObject({ ok: true });
+    expect((await db.select().from(workspaces).where(eq(workspaces.id, id)))[0]).toMatchObject({ dailyLimit: 50, dailyLimitOverriddenAt: null });
+    await db.update(workspaces).set({ dailyLimit: 5_000, dailyLimitOverriddenAt: new Date() }).where(eq(workspaces.id, id));
+    expect(await reviewWorkspaceAction(id, "limited")).toMatchObject({ ok: true });
+    expect((await db.select().from(workspaces).where(eq(workspaces.id, id)))[0]).toMatchObject({ dailyLimit: 50, dailyLimitOverriddenAt: null, status: "paused" });
+  });
 });
