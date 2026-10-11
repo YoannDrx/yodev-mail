@@ -87,4 +87,18 @@ describe("SES delivery contract", () => {
     send.mockRejectedValueOnce({ name: "recipient@example.test" });
     await expect(new SesDeliveryProvider().send(input)).rejects.toMatchObject({ kind: "ambiguous", code: "ses_unknown" });
   });
+
+  it.each([
+    ["x@other.test, Bob", '"x@other.test, Bob" <recipient@example.test>'],
+    ['Bob" <evil@other.test>', '"Bob\\" <evil@other.test>" <recipient@example.test>'],
+    ["back\\slash", '"back\\\\slash" <recipient@example.test>'],
+    ["Zoé", "=?UTF-8?B?Wm/DqQ==?= <recipient@example.test>"],
+    ["📬 Équipe", "=?UTF-8?B?8J+TrCDDiXF1aXBl?= <recipient@example.test>"],
+  ])("formats a hostile or non-ASCII display name as a single recipient: %s", async (name, expected) => {
+    send.mockResolvedValue({ MessageId: "ses-1" });
+    await new SesDeliveryProvider().send({ ...input, from: { email: "sender@example.test", name }, to: { email: "recipient@example.test", name } });
+    const command = send.mock.calls[0][0];
+    expect(command.input.Destination.ToAddresses).toEqual([expected]);
+    expect(command.input.FromEmailAddress).toBe(expected.replace("recipient@", "sender@"));
+  });
 });

@@ -1,14 +1,29 @@
 import { z } from "zod";
+import {
+  MAX_TEMPLATE_VARIABLE_LENGTH,
+  MAX_TEMPLATE_VARIABLES_TOTAL_LENGTH,
+  templateVariableLength,
+} from "@/features/templates/render";
 
+// A display name is never allowed to carry address syntax: control characters
+// could inject headers and `,;:"<>@\` could turn one recipient into a list.
+// Providers also quote or encode the name, but the API refuses it first.
 const mailbox = z.object({
   email: z.string().email(),
-  name: z.string().trim().min(1).max(140).regex(/^[^\u0000-\u001f\u007f]+$/).optional(),
+  name: z.string().trim().min(1).max(140)
+    .regex(/^[^\u0000-\u001f\u007f]+$/, { message: "Le nom ne peut pas contenir de caractère de contrôle." })
+    .regex(/^[^,;:"<>@\\]+$/, { message: "Le nom ne peut pas contenir les caractères , ; : \" < > @ ou \\." })
+    .optional(),
 }).strict();
 
 const variables = z.record(
   z.string().max(80),
-  z.union([z.string().max(10_000), z.number(), z.boolean(), z.null()]),
-).refine((value) => Object.keys(value).length <= 50, { message: "Un maximum de 50 variables est autorisé." });
+  z.union([z.string().max(MAX_TEMPLATE_VARIABLE_LENGTH), z.number(), z.boolean(), z.null()]),
+).refine((value) => Object.keys(value).length <= 50, { message: "Un maximum de 50 variables est autorisé." })
+  .refine(
+    (value) => Object.values(value).reduce<number>((sum, item) => sum + templateVariableLength(item), 0) <= MAX_TEMPLATE_VARIABLES_TOTAL_LENGTH,
+    { message: `Les variables ne peuvent pas dépasser ${MAX_TEMPLATE_VARIABLES_TOTAL_LENGTH} caractères au total.` },
+  );
 
 const templateContent = z.object({
   templateId: z.string().uuid(),

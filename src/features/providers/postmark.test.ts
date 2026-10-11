@@ -64,4 +64,18 @@ describe("Postmark delivery contract", () => {
     vi.mocked(fetch).mockRejectedValueOnce(new Error(privateText));
     await expect(new PostmarkDeliveryProvider().send(input)).rejects.toMatchObject({ message: "Postmark request outcome is unknown.", kind: "ambiguous" });
   });
+
+  it.each([
+    ["x@other.test, Bob", '"x@other.test, Bob" <recipient@example.test>'],
+    ['Bob" <evil@other.test>', '"Bob\\" <evil@other.test>" <recipient@example.test>'],
+    ["back\\slash", '"back\\\\slash" <recipient@example.test>'],
+    ["Zoé", "=?UTF-8?B?Wm/DqQ==?= <recipient@example.test>"],
+    ["📬 Équipe", "=?UTF-8?B?8J+TrCDDiXF1aXBl?= <recipient@example.test>"],
+  ])("formats a hostile or non-ASCII display name as a single recipient: %s", async (name, expected) => {
+    vi.mocked(fetch).mockResolvedValue(new Response(JSON.stringify({ ErrorCode: 0, MessageID: "pm-1" }), { status: 200 }));
+    await new PostmarkDeliveryProvider().send({ ...input, from: { email: "sender@example.test", name }, to: { email: "recipient@example.test", name } });
+    const body = JSON.parse(String(vi.mocked(fetch).mock.calls[0][1]?.body));
+    expect(body.To).toBe(expected);
+    expect(body.From).toBe(expected.replace("recipient@", "sender@"));
+  });
 });

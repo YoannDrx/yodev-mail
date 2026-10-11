@@ -23,7 +23,11 @@ import { causalErrorCode, withSafeRouteErrors } from "@/features/api/safe-route"
 import { normalizeEmail } from "@/features/email-address/normalization";
 import { combinedContentSize, estimatedMimeSize, isRawContent, sendEmailSchema } from "@/features/emails/schema";
 import { evaluateStoredMessage, utcDay } from "@/features/sending/eligibility";
-import { renderApprovedTemplate, TemplateVariablesMissingError } from "@/features/templates/render";
+import {
+  renderApprovedTemplate,
+  TemplateVariablesMissingError,
+  TemplateVariablesTooLongError,
+} from "@/features/templates/render";
 import { canonicalJson, sha256 } from "@/lib/crypto";
 import { isFeatureEnabled } from "@/lib/env";
 
@@ -35,16 +39,29 @@ async function postEmail(request: Request) {
   if (key.mode === "live" && !isFeatureEnabled("LIVE_EMAIL_ACCEPTANCE_ENABLED")) {
     return NextResponse.json({ error: { code: "live_email_acceptance_disabled", message: "Les envois live sont temporairement suspendus." } }, { status: 503 });
   }
-  const rate = await consumeWorkspaceRateLimit(key.workspaceId, key.mode);
-  if (!rate.allowed) {
-    return NextResponse.json({ error: { code: "rate_limit_exceeded" } }, {
-      status: 429,
-      headers: { "retry-after": String(Math.max(1, Math.ceil((rate.resetAt.getTime() - Date.now()) / 1000))), "x-ratelimit-limit": String(rate.limit), "x-ratelimit-remaining": "0" },
-    });
-  }
   const idempotencyKey = request.headers.get("idempotency-key")?.trim();
   if (!idempotencyKey || idempotencyKey.length > 128) {
     return NextResponse.json({ error: { code: "idempotency_key_required", message: "L’en-tête Idempotency-Key est requis." } }, { status: 400 });
+  }
+  const db = requireDb();
+  // A retry of an already accepted request must not burn the per-minute
+  // budget, otherwise legitimate client retries end up rate limited. Only a
+  // key that already exists for this workspace skips the limiter, and that
+  // path can only replay the stored answer or refuse a different body: it
+  // never creates a message, so it cannot be used to bypass the limit.
+  const [existing] = await db
+    .select()
+    .from(idempotencyKeys)
+    .where(and(eq(idempotencyKeys.workspaceId, key.workspaceId), eq(idempotencyKeys.key, idempotencyKey)))
+    .limit(1);
+  if (!existing) {
+    const rate = await consumeWorkspaceRateLimit(key.workspaceId, key.mode);
+    if (!rate.allowed) {
+      return NextResponse.json({ error: { code: "rate_limit_exceeded" } }, {
+        status: 429,
+        headers: { "retry-after": String(Math.max(1, Math.ceil((rate.resetAt.getTime() - Date.now()) / 1000))), "x-ratelimit-limit": String(rate.limit), "x-ratelimit-remaining": "0" },
+      });
+    }
   }
   let raw: unknown;
   try {
@@ -69,18 +86,12 @@ async function postEmail(request: Request) {
     );
   }
 
-  const db = requireDb();
   const requestHash = sha256(canonicalJson(parsed.data));
   const fromEmail = normalizeEmail(parsed.data.from.email);
   const toEmail = normalizeEmail(parsed.data.to.email);
   const replyTo = parsed.data.replyTo
     ? normalizeEmail(parsed.data.replyTo)
     : undefined;
-  const [existing] = await db
-    .select()
-    .from(idempotencyKeys)
-    .where(and(eq(idempotencyKeys.workspaceId, key.workspaceId), eq(idempotencyKeys.key, idempotencyKey)))
-    .limit(1);
   if (existing) {
     if (existing.requestHash !== requestHash) {
       return NextResponse.json({ error: { code: "idempotency_conflict", message: "Cette clé a déjà été utilisée avec un corps différent." } }, { status: 409 });
@@ -160,6 +171,9 @@ async function postEmail(request: Request) {
     } catch (error) {
       if (error instanceof TemplateVariablesMissingError) {
         return NextResponse.json({ error: { code: "template_variables_missing", details: { missing: error.missingVariables } } }, { status: 422 });
+      }
+      if (error instanceof TemplateVariablesTooLongError) {
+        return NextResponse.json({ error: { code: "template_variables_too_long", details: { variables: error.variables } } }, { status: 422 });
       }
       throw error;
     }
