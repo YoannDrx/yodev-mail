@@ -9,7 +9,7 @@ vi.hoisted(() => {
     BETTER_AUTH_EMAIL_PASSWORD_ENABLED: "false",
     BETTER_AUTH_GOOGLE_CLIENT_ID: "local-integration.invalid",
     BETTER_AUTH_GOOGLE_CLIENT_SECRET: "local-only-not-a-google-credential",
-    BETTER_AUTH_SECRET: "integration-secret-integration-secret-0123456789",
+    BETTER_AUTH_SECRET: "integration-secret-".padEnd(48, "0"),
     BETTER_AUTH_TRUSTED_ORIGINS: "",
     NEXT_PUBLIC_APP_URL: "http://localhost:3000",
   });

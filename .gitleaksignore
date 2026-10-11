@@ -9,3 +9,6 @@ a5ce4e2229d846b20d45e563e7ca1b9740ec111d:src/workers/report-stripe-usage.integra
 # Historical public API documentation placeholder, ending in an ellipsis.
 2037f0615b8f6988bb0043f6bc5696c993965f6a:src/app/docs/page.tsx:curl-auth-header:4
 84e0640b0dca299fc2ed7f8763656ae6be25a596:src/app/docs/page.tsx:curl-auth-header:2
+# Fixed secrets of mocked envs in integration tests, never deployed values.
+5a8dec2237912590db7a80b016e94a3be991539c:src/features/applications/beta-applications.integration.test.ts:generic-api-key:18
+4f127cb6de32d78249603605f6f104ae77e1dc47:src/lib/auth.integration.test.ts:generic-api-key:12

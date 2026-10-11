@@ -15,7 +15,7 @@ vi.mock("@/lib/page-auth", () => ({
 }));
 vi.mock("@/lib/env", async (importOriginal) => {
   const original = await importOriginal<typeof import("@/lib/env")>();
-  return { ...original, env: { ...original.env, API_KEY_PEPPER: "integration-pepper-0123456789abcdef" } };
+  return { ...original, env: { ...original.env, API_KEY_PEPPER: "integration-pepper-".padEnd(32, "0") } };
 });
 
 import { databasePool, requireDb } from "@/db/runtime";
@@ -73,7 +73,7 @@ describe("public beta application form", () => {
         expectedMonthlyVolume: 12_000,
         locale: "fr",
         status: "new",
-        ipHash: hmac("beta-application-ip:203.0.113.10", "integration-pepper-0123456789abcdef"),
+        ipHash: hmac("beta-application-ip:203.0.113.10", "integration-pepper-".padEnd(32, "0")),
       });
       expect(row.ipHash).not.toContain("203.0.113.10");
       expect(row.consentedAt).toBeInstanceOf(Date);
