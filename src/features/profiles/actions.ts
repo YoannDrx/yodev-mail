@@ -5,38 +5,51 @@ import { revalidatePath } from "next/cache";
 import { z } from "zod";
 import { requireDb } from "@/db";
 import { auditEvents, transactionalProfiles } from "@/db/schema";
+import { profileFieldMessages, profileFields, profileSchema } from "@/features/profiles/schema";
+import { localized } from "@/i18n/config";
+import { actionFailure, actionSuccess, formValues, type ActionState } from "@/lib/action-state";
+import { ConsoleActionError, invalidForm, localizedFieldErrors, runConsoleAction } from "@/lib/console-action";
 import { currentWorkspace } from "@/lib/current-workspace";
 
-const profileSchema = z.object({
-  key: z.string().trim().toLowerCase().regex(/^[a-z][a-z0-9_]{1,79}$/),
-  name: z.string().trim().min(2).max(160),
-  triggerDescription: z.string().trim().min(20).max(2000),
-  recipientRelationship: z.string().trim().min(20).max(2000),
-  expectedMonthlyVolume: z.coerce.number().int().min(1).max(10_000_000),
-  contentExample: z.string().trim().min(20).max(10_000),
-});
+const duplicateKey = new ConsoleActionError({
+  fr: "Un cas d’usage utilise déjà cette clé dans ce workspace.",
+  en: "A use case already uses this key in this workspace.",
+}, "key");
 
-export async function createTransactionalProfileAction(formData: FormData) {
-  const data = profileSchema.parse(Object.fromEntries(formData));
-  const { workspace, userId } = await currentWorkspace({ admin: true });
-  const db = requireDb();
-  await db.transaction(async (tx) => {
-    const [profile] = await tx.insert(transactionalProfiles).values({
-      workspaceId: workspace.id,
-      ...data,
-      status: "pending_review",
-      submittedAt: new Date(),
-    }).returning();
-    await tx.insert(auditEvents).values({
-      workspaceId: workspace.id,
-      actorUserId: userId,
-      action: "transactional_profile.submitted",
-      entityType: "transactional_profile",
-      entityId: profile.id,
-      metadata: { key: data.key, expectedMonthlyVolume: data.expectedMonthlyVolume },
+export async function createTransactionalProfileAction(_: ActionState, formData: FormData): Promise<ActionState> {
+  return runConsoleAction(formData, profileFields, async (locale) => {
+    const parsed = profileSchema.safeParse(Object.fromEntries(formData));
+    if (!parsed.success) {
+      return actionFailure(localized(locale, invalidForm), {
+        fieldErrors: localizedFieldErrors(locale, parsed.error, profileFieldMessages),
+        values: formValues(formData, profileFields),
+      });
+    }
+    const data = parsed.data;
+    const { workspace, userId } = await currentWorkspace({ admin: true });
+    const db = requireDb();
+    await db.transaction(async (tx) => {
+      const [profile] = await tx.insert(transactionalProfiles).values({
+        workspaceId: workspace.id,
+        ...data,
+        status: "pending_review",
+        submittedAt: new Date(),
+      }).returning();
+      await tx.insert(auditEvents).values({
+        workspaceId: workspace.id,
+        actorUserId: userId,
+        action: "transactional_profile.submitted",
+        entityType: "transactional_profile",
+        entityId: profile.id,
+        metadata: { key: data.key, expectedMonthlyVolume: data.expectedMonthlyVolume },
+      });
     });
-  });
-  revalidatePath("/dashboard/profils");
+    revalidatePath("/dashboard/profils");
+    return actionSuccess(localized(locale, {
+      fr: `Le cas d’usage « ${data.name} » est soumis à validation.`,
+      en: `The “${data.name}” use case was submitted for review.`,
+    }));
+  }, { uniqueViolation: duplicateKey });
 }
 
 export async function disableTransactionalProfileAction(profileId: string) {

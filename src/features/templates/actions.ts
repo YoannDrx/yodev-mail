@@ -1,66 +1,99 @@
 "use server";
 
-import { and, eq } from "drizzle-orm";
 import { revalidatePath } from "next/cache";
 import { z } from "zod";
 import { requireDb } from "@/db";
-import { auditEvents, templates, templateVersions, transactionalProfiles } from "@/db/schema";
+import { templateLimits } from "@/features/templates/document";
+import { createTemplate, createTemplateVersion, TemplateNotEditableError } from "@/features/templates/versioning";
+import { localized, type Locale } from "@/i18n/config";
+import { actionFailure, actionSuccess, formValues, type ActionState } from "@/lib/action-state";
+import { ConsoleActionError, invalidForm, localizedFieldErrors, runConsoleAction } from "@/lib/console-action";
 import { currentWorkspace } from "@/lib/current-workspace";
-import { sha256 } from "@/lib/crypto";
 
-const schema = z.object({
-  body: z.string().trim().min(1).max(100_000),
-  name: z.string().trim().min(2).max(160),
-  subject: z.string().trim().min(1).max(255),
-  transactionalProfileId: z.string().uuid(),
+const text = (field: keyof typeof templateLimits) =>
+  z.string().trim().min(templateLimits[field].min).max(templateLimits[field].max);
+
+const contentSchema = z.object({
+  body: text("body"),
+  name: text("name"),
+  subject: text("subject"),
 });
 
-function escapeHtml(value: string) {
-  return value.replace(/[&<>"']/g, (character) => ({
-    "&": "&amp;",
-    "<": "&lt;",
-    ">": "&gt;",
-    '"': "&quot;",
-    "'": "&#039;",
-  })[character]!);
+const createSchema = contentSchema.extend({ transactionalProfileId: z.string().uuid() });
+
+const contentFields = ["name", "subject", "body"] as const;
+const createFields = [...contentFields, "transactionalProfileId"] as const;
+
+const fieldMessages: Record<string, Record<Locale, string>> = {
+  name: { fr: "Entre 2 et 160 caractères.", en: "Between 2 and 160 characters." },
+  subject: { fr: "Entre 1 et 255 caractères.", en: "Between 1 and 255 characters." },
+  body: { fr: "Le contenu est obligatoire (100 000 caractères maximum).", en: "Content is required (100,000 characters maximum)." },
+  transactionalProfileId: { fr: "Choisissez le cas d’usage de ce template.", en: "Choose this template’s use case." },
+};
+
+function notEditable(error: unknown) {
+  if (!(error instanceof TemplateNotEditableError)) return error;
+  if (error.reason === "profile_not_found") {
+    return new ConsoleActionError({ fr: "Ce cas d’usage n’existe pas dans le workspace.", en: "This use case does not exist in the workspace." }, "transactionalProfileId");
+  }
+  if (error.reason === "disabled") {
+    return new ConsoleActionError({ fr: "Ce template a été désactivé par Yodev et ne peut plus être modifié.", en: "Yodev disabled this template; it can no longer be edited." });
+  }
+  return new ConsoleActionError({ fr: "Template introuvable.", en: "Template not found." });
 }
 
-export async function createTemplateAction(formData: FormData) {
-  const data = schema.parse(Object.fromEntries(formData));
-  const { workspace, userId } = await currentWorkspace();
-  const db = requireDb();
-  const [profile] = await db.select({ id: transactionalProfiles.id }).from(transactionalProfiles).where(and(
-    eq(transactionalProfiles.id, data.transactionalProfileId),
-    eq(transactionalProfiles.workspaceId, workspace.id),
-  )).limit(1);
-  if (!profile) throw new Error("Transactional profile not found");
-  const html = `<div style="font-family:Arial,sans-serif;line-height:1.6;color:#18151f">${data.body.split(/\n{2,}/).map((paragraph) => `<p>${escapeHtml(paragraph).replaceAll("\n", "<br>")}</p>`).join("")}</div>`;
-  await db.transaction(async (tx) => {
-    const [template] = await tx.insert(templates).values({
-      name: data.name,
-      subject: data.subject,
-      workspaceId: workspace.id,
-      transactionalProfileId: data.transactionalProfileId,
-      reviewStatus: "pending_review",
-      contentHash: sha256(`${data.subject}\0${html}\0${data.body}`),
-      submittedAt: new Date(),
-    }).returning();
-    await tx.insert(templateVersions).values({
-      workspaceId: workspace.id,
-      createdBy: userId,
-      document: { version: 1, blocks: [{ type: "text", value: data.body }] },
-      html,
-      plainText: data.body,
-      templateId: template.id,
-      version: 1,
-    });
-    await tx.insert(auditEvents).values({
-      action: "template.created",
-      actorUserId: userId,
-      entityId: template.id,
-      entityType: "template",
-      workspaceId: workspace.id,
-    });
+export async function createTemplateAction(_: ActionState, formData: FormData): Promise<ActionState> {
+  return runConsoleAction(formData, createFields, async (locale) => {
+    const parsed = createSchema.safeParse(Object.fromEntries(formData));
+    if (!parsed.success) {
+      return actionFailure(localized(locale, invalidForm), {
+        fieldErrors: localizedFieldErrors(locale, parsed.error, fieldMessages),
+        values: formValues(formData, createFields),
+      });
+    }
+    // Template content is reviewed like domains and use cases: owners and admins only.
+    const { workspace, userId } = await currentWorkspace({ admin: true });
+    try {
+      await createTemplate(requireDb(), { ...parsed.data, workspaceId: workspace.id, userId });
+    } catch (error) {
+      throw notEditable(error);
+    }
+    revalidatePath("/dashboard/templates");
+    return actionSuccess(localized(locale, {
+      fr: `Le template « ${parsed.data.name} » est soumis à validation. Son identifiant est affiché ci-dessous.`,
+      en: `The “${parsed.data.name}” template was submitted for review. Its ID is shown below.`,
+    }));
   });
-  revalidatePath("/dashboard/templates");
+}
+
+export async function updateTemplateAction(templateId: string, _: ActionState, formData: FormData): Promise<ActionState> {
+  return runConsoleAction(formData, contentFields, async (locale) => {
+    const id = z.string().uuid().safeParse(templateId);
+    if (!id.success) throw notEditable(new TemplateNotEditableError("not_found"));
+    const parsed = contentSchema.safeParse(Object.fromEntries(formData));
+    if (!parsed.success) {
+      return actionFailure(localized(locale, invalidForm), {
+        fieldErrors: localizedFieldErrors(locale, parsed.error, fieldMessages),
+        values: formValues(formData, contentFields),
+      });
+    }
+    const { workspace, userId } = await currentWorkspace({ admin: true });
+    let version: number;
+    try {
+      ({ version } = await createTemplateVersion(requireDb(), { ...parsed.data, templateId: id.data, workspaceId: workspace.id, userId }));
+    } catch (error) {
+      throw notEditable(error);
+    }
+    revalidatePath("/dashboard/templates");
+    revalidatePath(`/dashboard/templates/${id.data}`);
+    return actionSuccess(localized(locale, {
+      fr: `Version ${version} enregistrée et soumise à validation.`,
+      en: `Version ${version} saved and submitted for review.`,
+    }));
+  }, {
+    uniqueViolation: new ConsoleActionError({
+      fr: "Le template vient d’être modifié par ailleurs. Rechargez la page avant de réessayer.",
+      en: "The template was just changed elsewhere. Reload the page before trying again.",
+    }),
+  });
 }

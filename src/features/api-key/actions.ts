@@ -5,43 +5,70 @@ import { revalidatePath } from "next/cache";
 import { z } from "zod";
 import { requireDb } from "@/db";
 import { apiKeys, auditEvents } from "@/db/schema";
+import { apiKeyAvailability } from "@/features/api-key/availability";
+import { localized } from "@/i18n/config";
+import { actionFailure, actionSuccess, formValues, type ActionState } from "@/lib/action-state";
+import { ConsoleActionError, invalidForm, runConsoleAction } from "@/lib/console-action";
 import { createApiKey } from "@/lib/crypto";
 import { currentWorkspace } from "@/lib/current-workspace";
 import { env } from "@/lib/env";
+
 const createSchema = z.object({
-  name: z.string().min(2).max(120),
+  name: z.string().trim().min(2).max(120),
   mode: z.enum(["test", "live"]),
   scopes: z.array(z.enum(["emails:send", "emails:read", "emails:send:raw", "attachments:write", "webhooks:manage"])).min(1),
 });
 
-export async function createApiKeyAction(input: z.infer<typeof createSchema>) {
-  const data = createSchema.parse(input);
-  if (!env.API_KEY_PEPPER) throw new Error("API key pepper is not configured");
-  const { workspace, userId } = await currentWorkspace({ admin: true });
-  if (data.mode === "live" && workspace.status !== "approved") throw new Error("Live keys require an approved workspace");
-  if (data.scopes.includes("emails:send:raw") && workspace.contentPolicy !== "hybrid") throw new Error("Raw sending has not been approved for this workspace");
-  const generated = createApiKey(data.mode, env.API_KEY_PEPPER);
-  await requireDb().transaction(async (tx) => {
-    await tx.insert(apiKeys).values({ workspaceId: workspace.id, name: data.name, mode: data.mode, prefix: generated.prefix, secretHash: generated.secretHash, scopes: data.scopes, createdBy: userId });
-    await tx.insert(auditEvents).values({ workspaceId: workspace.id, actorUserId: userId, action: "api_key.created", entityType: "api_key", metadata: { mode: data.mode, scopes: data.scopes } });
-  });
-  revalidatePath("/dashboard/api-keys");
-  return { token: generated.token };
-}
-export type ApiKeyFormState = { token: string; error: string };
+export type ApiKeyFormState = ActionState<{ token: string; mode: "test" | "live" }>;
 
 export async function createApiKeyFormAction(_: ApiKeyFormState, formData: FormData): Promise<ApiKeyFormState> {
-  try {
-    const result = await createApiKeyAction({
+  // Multi-valued checkboxes are echoed as one comma-separated value.
+  const echoed = { scopes: formData.getAll("scopes").map(String).join(",") };
+  return runConsoleAction(formData, ["name", "mode"], async (locale) => {
+    const parsed = createSchema.safeParse({
       mode: formData.get("mode"),
       name: formData.get("name"),
       scopes: formData.getAll("scopes"),
-    } as z.infer<typeof createSchema>);
-    return { token: result.token, error: "" };
-  } catch (error) {
-    return { token: "", error: error instanceof Error ? error.message : "Création impossible" };
-  }
+    });
+    if (!parsed.success) {
+      const fieldErrors: Record<string, string[]> = {};
+      for (const issue of parsed.error.issues) {
+        const field = String(issue.path[0]);
+        fieldErrors[field] ??= [localized(locale, field === "name"
+          ? { fr: "Entre 2 et 120 caractères.", en: "Between 2 and 120 characters." }
+          : field === "scopes"
+            ? { fr: "Choisissez au moins une permission.", en: "Choose at least one permission." }
+            : { fr: "Mode invalide.", en: "Invalid mode." })];
+      }
+      return actionFailure(localized(locale, invalidForm), { fieldErrors, values: { ...formValues(formData, ["name", "mode"]), ...echoed } });
+    }
+    const data = parsed.data;
+    if (!env.API_KEY_PEPPER) {
+      throw new ConsoleActionError({ fr: "La création de clés n’est pas configurée sur cet environnement.", en: "Key creation is not configured on this environment." });
+    }
+    const { workspace, userId } = await currentWorkspace({ admin: true });
+    const availability = apiKeyAvailability(workspace);
+    if (data.mode === "live" && !availability.live) {
+      throw new ConsoleActionError(availability.liveReason === "workspace"
+        ? { fr: "Les clés live nécessitent un workspace approuvé par Yodev.", en: "Live keys require a workspace approved by Yodev." }
+        : { fr: "Les envois live sont fermés pour le moment : seules les clés de test peuvent être créées.", en: "Live sending is closed for now: only test keys can be created." }, "mode");
+    }
+    if (data.scopes.includes("emails:send:raw") && !availability.raw) {
+      throw new ConsoleActionError({ fr: "L’envoi de HTML brut n’est pas autorisé pour ce workspace.", en: "Raw HTML sending is not allowed for this workspace." }, "scopes");
+    }
+    if (data.scopes.includes("attachments:write") && !availability.attachments) {
+      throw new ConsoleActionError({ fr: "Les pièces jointes ne sont pas encore disponibles.", en: "Attachments are not available yet." }, "scopes");
+    }
+    const generated = createApiKey(data.mode, env.API_KEY_PEPPER);
+    await requireDb().transaction(async (tx) => {
+      await tx.insert(apiKeys).values({ workspaceId: workspace.id, name: data.name, mode: data.mode, prefix: generated.prefix, secretHash: generated.secretHash, scopes: data.scopes, createdBy: userId });
+      await tx.insert(auditEvents).values({ workspaceId: workspace.id, actorUserId: userId, action: "api_key.created", entityType: "api_key", metadata: { mode: data.mode, scopes: data.scopes } });
+    });
+    revalidatePath("/dashboard/api-keys");
+    return actionSuccess(localized(locale, { fr: "Clé créée.", en: "Key created." }), { token: generated.token, mode: data.mode });
+  }, { values: echoed });
 }
+
 export async function revokeApiKeyAction(id: string) {
   const keyId = z.string().uuid().parse(id);
   const { workspace, userId } = await currentWorkspace({ admin: true });
