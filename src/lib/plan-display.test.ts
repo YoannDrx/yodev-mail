@@ -1,4 +1,5 @@
 import { describe, expect, it } from "vitest";
+import { warmupLimitForStage } from "@/features/sending/warmup";
 import { planCatalog } from "@/lib/plans";
 import { betaPlanDisplay } from "./plan-display";
 
@@ -23,6 +24,6 @@ describe("betaPlanDisplay", () => {
     const display = betaPlanDisplay("fr");
     expect(display.domains).toBe(planCatalog.beta.domains);
     expect(display.members).toBe(planCatalog.beta.members);
-    expect(display.dailyLimit).toBe(planCatalog.beta.dailyLimit);
+    expect(display.dailyLimit).toBe(warmupLimitForStage(1));
   });
 });

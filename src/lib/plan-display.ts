@@ -1,4 +1,5 @@
 import type { Locale } from "@/i18n/config";
+import { warmupLimitForStage } from "@/features/sending/warmup";
 import { planCatalog } from "@/lib/plans";
 
 function euros(locale: Locale, amount: number, fractionDigits: number) {
@@ -26,6 +27,7 @@ export function betaPlanDisplay(locale: Locale) {
     perThousand: euros(locale, perThousand, 2),
     domains: plan.domains,
     members: plan.members,
-    dailyLimit: plan.dailyLimit,
+    // The plan no longer carries a limit: every approved sender starts at warmup stage 1.
+    dailyLimit: warmupLimitForStage(1),
   };
 }
