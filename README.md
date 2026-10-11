@@ -66,7 +66,7 @@ reference values, not an automatic account switch. Preserve `AWS_PROFILE`,
 `AWS_ACCOUNT_ID`, runtime resource ARNs and operating modes when adding account
 metadata. Keep SSO credentials in the AWS CLI credential store, never in `.env`
 files, and do not upload this directory to Vercel. See the
-[test-account setup report](docs/aws-test-account-2026-09-10.md).
+[test-account setup report](docs/archive/aws-test-account-2026-09-10.md).
 
 Never use `drizzle-kit push` against production. Create and verify a Neon
 restore branch before every production migration.
@@ -185,11 +185,11 @@ explicitly before enabling SES. These application checks do not create separate
 AWS accounts or make a shared sending identity environment-specific.
 
 The additional SES IAM restrictions were deployed **in standby** on September 10
-under `a65f72d`. The [real probe](docs/ses-real-probe-2026-09-10.md) records 44
+under `a65f72d`. The [real probe](docs/archive/ses-real-probe-2026-09-10.md) records 44
 provisioning checks and 12 SendEmail checks in the dedicated test account (two
 accepted simulator messages, not 56 deliveries). IAM tenant constraints and SES
 identity membership provide distinct layers of enforcement. The
-[IAM simulator](docs/ses-iam-certification-2026-09-07.md) still disagrees with ten
+[IAM simulator](docs/archive/ses-iam-certification-2026-09-07.md) still disagrees with ten
 expected positive cases; its result is not green. Legacy identities require an
 explicit ownership decision, and the complete application transport and ledger
 still need certification. SES production approval is a separate prerequisite.
@@ -200,10 +200,10 @@ are rejected; workers filter the initial database access by that workspace.
 Deploy outbox, send and webhook workers together in standby. Before activating
 transport, inventory queues and reconcile legacy jobs against their owned
 database records; do not purge queues or add an unscoped compatibility fallback.
-See the [September 11 certification and remaining blockers](docs/queue-workspace-certification-2026-09-11.md)
+See the [September 11 certification and remaining blockers](docs/archive/queue-workspace-certification-2026-09-11.md)
 for this change's publication status.
 
-The [real SES event transport probe](docs/ses-transport-certification-2026-09-11.md)
+The [real SES event transport probe](docs/archive/ses-transport-certification-2026-09-11.md)
 uses a separately gated stack in the dedicated test account. It found that
 EventBridge emits an empty optional bounce field on Delivery events; the consumer
 accepts that representation for non-bounce events without weakening workspace or
@@ -230,4 +230,4 @@ The foundation stack creates an encrypted multi-region management CloudTrail, on
 Better Auth uses a distinct `BETTER_AUTH_SECRET` and Google OAuth client in every environment. Public organization creation is disabled; the first organization is rebound to the existing workspace only for `AUTH_BOOTSTRAP_EMAIL`. Email/password stays disabled until the Postmark system Server is approved and configured.
 
 See [architecture](docs/architecture.md), the [production runbook](docs/production-runbook.md)
-and the dated [production/commercial GO checklist](docs/commercial-go-checklist-2026-08-18.md).
+and the dated [production/commercial GO checklist](docs/archive/commercial-go-checklist-2026-08-18.md).
