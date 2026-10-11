@@ -7,8 +7,8 @@ test("landing page exposes the transactional private-beta promise", async ({ pag
   await expect(page.getByRole("heading", { name: /Vos emails transactionnels/ })).toBeVisible();
   await expect(page.getByRole("link", { name: /Candidater à la bêta/ }).first()).toBeVisible();
   await expect(page.getByText("1 / requête")).toBeVisible();
-  await expect(page.getByText("Tracking", { exact: true })).toBeVisible();
-  await expect(page.getByText("Désactivé", { exact: true })).toBeVisible();
+  await expect(page.getByText("Pixel de suivi", { exact: true })).toBeVisible();
+  await expect(page.getByText("Aucun", { exact: true })).toBeVisible();
   await expect(page).toHaveURL(/\/fr$/);
   await expect(page.locator("html")).toHaveAttribute("lang", "fr");
 });
@@ -17,7 +17,7 @@ test("English pages and the language selector preserve the current route", async
   await page.goto("/en/fonctionnalites?source=language-test");
   await expect(page.locator("html")).toHaveAttribute("lang", "en");
   await expect(page.getByRole("heading", { name: /Transactional delivery/ })).toBeVisible();
-  await page.getByRole("link", { name: "FR" }).click();
+  await page.getByRole("link", { name: "FR", exact: true }).click();
   await expect(page).toHaveURL(/\/fr\/fonctionnalites\?source=language-test$/);
   await expect(page.getByRole("heading", { name: /La livraison transactionnelle/ })).toBeVisible();
   await page.goto("/");
@@ -42,6 +42,7 @@ test("every public and authentication page renders in both languages", async ({ 
     "/delivrabilite",
     "/conformite",
     "/docs",
+    "/contact",
     "/anti-abus",
     "/confidentialite",
     "/cgu",
@@ -113,7 +114,7 @@ test('public appearance stays legible in both themes and at every breakpoint', a
 });
 
 test('brand image routes remain outside locale negotiation', async ({request}) => {
-  for (const path of ['/icon','/apple-icon','/opengraph-image']) {
+  for (const path of ['/icon','/apple-icon','/opengraph-image','/opengraph-image?locale=en']) {
     const response=await request.get(path);expect(response.status()).toBe(200);expect(response.headers()['content-type']).toContain('image/png');
   }
 });

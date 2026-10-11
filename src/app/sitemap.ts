@@ -1,14 +1,17 @@
 import type { MetadataRoute } from "next";
+import { locales } from "@/i18n/config";
+import { absoluteUrl } from "@/lib/site-config";
 
-const publicPaths = ["", "/fonctionnalites", "/tarifs", "/delivrabilite", "/conformite", "/docs", "/anti-abus", "/confidentialite", "/cgu", "/mentions-legales", "/dpa", "/sous-traitants", "/sla"];
+const publicPaths = ["", "/fonctionnalites", "/tarifs", "/delivrabilite", "/conformite", "/docs", "/contact", "/inscription", "/anti-abus", "/confidentialite", "/cgu", "/mentions-legales", "/dpa", "/sous-traitants", "/sla"];
 
 export default function sitemap(): MetadataRoute.Sitemap {
-  return publicPaths.flatMap((path, index) => ["fr", "en"].map((locale) => ({
-    url: `https://mail.yodev.fr/${locale}${path}`,
+  return publicPaths.flatMap((path, index) => locales.map((locale) => ({
+    url: absoluteUrl(`/${locale}${path}`),
     alternates: {
       languages: {
-        fr: `https://mail.yodev.fr/fr${path}`,
-        en: `https://mail.yodev.fr/en${path}`,
+        fr: absoluteUrl(`/fr${path}`),
+        en: absoluteUrl(`/en${path}`),
+        "x-default": absoluteUrl(path || "/"),
       },
     },
     changeFrequency: index === 0 ? "weekly" as const : "monthly" as const,
