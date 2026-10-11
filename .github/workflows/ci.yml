@@ -25,7 +25,11 @@ jobs:
           node-version: 24
           cache: npm
       - run: npm ci
-      - run: npm audit --audit-level=high
+      # Runtime dependencies must have no high advisory. Build-only tooling
+      # (eslint, shadcn CLI, CDK) is gated at critical: some high advisories
+      # there have no published fix and never ship in the deployed bundle.
+      - run: npm audit --omit=dev --audit-level=high
+      - run: npm audit --audit-level=critical
       - run: npx drizzle-kit check
       - run: npm run infra:synth
         # Main-workload compliance uses account-scoped IAM patterns and the
