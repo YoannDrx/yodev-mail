@@ -24,7 +24,7 @@ vi.mock("node:https", () => ({
   request: dependencies.httpsRequest,
 }));
 
-import { postWebhookSafely, selectPublicLookupAddress } from "./safe-http";
+import { createPinnedLookup, postWebhookSafely, selectPublicLookupAddress } from "./safe-http";
 
 afterEach(() => {
   dependencies.agentDestroy.mockReset();
@@ -113,6 +113,39 @@ describe("webhook socket-time DNS selection", () => {
       expect.objectContaining({ message: "dns failed" }),
       "",
       4,
+    ));
+  });
+
+  it("answers an array when Node asks for all addresses, keeping only checked ones", async () => {
+    dependencies.dnsLookup.mockResolvedValue([
+      { address: "2606:4700:4700::1111", family: 6 },
+      { address: "8.8.8.8", family: 4 },
+    ]);
+    const lookup = createPinnedLookup();
+    const all = vi.fn();
+    lookup("webhook.example.test", { all: true }, all);
+    await vi.waitFor(() => expect(all).toHaveBeenCalledWith(null, [
+      { address: "2606:4700:4700::1111", family: 6 },
+      { address: "8.8.8.8", family: 4 },
+    ]));
+    const ipv4 = vi.fn();
+    lookup("webhook.example.test", { all: true, family: 4 }, ipv4);
+    await vi.waitFor(() => expect(ipv4).toHaveBeenCalledWith(null, [{ address: "8.8.8.8", family: 4 }]));
+    const single = vi.fn();
+    lookup("webhook.example.test", { family: 6 }, single);
+    await vi.waitFor(() => expect(single).toHaveBeenCalledWith(null, "2606:4700:4700::1111", 6));
+  });
+
+  it("rejects a private answer in array mode too", async () => {
+    dependencies.dnsLookup.mockResolvedValue([
+      { address: "8.8.8.8", family: 4 },
+      { address: "10.0.0.5", family: 4 },
+    ]);
+    const callback = vi.fn();
+    createPinnedLookup()("webhook.example.test", { all: true }, callback);
+    await vi.waitFor(() => expect(callback).toHaveBeenCalledWith(
+      expect.objectContaining({ message: "Webhook DNS resolution was rejected." }),
+      [],
     ));
   });
 });

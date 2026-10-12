@@ -1,3 +1,4 @@
+import type { Metadata } from "next";
 import Link from "next/link";
 import { notFound } from "next/navigation";
 import { BrandMark } from "@/components/brand-mark";
@@ -5,6 +6,13 @@ import { PasswordResetPanel } from "@/components/auth/password-reset-panel";
 import { env } from "@/lib/env";
 import { localized, localizedPath } from "@/i18n/config";
 import { getLocale } from "@/i18n/server";
+
+export async function generateMetadata(): Promise<Metadata> {
+  return {
+    title: (await getLocale()) === "fr" ? "Nouveau mot de passe" : "New password",
+    robots: { index: false, follow: false },
+  };
+}
 
 export default async function Page({ searchParams }: { searchParams: Promise<{ token?: string }> }) {
   const { token } = await searchParams;

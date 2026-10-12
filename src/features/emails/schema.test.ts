@@ -61,6 +61,39 @@ describe("transactional email schema", () => {
     }).success).toBe(false);
   });
 
+  it.each(["x@other.test, Bob", "Bob; Alice", "Team: list", 'Bob "the boss"', "Bob <evil@other.test>", "Bob@Home", "back\\slash"])(
+    "rejects address syntax in display names: %s",
+    (name) => {
+      for (const field of ["from", "to"] as const) {
+        const result = sendEmailSchema.safeParse({
+          ...base,
+          [field]: { email: `${field}@example.com`, name },
+          content: { subject: "Test", html: "<p>Test</p>", text: "Test" },
+        });
+        expect(result.success).toBe(false);
+        expect(result.error?.issues[0]?.path).toEqual([field, "name"]);
+      }
+    },
+  );
+
+  it("accepts accented, emoji and punctuated display names", () => {
+    for (const name of ["Société Générale", "Zoë 📬", "O'Brien & Fils (support)", "Yodev Mail - Factures"]) {
+      expect(sendEmailSchema.safeParse({
+        ...base,
+        to: { email: "recipient@example.net", name },
+        content: { subject: "Test", html: "<p>Test</p>", text: "Test" },
+      }).success).toBe(true);
+    }
+  });
+
+  it("caps each template variable and their combined length", () => {
+    const content = (variables: Record<string, string>) => ({ ...base, content: { templateId: crypto.randomUUID(), variables } });
+    expect(sendEmailSchema.safeParse(content({ link: "x".repeat(2_048) })).success).toBe(true);
+    expect(sendEmailSchema.safeParse(content({ body: "x".repeat(2_049) })).success).toBe(false);
+    expect(sendEmailSchema.safeParse(content(Object.fromEntries(Array.from({ length: 4 }, (_, index) => [`v${index}`, "x".repeat(2_048)])))).success).toBe(true);
+    expect(sendEmailSchema.safeParse(content(Object.fromEntries(Array.from({ length: 5 }, (_, index) => [`v${index}`, "x".repeat(2_000)])))).success).toBe(false);
+  });
+
   it("accepts only the attachment allowlist", () => {
     expect(attachmentUploadSchema.safeParse({
       fileName: "facture.pdf",

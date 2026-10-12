@@ -8,6 +8,7 @@ vi.mock("next/cache", () => ({ revalidatePath: vi.fn() }));
 vi.mock("@/lib/page-auth", () => ({ requireAdmin: async () => ({ userId: "synthetic-admin" }) }));
 vi.mock("@/lib/aws", () => ({ enqueueProviderProvisioning: calls.queue }));
 vi.mock("@/workers/provider-provisioning", () => ({ provisionBinding: calls.provision }));
+vi.mock("@/i18n/server", () => ({ getLocale: async () => "en" }));
 
 import { databasePool, requireDb } from "@/db/runtime";
 import { domainProviderBindings, domains, workspaces } from "@/db/schema";
@@ -43,7 +44,7 @@ describe("administrator provider provisioning request", () => {
 
   it.each(["disabled", "verified", "dns_pending"] as const)("does not reset a %s binding", async (status) => {
     const [binding] = await db.insert(domainProviderBindings).values({ workspaceId, domainId, provider: "ses", status }).returning();
-    await expect(provisionDomainAction(domainId, "ses")).rejects.toThrow("cannot be reset");
+    expect(await provisionDomainAction(domainId, "ses")).toMatchObject({ ok: false, message: expect.stringContaining("cannot be reset") });
     const [saved] = await db.select().from(domainProviderBindings).where(and(eq(domainProviderBindings.workspaceId, workspaceId), eq(domainProviderBindings.id, binding.id)));
     expect(saved.status).toBe(status);
     expect(calls.queue).not.toHaveBeenCalled();
@@ -59,7 +60,7 @@ describe("administrator provider provisioning request", () => {
 
   it("refuses a disabled domain before creating a binding", async () => {
     await db.update(domains).set({ status: "disabled" }).where(and(eq(domains.workspaceId, workspaceId), eq(domains.id, domainId)));
-    await expect(provisionDomainAction(domainId, "ses")).rejects.toThrow("available for provisioning");
+    expect(await provisionDomainAction(domainId, "ses")).toMatchObject({ ok: false, message: expect.stringContaining("available for provisioning") });
     expect(calls.queue).not.toHaveBeenCalled();
     expect(await db.select().from(domainProviderBindings).where(eq(domainProviderBindings.workspaceId, workspaceId))).toHaveLength(0);
   });

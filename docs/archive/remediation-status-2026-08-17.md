@@ -2,7 +2,7 @@
 
 > Historique figé au 17 août. Les preuves actualisées (couverture imposée,
 > répétition/restauration Neon, audit AWS et certification Postmark en lecture
-> seule) sont consignées dans `docs/hardening-status-2026-08-18.md`.
+> seule) sont consignées dans `docs/archive/hardening-status-2026-08-18.md`.
 
 ## Décision actuelle
 

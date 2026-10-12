@@ -1,8 +1,9 @@
 "use client";
 import { ThemeProvider, useTheme } from "next-themes";
 import { Moon, Sun } from "lucide-react";
+// The theme follows the operating-system preference until the visitor picks one.
 export function AppearanceProvider({ children, nonce }: { children: React.ReactNode; nonce?: string }) {
- return <ThemeProvider attribute="class" defaultTheme="dark" enableSystem disableTransitionOnChange nonce={nonce}>{children}</ThemeProvider>;
+ return <ThemeProvider attribute="class" defaultTheme="system" enableSystem disableTransitionOnChange nonce={nonce}>{children}</ThemeProvider>;
 }
 export function AppearanceToggle({ locale = "fr" }: { locale?: string }) {
  const { setTheme } = useTheme();

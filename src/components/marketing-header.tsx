@@ -12,8 +12,8 @@ import { getLocale } from "@/i18n/server";
 export async function MarketingHeader() {
   const locale = await getLocale();
   const copy = localized(locale, {
-    fr: { home: "Yodev Mail, accueil", features: "Fonctionnalités", deliverability: "Délivrabilité", pricing: "Tarifs", signIn: "Connexion", join: "Rejoindre la bêta" },
-    en: { home: "Yodev Mail, home", features: "Features", deliverability: "Deliverability", pricing: "Pricing", signIn: "Sign in", join: "Join the beta" },
+    fr: { home: "Mail by Yodev, accueil", features: "Fonctionnalités", deliverability: "Délivrabilité", pricing: "Tarifs", signIn: "Connexion", join: "Rejoindre la bêta" },
+    en: { home: "Mail by Yodev, home", features: "Features", deliverability: "Deliverability", pricing: "Pricing", signIn: "Sign in", join: "Join the beta" },
   });
   return <header className="sticky top-0 z-40 border-b bg-background "><div className="mx-auto flex flex-wrap min-h-20 gap-3 py-3 max-w-7xl items-center justify-between px-5">
     <Link href={localizedPath(locale, "/")} aria-label={copy.home}><BrandMark /></Link>

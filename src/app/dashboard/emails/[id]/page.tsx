@@ -1,3 +1,4 @@
+import type { Metadata } from "next";
 import Link from "next/link";
 import { notFound } from "next/navigation";
 import { ArrowLeft, CheckCircle2, CircleDashed, MailWarning } from "lucide-react";
@@ -5,20 +6,21 @@ import { z } from "zod";
 import { Badge } from "@/components/ui/badge";
 import { DashboardPage } from "@/components/dashboard-page";
 import { getMessageDetail } from "@/features/dashboard/queries";
+import { dateTimeFormatter } from "@/lib/date-time";
 import { requirePageWorkspace } from "@/lib/page-auth";
+import { getWorkspaceTimeZone } from "@/lib/workspace-time-zone";
 import { localized, localizedPath } from "@/i18n/config";
-import { localeCode, statusLabel } from "@/i18n/format";
+import { statusLabel } from "@/i18n/format";
 import { getLocale } from "@/i18n/server";
 
-function formatDate(date: Date | null, locale: string) {
-  return date
-    ? new Intl.DateTimeFormat(locale, { dateStyle: "medium", timeStyle: "medium" }).format(date)
-    : "—";
+export const dynamic = "force-dynamic";
+
+export async function generateMetadata(): Promise<Metadata> {
+  return { title: localized(await getLocale(), { fr: "Détail d’un email", en: "Email details" }) };
 }
 
 export default async function Page({ params }: { params: Promise<{ id: string }> }) {
   const locale = await getLocale();
-  const formatLocale = localeCode(locale);
   const copy = localized(locale, { fr: { all: "Tous les emails", description: "Chronologie Yodev et diagnostic normalisé de cette livraison.", created: "Message créé", attempt: "Tentative", from: "De", to: "À", createdAt: "Créé", accepted: "Accepté pour livraison", delivered: "Délivré", reference: "Référence Yodev", lastError: "Dernière erreur", retentionBefore: "Le contenu complet est conservé jusqu’au", retentionAfter: "Il n’est pas affiché dans ce diagnostic afin de limiter l’exposition des données.", timeline: "Chronologie" }, en: { all: "All emails", description: "Yodev timeline and normalized delivery diagnosis.", created: "Message created", attempt: "Attempt", from: "From", to: "To", createdAt: "Created", accepted: "Accepted for delivery", delivered: "Delivered", reference: "Yodev reference", lastError: "Latest error", retentionBefore: "The full content is retained until", retentionAfter: "It is not displayed in this diagnostic to limit data exposure.", timeline: "Timeline" } });
   const parsedId = z.string().uuid().safeParse((await params).id);
   if (!parsedId.success) notFound();
@@ -28,6 +30,9 @@ export default async function Page({ params }: { params: Promise<{ id: string }>
   const result = await getMessageDetail(context.workspace.id, id);
   if (!result) notFound();
   const { message, attempts, events } = result;
+  const dateFormat = dateTimeFormatter(locale, await getWorkspaceTimeZone(context.workspace.id), "medium");
+  const formatDate = (date: Date | null) => date ? dateFormat.format(date) : "—";
+  const contentKind = message.contentKind ? localized(locale, message.contentKind === "template" ? { fr: "template", en: "template" } : { fr: "HTML brut", en: "raw HTML" }) : null;
   const timeline = [
     { at: message.createdAt, label: copy.created, type: "created" },
     ...attempts.map((attempt) => ({ at: attempt.createdAt, label: `${copy.attempt} ${attempt.attempt} · ${statusLabel(locale, attempt.status)}`, type: attempt.status })),
@@ -42,17 +47,17 @@ export default async function Page({ params }: { params: Promise<{ id: string }>
     >
       <div className="grid gap-6 lg:grid-cols-[1.1fr_0.9fr]">
         <section className="rounded-md border bg-card p-6 ">
-          <div className="flex flex-wrap items-center gap-3"><Badge>{statusLabel(locale, message.status)}</Badge><Badge variant="outline">{message.contentKind}</Badge><Badge variant="secondary">{statusLabel(locale, message.sendMode)}</Badge></div>
+          <div className="flex flex-wrap items-center gap-3"><Badge>{statusLabel(locale, message.status)}</Badge>{contentKind ? <Badge variant="outline">{contentKind}</Badge> : null}<Badge variant="secondary">{statusLabel(locale, message.sendMode)}</Badge></div>
           <dl className="mt-6 grid gap-5 text-sm sm:grid-cols-2">
             <div><dt className="text-muted-foreground">{copy.from}</dt><dd className="mt-1 font-medium">{message.fromName ? `${message.fromName} <${message.fromEmail}>` : message.fromEmail}</dd></div>
             <div><dt className="text-muted-foreground">{copy.to}</dt><dd className="mt-1 font-medium">{message.toName ? `${message.toName} <${message.toEmail}>` : message.toEmail}</dd></div>
-            <div><dt className="text-muted-foreground">{copy.createdAt}</dt><dd className="mt-1">{formatDate(message.createdAt, formatLocale)}</dd></div>
-            <div><dt className="text-muted-foreground">{copy.accepted}</dt><dd className="mt-1">{formatDate(message.providerAcceptedAt, formatLocale)}</dd></div>
-            <div><dt className="text-muted-foreground">{copy.delivered}</dt><dd className="mt-1">{formatDate(message.deliveredAt, formatLocale)}</dd></div>
+            <div><dt className="text-muted-foreground">{copy.createdAt}</dt><dd className="mt-1">{formatDate(message.createdAt)}</dd></div>
+            <div><dt className="text-muted-foreground">{copy.accepted}</dt><dd className="mt-1">{formatDate(message.providerAcceptedAt)}</dd></div>
+            <div><dt className="text-muted-foreground">{copy.delivered}</dt><dd className="mt-1">{formatDate(message.deliveredAt)}</dd></div>
             <div><dt className="text-muted-foreground">{copy.reference}</dt><dd className="mt-1 break-all font-mono text-xs">{message.id}</dd></div>
           </dl>
           {message.lastError && <div className="mt-6 rounded-md border border-red-200 y-status-danger p-4 text-sm text-[var(--y-danger)]"><strong>{copy.lastError}</strong><p className="mt-1">{message.lastError}</p></div>}
-          <div className="mt-6 border-t pt-5"><p className="text-xs text-muted-foreground">{copy.retentionBefore} {formatDate(message.contentExpiresAt, formatLocale)}. {copy.retentionAfter}</p></div>
+          <div className="mt-6 border-t pt-5"><p className="text-xs text-muted-foreground">{copy.retentionBefore} {formatDate(message.contentExpiresAt)}. {copy.retentionAfter}</p></div>
         </section>
 
         <section className="rounded-md border bg-card p-6 ">
@@ -61,7 +66,7 @@ export default async function Page({ params }: { params: Promise<{ id: string }>
             {timeline.map((item, index) => {
               const failed = /fail|bounce|complaint/i.test(item.type);
               const Icon = failed ? MailWarning : /deliver|sent|accept/i.test(item.type) ? CheckCircle2 : CircleDashed;
-              return <li className="grid grid-cols-[24px_1fr] gap-3" key={`${item.type}-${item.at.toISOString()}-${index}`}><Icon className={`mt-0.5 size-5 ${failed ? "text-[var(--y-danger)]" : "text-[var(--y-success)]"}`} /><div><p className="text-sm font-medium">{item.label}</p><p className="mt-1 text-xs text-muted-foreground">{formatDate(item.at, formatLocale)}</p></div></li>;
+              return <li className="grid grid-cols-[24px_1fr] gap-3" key={`${item.type}-${item.at.toISOString()}-${index}`}><Icon className={`mt-0.5 size-5 ${failed ? "text-[var(--y-danger)]" : "text-[var(--y-success)]"}`} /><div><p className="text-sm font-medium">{item.label}</p><p className="mt-1 text-xs text-muted-foreground"><time dateTime={item.at.toISOString()}>{formatDate(item.at)}</time></p></div></li>;
             })}
           </ol>
         </section>

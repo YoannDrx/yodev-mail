@@ -7,7 +7,8 @@ const groups = [
  { fr: "Configuration", en: "Configuration", links: [["Domaines","Domains","/dashboard/domaines"],["Cas d’usage","Use cases","/dashboard/profils"],["Templates","Templates","/dashboard/templates"],["Clés API","API keys","/dashboard/api-keys"],["Webhooks","Webhooks","/dashboard/webhooks"]] },
  { fr: "Espace de travail", en: "Workspace", links: [["Membres","Members","/dashboard/membres"],["Facturation","Billing","/dashboard/facturation"],["Paramètres","Settings","/dashboard/parametres"],["Documentation","Documentation","/docs"],["Administration","Administration","/admin"]] },
 ];
-export function DashboardNavigation({ locale }: { locale: Locale }) {
+// The console link is only a convenience: /admin itself re-checks the role server-side.
+export function DashboardNavigation({ locale, showAdmin = false }: { locale: Locale; showAdmin?: boolean }) {
  const pathname = stripLocale(usePathname());
- return <nav aria-label={locale === "fr" ? "Navigation principale" : "Main navigation"}>{groups.map(group => <div key={group.en}><p className="y-nav-group">{group[locale]}</p>{group.links.map(([fr,en,path]) => <Link key={path} className="y-app-link" href={localizedPath(locale,path)} aria-current={pathname === path || (path !== "/dashboard" && pathname.startsWith(path + "/")) ? "page" : undefined}>{locale === "fr" ? fr : en}</Link>)}</div>)}</nav>;
+ return <nav aria-label={locale === "fr" ? "Navigation principale" : "Main navigation"}>{groups.map(group => <div key={group.en}><p className="y-nav-group">{group[locale]}</p>{group.links.filter(([, , path]) => showAdmin || path !== "/admin").map(([fr,en,path]) => <Link key={path} className="y-app-link" href={localizedPath(locale,path)} aria-current={pathname === path || (path !== "/dashboard" && pathname.startsWith(path + "/")) ? "page" : undefined}>{locale === "fr" ? fr : en}</Link>)}</div>)}</nav>;
 }

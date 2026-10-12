@@ -7,7 +7,7 @@ const baseURL = "http://localhost:3918";
 
 export default defineConfig({
   testDir: "./e2e",
-  testMatch: "authenticated.spec.ts",
+  testMatch: ["authenticated.spec.ts", "*.auth.spec.ts"],
   fullyParallel: false,
   workers: 1,
   timeout: 120_000,
@@ -33,14 +33,16 @@ export default defineConfig({
       BETTER_AUTH_EMAIL_PASSWORD_ENABLED: "true",
       AUTH_BOOTSTRAP_EMAIL: "unused-bootstrap@example.invalid",
       API_KEY_PEPPER: randomBytes(32).toString("hex"),
-      WEBHOOK_SIGNING_SECRET: "",
+      WEBHOOK_SIGNING_SECRET: randomBytes(32).toString("hex"),
       AWS_PROFILE: "", AWS_ACCESS_KEY_ID: "", AWS_SECRET_ACCESS_KEY: "", AWS_SESSION_TOKEN: "",
       AWS_ROLE_ARN: "", AWS_ACCOUNT_ID: "", AWS_OIDC_AUDIENCE: "", AWS_EC2_METADATA_DISABLED: "true",
       AWS_EMAIL_QUEUE_URL: "", AWS_PROVIDER_EVENTS_QUEUE_URL: "", AWS_PROVIDER_PROVISIONING_QUEUE_URL: "",
       AWS_ATTACHMENTS_BUCKET: "", POSTMARK_SYSTEM_SERVER_TOKEN_PARAMETER: "",
       SES_ENABLED: "false", POSTMARK_ENABLED: "false",
       STRIPE_SECRET_KEY: "", STRIPE_WEBHOOK_SECRET: "", STRIPE_PRICE_PLATFORM: "", STRIPE_PRICE_USAGE: "",
-      STRIPE_TAX_MODE: "unconfigured", COMMERCIAL_ONBOARDING_ENABLED: "false",
+      STRIPE_TAX_MODE: "unconfigured",
+      // Opens the admin client-creation form for the copied-invitation-link journey.
+      COMMERCIAL_ONBOARDING_ENABLED: "true",
       LIVE_CHECKOUT_ENABLED: "false", STRIPE_USAGE_REPORTING_ENABLED: "false",
       ATTACHMENTS_ENABLED: "false", RAW_EMAIL_ENABLED: "false",
       LIVE_EMAIL_ACCEPTANCE_ENABLED: "false", CUSTOMER_WEBHOOKS_ENABLED: "false",

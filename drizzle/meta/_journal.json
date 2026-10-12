@@ -78,6 +78,34 @@
       "when": 1789469845531,
       "tag": "0010_retention_fair_sweep",
       "breakpoints": true
+    },
+    {
+      "idx": 11,
+      "version": "7",
+      "when": 1791739285984,
+      "tag": "0011_billing_reliability_and_indexes",
+      "breakpoints": true
+    },
+    {
+      "idx": 12,
+      "version": "7",
+      "when": 1791739302582,
+      "tag": "0012_account_lifecycle_and_beta_applications",
+      "breakpoints": true
+    },
+    {
+      "idx": 13,
+      "version": "7",
+      "when": 1791739344864,
+      "tag": "0013_drop_retired_marketing_tables",
+      "breakpoints": true
+    },
+    {
+      "idx": 14,
+      "version": "7",
+      "when": 1791741713083,
+      "tag": "0014_workspace_purge_requests",
+      "breakpoints": true
     }
   ]
 }

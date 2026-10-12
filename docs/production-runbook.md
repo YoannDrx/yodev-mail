@@ -119,6 +119,35 @@ Checkout. Preserve all earlier invoices unchanged.
 
 These are operational objectives for the beta, not evidence that Neon currently meets them; the first measured restore exercise is a launch gate.
 
+### Prerequisite: history retention
+
+The September 15 audit measured a 6-hour Neon history window on the free plan with 10 of 10 branches used. A 15-minute RPO is only meaningful inside that window: before the first paying customer, move to a plan with at least 7 days of history and free branch slots, and record the new window here.
+
+### Point-in-time restore of the production database
+
+Vercel (`DATABASE_URL`) and the Lambda workers (SSM parameter `database-url`) both point at the production branch endpoint. Restoring that branch in place keeps the endpoint and its connection string, so neither Vercel nor SSM needs to change.
+
+1. Declare the incident and note the target time in UTC (the last known good instant, before the faulty write or migration).
+2. Close new writes: set `LIVE_EMAIL_ACCEPTANCE_ENABLED=false` and `COMMERCIAL_ONBOARDING_ENABLED=false` in Vercel Production and redeploy; put the AWS workload in `standby` so workers stop consuming. Accepted messages stay in SQS and are not lost.
+3. Rehearse first on a child branch: in the Neon console, create a branch from production at the target time, run `npx drizzle-kit check` and the readiness query (`src/features/operations/readiness-query.ts`) against it, and compare table counts with the incident notes.
+4. Restore production in place with Neon's branch restore to the same timestamp. Neon keeps the pre-restore state as a backup branch: do not delete it until the incident is closed.
+5. Verify `GET https://mail.yodev.fr/api/health` returns `"database":"ok"`, sign in to the console, and check the latest messages, subscriptions and `stripe_usage_report_jobs` against Stripe and Postmark (the external reconciliation sources).
+6. Reconcile anything accepted between the target time and the incident: provider message IDs and Stripe event IDs in the backup branch are the evidence. Never re-send a message already `sent` or `unknown`.
+7. Reopen in reverse order: workload `live`, then the Vercel gates. Record the timeline, measured duration and outcome below.
+
+### Rolling back a Vercel deployment
+
+1. In the Vercel dashboard (project `yodev-mail`), use Instant Rollback on the previous production deployment, or run `vercel rollback <deployment-url>`.
+2. Instant Rollback stops new `main` deployments from being promoted automatically. After the fix is merged, promote the fixed deployment explicitly (`vercel promote` or the dashboard) to resume normal deployments.
+3. A rollback is only safe because migrations are additive: a deployed migration must never drop or rename a column still read by the previous release. Destructive steps (drops, renames) ship in a later release, once no deployed version reads the old shape. The marketing-table drop in this repository aborts on non-empty tables for the same reason.
+4. If the faulty release ran a non-additive migration, roll the database back first (procedure above), then the deployment.
+
+### Restore exercise log
+
+| Date | Scenario | Measured duration | Result | Operator |
+|---|---|---|---|---|
+| Not yet exercised | Point-in-time restore on a child branch, then Vercel rollback | | | |
+
 ## Stripe usage reconciliation
 
 Monitor `stripe_usage_report_jobs` by status. `pending` should be short-lived; a stale `processing`, any `unknown`, or any `unreportable` is an alert and blocks invoice certification. Compare the frozen customer/subscription, accepted timestamp and opaque identifier with Stripe without creating a second meter event. Mark a job reported only after positive Stripe evidence; otherwise resolve billing manually and preserve the audit trail. Stripe meter identifiers are not treated as a permanent exactly-once guarantee.

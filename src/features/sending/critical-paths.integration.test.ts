@@ -1396,4 +1396,50 @@ describe("transactional email critical paths", () => {
     expect(events[0].status).toBe("processed");
     expect(dependencies.retrieveStripeSubscription).toHaveBeenCalledTimes(1);
   });
+
+  it("keeps a stage-3 warmup limit when an invoice is paid", async () => {
+    const context = await seedTransactionalContext({ dailyLimit: 500 });
+    await db.update(workspaces).set({ warmupStage: 3, plan: "beta" }).where(eq(workspaces.id, context.workspaceId));
+    const subscriptionId = "sub_stage_three";
+    dependencies.stripeSubscription = {
+      id: subscriptionId,
+      object: "subscription",
+      canceled_at: null,
+      customer: "cus_stage_three",
+      livemode: false,
+      metadata: { workspaceId: context.workspaceId, plan: "beta", yodev_product: "mail" },
+      status: "active",
+      items: {
+        data: [
+          { current_period_start: 1_786_000_000, current_period_end: 1_788_000_000, price: { id: "price_platform", recurring: { usage_type: "licensed" } }, quantity: 1 },
+          { current_period_start: 1_786_000_000, current_period_end: 1_788_000_000, price: { id: "price_usage", recurring: { usage_type: "metered" } }, quantity: null },
+        ],
+      },
+    } as unknown as Stripe.Subscription;
+    dependencies.stripeEvent = {
+      id: "evt_invoice_paid_stage_three",
+      object: "event",
+      api_version: "2026-06-24.dahlia",
+      created: 1_786_000_200,
+      data: { object: { id: "in_stage_three", object: "invoice", customer: "cus_stage_three", parent: { subscription_details: { subscription: subscriptionId } } } },
+      livemode: false,
+      pending_webhooks: 1,
+      request: null,
+      type: "invoice.paid",
+    } as unknown as Stripe.Event;
+
+    const response = await stripeWebhookRoute(new Request("https://mail.yodev.fr/api/stripe/webhook", {
+      method: "POST",
+      headers: { "stripe-signature": "signed" },
+      body: "{}",
+    }));
+
+    expect(response.status).toBe(200);
+    const [workspace] = await db.select().from(workspaces).where(eq(workspaces.id, context.workspaceId));
+    const [subscription] = await db.select().from(subscriptions).where(eq(subscriptions.workspaceId, context.workspaceId));
+    const [event] = await db.select().from(stripeEvents).where(eq(stripeEvents.eventId, "evt_invoice_paid_stage_three"));
+    expect(event.status).toBe("processed");
+    expect(subscription.status).toBe("active");
+    expect(workspace).toMatchObject({ dailyLimit: 500, warmupStage: 3, plan: "beta" });
+  });
 });

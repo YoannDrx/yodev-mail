@@ -2,11 +2,8 @@ import { SendEmailCommand } from "@aws-sdk/client-sesv2";
 import { awsClients } from "@/lib/aws";
 import type { DeliveryProvider, ProviderSendInput } from "@/features/providers/types";
 import { ProviderSendError } from "@/features/providers/types";
+import { formatMailbox } from "@/features/providers/mailbox";
 import { sesResourceNames } from "@/features/providers/ses-resources";
-
-function mailbox(value: { email: string; name?: string | null }) {
-  return value.name ? `${value.name.replace(/[<>]/g, "")} <${value.email}>` : value.email;
-}
 
 export class SesDeliveryProvider implements DeliveryProvider {
   async send(input: ProviderSendInput) {
@@ -27,8 +24,8 @@ export class SesDeliveryProvider implements DeliveryProvider {
         new SendEmailCommand({
           TenantName: resources.tenantName,
           ConfigurationSetName: resources.configurationSetName,
-          FromEmailAddress: mailbox(input.from),
-          Destination: { ToAddresses: [mailbox(input.to)] },
+          FromEmailAddress: formatMailbox(input.from),
+          Destination: { ToAddresses: [formatMailbox(input.to)] },
           ReplyToAddresses: input.replyTo ? [input.replyTo] : undefined,
           Content: {
             Simple: {

@@ -66,7 +66,7 @@ reference values, not an automatic account switch. Preserve `AWS_PROFILE`,
 `AWS_ACCOUNT_ID`, runtime resource ARNs and operating modes when adding account
 metadata. Keep SSO credentials in the AWS CLI credential store, never in `.env`
 files, and do not upload this directory to Vercel. See the
-[test-account setup report](docs/aws-test-account-2026-09-10.md).
+[test-account setup report](docs/archive/aws-test-account-2026-09-10.md).
 
 Never use `drizzle-kit push` against production. Create and verify a Neon
 restore branch before every production migration.
@@ -131,8 +131,8 @@ All externally consequential capabilities are fail-closed. New environments star
 - Queue bodies, object keys, SES tags and operational logs contain opaque identifiers only.
 - Message bodies are scheduled to expire two hours before the 30-day maximum; attachments before the 24-hour maximum. Recipient/sender fields and suppression addresses are redacted after 90 days, and normalized technical events are deleted after 90 days. Privacy maintenance runs every thirty minutes even in standby; retention sweeps are bounded and rotate by workspace. Production alarms cover failures, backlog and missing retention heartbeats. Apply migration `0010_retention_fair_sweep` before deploying the updated app or retention worker.
 - No open pixel or link rewriting is enabled.
-- A first complaint, three hard bounces, or a hard-bounce rate of at least 2% after 50 accepted messages pauses the workspace.
-- Initial quotas are 50/day, 200/day after three clean days and 500/day after seven clean days.
+- Automatic pause is evaluated on the last 7 days (`reputationPolicy` in `src/features/sending/policy.ts`): below 1,000 accepted messages a single complaint pauses, above it a complaint rate of 0.1%; below 150 accepted messages three hard bounces pause, above it a hard-bounce rate of 2%.
+- Daily limits start at 50/day and progress through warmup tiers up to 10,000/day after clean samples (`src/features/sending/warmup.ts`). An operator can pin a limit from the admin console; the warmup worker and billing events never overwrite a pinned limit.
 
 ## AWS activation
 
@@ -185,11 +185,11 @@ explicitly before enabling SES. These application checks do not create separate
 AWS accounts or make a shared sending identity environment-specific.
 
 The additional SES IAM restrictions were deployed **in standby** on September 10
-under `a65f72d`. The [real probe](docs/ses-real-probe-2026-09-10.md) records 44
+under `a65f72d`. The [real probe](docs/archive/ses-real-probe-2026-09-10.md) records 44
 provisioning checks and 12 SendEmail checks in the dedicated test account (two
 accepted simulator messages, not 56 deliveries). IAM tenant constraints and SES
 identity membership provide distinct layers of enforcement. The
-[IAM simulator](docs/ses-iam-certification-2026-09-07.md) still disagrees with ten
+[IAM simulator](docs/archive/ses-iam-certification-2026-09-07.md) still disagrees with ten
 expected positive cases; its result is not green. Legacy identities require an
 explicit ownership decision, and the complete application transport and ledger
 still need certification. SES production approval is a separate prerequisite.
@@ -200,10 +200,10 @@ are rejected; workers filter the initial database access by that workspace.
 Deploy outbox, send and webhook workers together in standby. Before activating
 transport, inventory queues and reconcile legacy jobs against their owned
 database records; do not purge queues or add an unscoped compatibility fallback.
-See the [September 11 certification and remaining blockers](docs/queue-workspace-certification-2026-09-11.md)
+See the [September 11 certification and remaining blockers](docs/archive/queue-workspace-certification-2026-09-11.md)
 for this change's publication status.
 
-The [real SES event transport probe](docs/ses-transport-certification-2026-09-11.md)
+The [real SES event transport probe](docs/archive/ses-transport-certification-2026-09-11.md)
 uses a separately gated stack in the dedicated test account. It found that
 EventBridge emits an empty optional bounce field on Delivery events; the consumer
 accepts that representation for non-bounce events without weakening workspace or
@@ -227,7 +227,7 @@ Runtime database, webhook and Stripe secrets are stored under `/yodev-mail-{envi
 
 The foundation stack creates an encrypted multi-region management CloudTrail, one-year CloudWatch/S3 retention, an immediate root-account alarm and staged account cost alerts. It does not record email data events.
 
-Better Auth uses a distinct `BETTER_AUTH_SECRET` and Google OAuth client in every environment. Public organization creation is disabled; the first organization is rebound to the existing workspace only for `AUTH_BOOTSTRAP_EMAIL`. Email/password stays disabled until the Postmark system Server is approved and configured.
+Better Auth uses a distinct `BETTER_AUTH_SECRET` and Google OAuth client in every environment. Public organization creation is disabled; the first organization is rebound to the existing workspace only for `AUTH_BOOTSTRAP_EMAIL`, which is required wherever sign-in runs and has no default. Email/password stays disabled until the Postmark system Server is approved and configured.
 
 See [architecture](docs/architecture.md), the [production runbook](docs/production-runbook.md)
-and the dated [production/commercial GO checklist](docs/commercial-go-checklist-2026-08-18.md).
+and the dated [production/commercial GO checklist](docs/archive/commercial-go-checklist-2026-08-18.md).

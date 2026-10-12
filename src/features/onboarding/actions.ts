@@ -2,9 +2,7 @@
 
 import { eq } from "drizzle-orm";
 import { redirect } from "next/navigation";
-import { localizedPath } from "@/i18n/config";
-import { getLocale } from "@/i18n/server";
-import { z } from "zod";
+import { localized, localizedPath } from "@/i18n/config";
 import { requireDb } from "@/db";
 import {
   adminReviews,
@@ -12,88 +10,85 @@ import {
   workspaceSettings,
   workspaces,
 } from "@/db/schema";
+import { actionFailure, formValues, type ActionState } from "@/lib/action-state";
+import { ConsoleActionError, invalidForm, localizedFieldErrors, runConsoleAction } from "@/lib/console-action";
 import { currentWorkspace } from "@/lib/current-workspace";
+import { onboardingFieldMessages, onboardingFields, onboardingSchema } from "@/features/onboarding/schema";
 
-const onboardingSchema = z.object({
-  abuseAccepted: z.literal("on"),
-  applicationName: z.string().trim().min(2).max(180),
-  averageDailyVolume: z.coerce.number().int().min(1).max(10_000_000),
-  categories: z.string().trim().min(3).max(1000),
-  companyAddress: z.string().trim().min(5).max(500),
-  companyName: z.string().trim().min(2).max(180),
-  dailyPeakVolume: z.coerce.number().int().min(1).max(10_000_000),
-  domainNames: z.string().trim().min(3).max(1000),
-  errorPolicy: z.string().trim().min(10).max(2000),
-  exampleContent: z.string().trim().min(20).max(5000),
-  expectedMonthlyVolume: z.coerce.number().int().min(0).max(10_000_000),
-  noCircumvention: z.literal("on"),
-  noColdEmail: z.literal("on"),
-  noMarketing: z.literal("on"),
-  noNewsletter: z.literal("on"),
-  noPurchasedLists: z.literal("on"),
-  recipientRelationship: z.string().trim().min(10).max(2000),
-  suspensionAccepted: z.literal("on"),
-  triggerDescription: z.string().trim().min(20).max(2000),
-  websiteUrl: z.string().url(),
-});
-
-export async function completeOnboardingAction(formData: FormData) {
-  const data = onboardingSchema.parse(Object.fromEntries(formData));
-  const { workspace, userId } = await currentWorkspace({ admin: true });
-  if (!["sandbox", "pending_review"].includes(workspace.status)) {
-    throw new Error("Ce workspace ne peut plus soumettre un dossier d’onboarding.");
-  }
-  const db = requireDb();
-  await db.transaction(async (tx) => {
-    await tx
-      .update(workspaces)
-      .set({
-        expectedMonthlyVolume: data.expectedMonthlyVolume,
-        status: "pending_review",
-        updatedAt: new Date(),
-        useCase: JSON.stringify({
-          applicationName: data.applicationName,
-          domains: data.domainNames.split(/[\n,]/).map((value) => value.trim().toLowerCase()).filter(Boolean),
-          categories: data.categories,
-          triggerDescription: data.triggerDescription,
-          recipientRelationship: data.recipientRelationship,
-          dailyPeakVolume: data.dailyPeakVolume,
-          averageDailyVolume: data.averageDailyVolume,
-          exampleContent: data.exampleContent,
-          errorPolicy: data.errorPolicy,
-          attestations: {
-            noPurchasedLists: true,
-            noColdEmail: true,
-            noNewsletter: true,
-            noMarketing: true,
-            noCircumvention: true,
-            suspensionAccepted: true,
-          },
-        }),
-        websiteUrl: data.websiteUrl,
-      })
-      .where(eq(workspaces.id, workspace.id));
-    await tx
-      .update(workspaceSettings)
-      .set({
-        abusePolicyAcceptedAt: new Date(),
-        companyAddress: data.companyAddress,
-        companyName: data.companyName,
-        updatedAt: new Date(),
-      })
-      .where(eq(workspaceSettings.workspaceId, workspace.id));
-    await tx
-      .insert(adminReviews)
-      .values({ workspaceId: workspace.id })
-      .onConflictDoNothing();
-    await tx.insert(auditEvents).values({
-      action: "workspace.onboarding_completed",
-      actorUserId: userId,
-      entityId: workspace.id,
-      entityType: "workspace",
-      metadata: { expectedMonthlyVolume: data.expectedMonthlyVolume },
-      workspaceId: workspace.id,
+export async function completeOnboardingAction(_: ActionState, formData: FormData): Promise<ActionState> {
+  let destination: string | null = null;
+  const state = await runConsoleAction(formData, onboardingFields, async (locale) => {
+    const parsed = onboardingSchema.safeParse(Object.fromEntries(formData));
+    if (!parsed.success) {
+      return actionFailure(localized(locale, invalidForm), {
+        fieldErrors: localizedFieldErrors(locale, parsed.error, onboardingFieldMessages),
+        values: formValues(formData, onboardingFields),
+      });
+    }
+    const data = parsed.data;
+    const { workspace, userId } = await currentWorkspace({ admin: true });
+    if (!["sandbox", "pending_review"].includes(workspace.status)) {
+      throw new ConsoleActionError({
+        fr: "Ce workspace ne peut plus soumettre un dossier d’onboarding.",
+        en: "This workspace can no longer submit an onboarding application.",
+      });
+    }
+    const db = requireDb();
+    await db.transaction(async (tx) => {
+      await tx
+        .update(workspaces)
+        .set({
+          expectedMonthlyVolume: data.expectedMonthlyVolume,
+          status: "pending_review",
+          updatedAt: new Date(),
+          useCase: JSON.stringify({
+            applicationName: data.applicationName,
+            domains: data.domainNames.split(/[\n,]/).map((value) => value.trim().toLowerCase()).filter(Boolean),
+            categories: data.categories,
+            triggerDescription: data.triggerDescription,
+            recipientRelationship: data.recipientRelationship,
+            dailyPeakVolume: data.dailyPeakVolume,
+            averageDailyVolume: data.averageDailyVolume,
+            exampleContent: data.exampleContent,
+            errorPolicy: data.errorPolicy,
+            attestations: {
+              noPurchasedLists: true,
+              noColdEmail: true,
+              noNewsletter: true,
+              noMarketing: true,
+              noCircumvention: true,
+              suspensionAccepted: true,
+            },
+          }),
+          websiteUrl: data.websiteUrl,
+        })
+        .where(eq(workspaces.id, workspace.id));
+      await tx
+        .update(workspaceSettings)
+        .set({
+          abusePolicyAcceptedAt: new Date(),
+          companyAddress: data.companyAddress,
+          companyName: data.companyName,
+          updatedAt: new Date(),
+        })
+        .where(eq(workspaceSettings.workspaceId, workspace.id));
+      await tx
+        .insert(adminReviews)
+        .values({ workspaceId: workspace.id })
+        .onConflictDoNothing();
+      await tx.insert(auditEvents).values({
+        action: "workspace.onboarding_completed",
+        actorUserId: userId,
+        entityId: workspace.id,
+        entityType: "workspace",
+        metadata: { expectedMonthlyVolume: data.expectedMonthlyVolume },
+        workspaceId: workspace.id,
+      });
     });
+    destination = localizedPath(locale, "/dashboard");
+    return { ok: true, message: "", fieldErrors: {}, values: {} };
   });
-  redirect(localizedPath(await getLocale(), "/dashboard"));
+  // Navigate outside the guarded block: redirect() must never be turned into a form error.
+  if (destination) redirect(destination);
+  return state;
 }

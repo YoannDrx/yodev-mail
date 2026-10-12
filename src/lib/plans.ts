@@ -6,7 +6,6 @@ export const planCatalog = {
     domains: 2,
     members: 3,
     usageEurosPerEmail: 0.0025,
-    dailyLimit: 50,
     priceEnv: "STRIPE_PRICE_PLATFORM",
   },
 } as const;

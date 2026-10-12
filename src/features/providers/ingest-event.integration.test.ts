@@ -6,7 +6,7 @@ vi.mock("server-only", () => ({}));
 vi.mock("@/lib/env", () => ({ isFeatureEnabled: () => false }));
 
 import { databasePool, requireDb } from "@/db/runtime";
-import { auditEvents, domains, emailEvents, messages, suppressions, usageDays, workspaces } from "@/db/schema";
+import { auditEvents, domains, emailEvents, messages, stripeUsageReportJobs, subscriptions, suppressions, usageDays, usageLedger, usageMonths, workspaces } from "@/db/schema";
 import { ingestProviderEvent } from "./ingest-event";
 import type { NormalizedProviderEvent } from "./normalize-event";
 
@@ -175,4 +175,75 @@ it("rechecks provider identity after waiting for the message lock", async () => 
     blocker.release();
     await processing;
   }
+});
+
+async function seedUnknownBillableMessage(status: "unknown" | "sending" = "unknown") {
+  await db.insert(subscriptions).values({
+    workspaceId, plan: "beta", status: "active", stripeCustomerId: `cus_${workspaceId.slice(0, 8)}`, stripeSubscriptionId: `sub_${workspaceId.slice(0, 8)}`,
+  });
+  const ambiguousAt = new Date(Date.now() - 60_000);
+  const queuedAt = new Date(Date.now() - 120_000);
+  await db.insert(usageDays).values({ workspaceId, day: queuedAt.toISOString().slice(0, 10), reservedEmails: status === "sending" ? 1 : 0 });
+  const [message] = await db.insert(messages).values({
+    workspaceId, domainId, provider: "ses", providerMessageId: randomUUID(), stream: "transactional", status,
+    ambiguousAt: status === "unknown" ? ambiguousAt : null, queuedAt,
+    fromEmail: "sender@example.test", toEmail: `${randomUUID()}@example.test`, subject: "Synthetic", html: "<p>Synthetic</p>", plainText: "Synthetic",
+  }).returning();
+  return { message, ambiguousAt };
+}
+
+async function billing() {
+  return {
+    ledger: await db.select().from(usageLedger).where(eq(usageLedger.workspaceId, workspaceId)),
+    jobs: await db.select().from(stripeUsageReportJobs).where(eq(stripeUsageReportJobs.workspaceId, workspaceId)),
+    months: await db.select().from(usageMonths).where(eq(usageMonths.workspaceId, workspaceId)),
+    days: await db.select().from(usageDays).where(eq(usageDays.workspaceId, workspaceId)),
+  };
+}
+
+it("bills an unknown message exactly once when a delivery confirms it, even if the event arrives twice", async () => {
+  const { message, ambiguousAt } = await seedUnknownBillableMessage();
+  const delivery = event(message, { type: "delivered", occurredAt: new Date() });
+
+  expect(await ingestProviderEvent(delivery)).toEqual({ skipped: false, duplicate: false });
+  expect(await ingestProviderEvent(delivery)).toEqual({ skipped: false, duplicate: true });
+  // A later distinct event for the same message must not bill it again.
+  await ingestProviderEvent(event(message, { type: "soft_bounced", occurredAt: new Date() }));
+
+  const state = await billing();
+  expect(state.ledger).toHaveLength(1);
+  expect(state.ledger[0].acceptedAt).toEqual(ambiguousAt);
+  expect(state.jobs).toHaveLength(1);
+  expect(state.jobs[0]).toMatchObject({ messageId: message.id, status: "pending", stripeIdentifier: `ym-${message.id}` });
+  expect(state.months.reduce((sum, row) => sum + row.acceptedEmails, 0)).toBe(1);
+  expect(state.days.reduce((sum, row) => sum + row.acceptedEmails, 0)).toBe(1);
+  expect(state.days.reduce((sum, row) => sum + row.deliveredEmails, 0)).toBe(1);
+  const [stored] = await db.select().from(messages).where(and(eq(messages.id, message.id), eq(messages.workspaceId, workspaceId)));
+  expect(stored).toMatchObject({ status: "delivered", acceptedAt: ambiguousAt, sentAt: ambiguousAt });
+});
+
+it("bills concurrent duplicate confirmations of an unknown message once", async () => {
+  const { message } = await seedUnknownBillableMessage();
+  const delivery = event(message, { type: "delivered" });
+  await Promise.all([ingestProviderEvent(delivery), ingestProviderEvent(delivery), ingestProviderEvent(event(message, { type: "sent" }))]);
+  const state = await billing();
+  expect(state.ledger).toHaveLength(1);
+  expect(state.jobs).toHaveLength(1);
+});
+
+it("does not bill an unknown message that the provider reports as failed", async () => {
+  const { message } = await seedUnknownBillableMessage();
+  await ingestProviderEvent(event(message, { type: "failed" }));
+  const state = await billing();
+  expect(state.ledger).toHaveLength(0);
+  expect(state.jobs).toHaveLength(0);
+});
+
+it("records usage and releases the reservation when an event beats the sending worker", async () => {
+  const { message } = await seedUnknownBillableMessage("sending");
+  await ingestProviderEvent(event(message, { type: "delivered" }));
+  const state = await billing();
+  expect(state.ledger).toHaveLength(1);
+  expect(state.jobs).toHaveLength(1);
+  expect(state.days.reduce((sum, row) => sum + row.reservedEmails, 0)).toBe(0);
 });

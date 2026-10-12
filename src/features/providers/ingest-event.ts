@@ -11,12 +11,22 @@ import {
   webhookEndpoints,
   workspaces,
 } from "@/db/schema";
+import {
+  recordAcceptedUsageInTransaction,
+  releaseReservationInTransaction,
+} from "@/features/billing/usage-ledger";
 import { normalizeEmail, suppressionHash } from "@/features/email-address/normalization";
 import type { NormalizedProviderEvent } from "@/features/providers/normalize-event";
+import { emitReputationMetric } from "@/features/providers/reputation-metrics";
 import { shouldAutoPause } from "@/features/sending/policy";
 import { utcDay } from "@/features/sending/eligibility";
 import { isFeatureEnabled } from "@/lib/env";
 import { monotonicMessageStatus } from "@/workers/ses-event-utils";
+
+// These events prove the provider accepted the message for delivery.
+const acceptanceEvents = new Set<NormalizedProviderEvent["type"]>([
+  "sent", "delivered", "soft_bounced", "hard_bounced", "complained",
+]);
 
 export async function ingestProviderEvent(event: NormalizedProviderEvent) {
   const db = requireDb();
@@ -38,6 +48,7 @@ export async function ingestProviderEvent(event: NormalizedProviderEvent) {
   }
   if (!locatedMessage) return { skipped: true };
 
+  let usageRecorded = false;
   const ingested = await db.transaction(async (tx) => {
     // Serialize reputation decisions across messages/days in this workspace.
     // NO KEY UPDATE remains compatible with foreign-key key-share checks.
@@ -74,8 +85,32 @@ export async function ingestProviderEvent(event: NormalizedProviderEvent) {
     const status = stale && !safetyEvent
       ? message.status
       : monotonicMessageStatus(message.status, event.type);
+    // An ambiguous send (timeout, lost commit or a provider event that beat the
+    // worker's commit) is confirmed here. The ledger row is the idempotency
+    // guard: one ledger row and one Stripe usage job, however many events arrive.
+    const confirmsAcceptance = acceptanceEvents.has(event.type)
+      && (message.status === "unknown" || message.status === "sending");
+    const acceptedAt = message.acceptedAt
+      ?? (message.ambiguousAt && message.ambiguousAt < event.occurredAt ? message.ambiguousAt : event.occurredAt);
+    if (confirmsAcceptance) {
+      const recorded = await recordAcceptedUsageInTransaction(tx, {
+        acceptedAt,
+        messageId: message.id,
+        workspaceId: message.workspaceId,
+      });
+      usageRecorded = recorded;
+      // An unknown message already released its reservation; a sending one has not.
+      if (recorded && message.status === "sending") {
+        await releaseReservationInTransaction(tx, message.workspaceId, message.queuedAt);
+      }
+    }
     await tx.update(messages).set({
       status,
+      ...(confirmsAcceptance ? {
+        acceptedAt,
+        providerAcceptedAt: message.providerAcceptedAt ?? acceptedAt,
+        sentAt: message.sentAt ?? acceptedAt,
+      } : {}),
       deliveredAt: event.type === "delivered" ? message.deliveredAt ?? event.occurredAt : message.deliveredAt,
       failedAt: event.type === "failed" ? message.failedAt ?? event.occurredAt : message.failedAt,
       lastEventAt: message.lastEventAt && message.lastEventAt > event.occurredAt
@@ -167,5 +202,11 @@ export async function ingestProviderEvent(event: NormalizedProviderEvent) {
   });
 
   if (!ingested) return { skipped: true };
+  // Emitted only after commit, once per new event (a duplicate emits nothing).
+  if (ingested.inserted) {
+    if (usageRecorded) emitReputationMetric("ProviderAccepted", event.provider);
+    if (event.type === "hard_bounced") emitReputationMetric("ProviderHardBounce", event.provider);
+    if (event.type === "complained") emitReputationMetric("ProviderComplaint", event.provider);
+  }
   return { skipped: false, duplicate: !ingested.inserted };
 }

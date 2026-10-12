@@ -1,27 +1,23 @@
 import { DeleteObjectCommand, GetObjectCommand } from "@aws-sdk/client-s3";
 import type { SQSEvent, SQSBatchResponse } from "aws-lambda";
-import { and, eq, inArray, sql } from "drizzle-orm";
+import { and, eq } from "drizzle-orm";
 import { requireDb } from "@/db/runtime";
 import {
   attachments,
-  messageAttempts,
   messages,
-  stripeUsageReportJobs,
-  subscriptions,
-  usageDays,
-  usageLedger,
-  usageMonths,
   workspaceProviderAccounts,
 } from "@/db/schema";
-import { deliveryProvider } from "@/features/providers/registry";
-import { ProviderSendError } from "@/features/providers/types";
-import { evaluateStoredMessage, utcDay } from "@/features/sending/eligibility";
-import { parseEmailSendJob } from "@/features/sending/send-job";
 import {
-  type DatabaseTransaction,
-  queuePublicEmailEventInTransaction,
-} from "@/features/webhooks/public-email-event";
-import { stripeMeterableSubscriptionStatuses } from "@/features/billing/stripe-state";
+  recordAcceptedUsageInTransaction,
+  releaseReservationInTransaction,
+} from "@/features/billing/usage-ledger";
+import { deliveryProvider } from "@/features/providers/registry";
+import { emitReputationMetric } from "@/features/providers/reputation-metrics";
+import { ProviderSendError } from "@/features/providers/types";
+import { type AttemptInput, recordAttemptInTransaction } from "@/features/sending/attempts";
+import { evaluateStoredMessage } from "@/features/sending/eligibility";
+import { parseEmailSendJob } from "@/features/sending/send-job";
+import { queuePublicEmailEventInTransaction } from "@/features/webhooks/public-email-event";
 import { awsClients } from "@/lib/aws";
 import { emitOperationalMetric } from "@/lib/operational-metric";
 import { logWorkerResult } from "@/lib/worker-log";
@@ -41,41 +37,6 @@ export async function handler(event: SQSEvent): Promise<SQSBatchResponse> {
     }
   }
   return { batchItemFailures: failures };
-}
-
-async function releaseReservationInTransaction(
-  tx: DatabaseTransaction,
-  workspaceId: string,
-  reservedAt: Date,
-) {
-  await tx
-    .update(usageDays)
-    .set({
-      reservedEmails: sql`greatest(${usageDays.reservedEmails} - 1, 0)`,
-      updatedAt: new Date(),
-    })
-    .where(and(eq(usageDays.workspaceId, workspaceId), eq(usageDays.day, utcDay(reservedAt))));
-}
-
-type AttemptInput = {
-  workspaceId: string;
-  messageId: string;
-  provider: "ses" | "postmark";
-  status: string;
-  outcome: "accepted" | "definitive_failure" | "transient_failure" | "ambiguous";
-  errorCode?: string;
-};
-
-async function recordAttemptInTransaction(
-  tx: DatabaseTransaction,
-  input: AttemptInput,
-) {
-  const [latest] = await tx.select({ value: sql<number>`coalesce(max(${messageAttempts.attempt}), 0)::int` })
-    .from(messageAttempts).where(and(
-      eq(messageAttempts.messageId, input.messageId),
-      eq(messageAttempts.workspaceId, input.workspaceId),
-    ));
-  await tx.insert(messageAttempts).values({ ...input, attempt: (latest?.value ?? 0) + 1 });
 }
 
 async function loadAttachments(messageId: string, workspaceId: string) {
@@ -372,7 +333,6 @@ export async function sendOne(messageId: string, workspaceId: string) {
 
   try {
     const acceptedAt = result.acceptedAt;
-    const month = acceptedAt.toISOString().slice(0, 7);
     await db.transaction(async (tx) => {
       const [sentMessage] = await tx.update(messages).set({
         status: "sent",
@@ -391,39 +351,12 @@ export async function sendOne(messageId: string, workspaceId: string) {
           "provider_accepted_state_conflict",
         );
       }
-      const ledger = await tx.insert(usageLedger).values({ acceptedAt, messageId: claimed.id, workspaceId: claimed.workspaceId }).onConflictDoNothing().returning();
-      if (ledger.length) {
-        const [billableSubscription] = await tx.select({
-          customerId: subscriptions.stripeCustomerId,
-          id: subscriptions.stripeSubscriptionId,
-        }).from(subscriptions).where(and(
-          eq(subscriptions.workspaceId, claimed.workspaceId),
-          inArray(subscriptions.status, [...stripeMeterableSubscriptionStatuses]),
-          eq(subscriptions.plan, "beta"),
-        )).limit(1);
-        if (billableSubscription?.customerId && billableSubscription.id) {
-          await tx.insert(stripeUsageReportJobs).values({
-            workspaceId: claimed.workspaceId,
-            messageId: claimed.id,
-            acceptedAt,
-            stripeIdentifier: `ym-${claimed.id}`,
-            stripeCustomerId: billableSubscription.customerId,
-            stripeSubscriptionId: billableSubscription.id,
-          }).onConflictDoNothing();
-        }
-        await tx.update(usageDays).set({
-          reservedEmails: sql`greatest(${usageDays.reservedEmails} - 1, 0)`,
-          updatedAt: acceptedAt,
-        }).where(and(eq(usageDays.workspaceId, claimed.workspaceId), eq(usageDays.day, utcDay(claimed.queuedAt))));
-        await tx.insert(usageDays).values({ workspaceId: claimed.workspaceId, day: utcDay(acceptedAt), acceptedEmails: 1 }).onConflictDoUpdate({
-          target: [usageDays.workspaceId, usageDays.day],
-          set: { acceptedEmails: sql`${usageDays.acceptedEmails} + 1`, updatedAt: acceptedAt },
-        });
-        await tx.insert(usageMonths).values({ workspaceId: claimed.workspaceId, month, acceptedEmails: 1 }).onConflictDoUpdate({
-          target: [usageMonths.workspaceId, usageMonths.month],
-          set: { acceptedEmails: sql`${usageMonths.acceptedEmails} + 1`, updatedAt: acceptedAt },
-        });
-      }
+      const recorded = await recordAcceptedUsageInTransaction(tx, {
+        acceptedAt,
+        messageId: claimed.id,
+        workspaceId: claimed.workspaceId,
+      });
+      if (recorded) await releaseReservationInTransaction(tx, claimed.workspaceId, claimed.queuedAt);
       await recordAttemptInTransaction(tx, {
         workspaceId: claimed.workspaceId,
         messageId: claimed.id,
@@ -449,5 +382,6 @@ export async function sendOne(messageId: string, workspaceId: string) {
     if (updated) emitOperationalMetric("ProviderOutcomeUnknown");
     return;
   }
+  emitReputationMetric("ProviderAccepted", provider);
   try { await purgeAttachments(loaded.rows); } catch { /* lifecycle remains the final deletion guarantee */ }
 }

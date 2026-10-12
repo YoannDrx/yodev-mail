@@ -1,4 +1,4 @@
-import { and, desc, eq, gte, sql } from "drizzle-orm";
+import { and, desc, eq, gte, inArray, sql } from "drizzle-orm";
 import { requireDb } from "@/db";
 import {
   domainProviderBindings,
@@ -62,10 +62,12 @@ export async function getDashboardData(workspaceId: string) {
         .from(messages)
         .innerJoin(transactionalProfiles, and(eq(transactionalProfiles.id, messages.transactionalProfileId), eq(transactionalProfiles.workspaceId, messages.workspaceId)))
         .where(eq(messages.workspaceId, workspaceId)).orderBy(desc(messages.createdAt)).limit(5),
+      // The overview only shows in-flight messages: count those two statuses
+      // through messages_workspace_status_idx instead of scanning all history.
       db
         .select({ count: sql<number>`count(*)::int`, status: messages.status })
         .from(messages)
-        .where(eq(messages.workspaceId, workspaceId))
+        .where(and(eq(messages.workspaceId, workspaceId), inArray(messages.status, ["queued", "sending"])))
         .groupBy(messages.status),
       db
         .select()
