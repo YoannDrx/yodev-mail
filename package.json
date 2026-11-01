@@ -39,7 +39,7 @@
     "@aws-sdk/client-ssm": "^3.1095.0",
     "@aws-sdk/client-sts": "^3.1090.0",
     "@aws-sdk/s3-request-presigner": "^3.1091.0",
-    "@better-auth/drizzle-adapter": "^1.6.27",
+    "@better-auth/drizzle-adapter": "^1.7.7",
     "@better-auth/passkey": "^1.6.27",
     "@neondatabase/serverless": "^1.1.0",
     "@react-email/components": "^1.0.12",
